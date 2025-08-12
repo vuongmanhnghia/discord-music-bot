@@ -73,8 +73,26 @@ class MusicBot(commands.Cog):
     @commands.Cog.listener()
     async def on_wavelink_track_end(self, payload: wavelink.TrackEndEventPayload):
         """Handle track end event"""
-        if payload.reason == "finished":
-            await self.play_next_track(payload.player)
+        try:
+            # Only handle "finished" or "stopped" reasons
+            if payload.reason in ["finished", "stopped"]:
+                logger.info(f"Track ended with reason: {payload.reason}")
+                
+                # Check if we have tracks in playlist
+                if not self.playlist_tracks:
+                    logger.info("No tracks in playlist, nothing to play next")
+                    return
+                    
+                # Wait a moment before playing next track
+                await asyncio.sleep(0.2)
+                
+                # Play next track
+                await self.play_next_track(payload.player)
+                
+        except Exception as e:
+            logger.error(f"Error in track end event: {e}")
+            if self.current_channel:
+                await self.current_channel.send(f"❌ Lỗi khi chuyển bài: {str(e)[:100]}")
     
     @commands.Cog.listener()
     async def on_wavelink_node_ready(self, payload: wavelink.NodeReadyEventPayload):
@@ -331,11 +349,26 @@ class MusicBot(commands.Cog):
     async def skip(self, ctx):
         """Skip current track"""
         player = ctx.voice_client
-        if player and player.playing:
-            await player.stop()
-            await ctx.send("⏭️ Đã bỏ qua bài hát")
-        else:
-            await ctx.send("❌ Không có bài hát nào đang phát")
+        if not player or not player.playing:
+            return await ctx.send("❌ Không có bài hát nào đang phát")
+            
+        if not self.playlist_tracks:
+            return await ctx.send("❌ Không có bài hát nào trong playlist để bỏ qua")
+            
+        # Save current track info for the message
+        current_track = player.current
+        
+        # Stop will trigger the track_end event which should play the next track
+        await player.stop()
+        
+        # But let's also manually trigger next track in case the event doesn't work
+        await asyncio.sleep(0.5)  # Small delay to allow track_end to process
+        
+        # If still on the same track or not playing, force play next
+        if not player.playing:
+            await self.play_next_track(player)
+            
+        await ctx.send(f"⏭️ Đã bỏ qua bài hát: **{current_track.title if current_track else ''}**")
     
     @commands.command(name='pause')
     async def pause(self, ctx):
@@ -424,10 +457,12 @@ class MusicBot(commands.Cog):
             ("!pause", "Tạm dừng"),
             ("!resume", "Tiếp tục phát"),
             ("!volume [0-100]", "Điều chỉnh âm lượng"),
-            ("!now", "Hiển thị bài hát đang phát"),
+            # ("!now", "Hiển thị bài hát đang phát"),
             ("!queue", "Hiển thị danh sách phát"),
             ("!repeat [off/one/all]", "Đặt chế độ lặp lại"),
             ("!remove <số>", "Xóa bài hát khỏi danh sách phát"),
+            ("!clear", "Xóa toàn bộ danh sách phát"),
+            ("!shuffle", "Xáo trộn danh sách phát"),
         ]
         
         for cmd, desc in commands_list:
@@ -436,41 +471,41 @@ class MusicBot(commands.Cog):
         embed.set_footer(text="Ví dụ: !play despacito hoặc !play https://youtu.be/...")
         await ctx.send(embed=embed)
 
-    @commands.command(name='now', aliases=['np', 'current'])
-    async def now_playing(self, ctx):
-        """Show currently playing track"""
-        player = ctx.voice_client
+    # @commands.command(name='now', aliases=['np', 'current'])
+    # async def now_playing(self, ctx):
+    #     """Show currently playing track"""
+    #     player = ctx.voice_client
         
-        if not player or not player.playing:
-            return await ctx.send("❌ Không có bài hát nào đang phát")
+    #     if not player or not player.playing:
+    #         return await ctx.send("❌ Không có bài hát nào đang phát")
         
-        track = player.current
-        if not track:
-            return await ctx.send("❌ Không thể lấy thông tin bài hát hiện tại")
+    #     track = player.current
+    #     if not track:
+    #         return await ctx.send("❌ Không thể lấy thông tin bài hát hiện tại")
         
-        position = player.position
-        duration = track.length
+    #     position = player.position
+    #     duration = track.length
         
-        # Format times
-        pos_min, pos_sec = divmod(position // 1000, 60)
-        dur_min, dur_sec = divmod(duration // 1000, 60)
+    #     # Format times
+    #     pos_min, pos_sec = divmod(position // 1000, 60)
+    #     dur_min, dur_sec = divmod(duration // 1000, 60)
         
-        embed = discord.Embed(
-            title="🎵 Đang phát",
-            description=f"**{track.title}**\n{track.author}",
-            color=discord.Color.blue()
-        )
+    #     embed = discord.Embed(
+    #         title="🎵 Đang phát",
+    #         description=f"**{track.title}**\n{track.author}",
+    #         color=discord.Color.blue()
+    #     )
         
-        embed.add_field(
-            name="Thời gian",
-            value=f"{pos_min}:{pos_sec:02d} / {dur_min}:{dur_sec:02d}",
-            inline=True
-        )
+    #     embed.add_field(
+    #         name="Thời gian",
+    #         value=f"{pos_min}:{pos_sec:02d} / {dur_min}:{dur_sec:02d}",
+    #         inline=True
+    #     )
         
-        if track.artwork_url:
-            embed.set_thumbnail(url=track.artwork_url)
+    #     if track.artwork_url:
+    #         embed.set_thumbnail(url=track.artwork_url)
             
-        await ctx.send(embed=embed)
+    #     await ctx.send(embed=embed)
 
     @commands.command(name='repeat', aliases=['loop'])
     async def set_repeat(self, ctx, mode: str = None):
@@ -587,6 +622,62 @@ class MusicBot(commands.Cog):
         except Exception as e:
             logger.error(f"Error removing track: {e}")
             await ctx.send(f"❌ Lỗi khi xóa bài hát: {str(e)[:100]}")
+
+    @commands.command(name='clear')
+    async def clear_playlist(self, ctx):
+        """Clear the playlist"""
+        if not self.playlist_tracks:
+            return await ctx.send("❌ Playlist đã trống")
+        
+        # Save current track if playing
+        player = ctx.voice_client
+        current_track = None
+        
+        if player and player.playing:
+            current_track = player.current
+            await player.stop()
+            
+        # Clear playlist
+        self.playlist_tracks = []
+        self.current_track_index = 0
+        
+        # Add current track back if needed
+        if current_track:
+            self.playlist_tracks = [current_track]
+            # Restart the current track
+            await self.play_track(player, current_track)
+            await ctx.send("🧹 Đã xóa tất cả bài hát khỏi playlist (ngoại trừ bài đang phát)")
+        else:
+            await ctx.send("🧹 Đã xóa tất cả bài hát khỏi playlist")
+    
+    @commands.command(name='shuffle')
+    async def shuffle_playlist(self, ctx):
+        """Shuffle the playlist"""
+        if not self.playlist_tracks or len(self.playlist_tracks) < 2:
+            return await ctx.send("❌ Cần ít nhất 2 bài hát để xáo trộn playlist")
+        
+        # Save current track
+        current_track = None
+        if self.playlist_tracks and len(self.playlist_tracks) > self.current_track_index:
+            current_track = self.playlist_tracks[self.current_track_index]
+        
+        # Remove current track from list temporarily
+        if current_track:
+            self.playlist_tracks.pop(self.current_track_index)
+        
+        # Shuffle remaining tracks
+        import random
+        random.shuffle(self.playlist_tracks)
+        
+        # Add current track back at position 0
+        if current_track:
+            self.playlist_tracks.insert(0, current_track)
+            self.current_track_index = 0
+        
+        await ctx.send("🔀 Đã xáo trộn playlist")
+        
+        # Show the new queue
+        await self.show_queue(ctx)
 
 # Add cog and run bot
 async def main():
