@@ -2,7 +2,6 @@
 
 # Tạo các thư mục cần thiết
 mkdir -p lavalink/plugins
-mkdir -p lavalink/logs
 
 # Đặt quyền cho thư mục lavalink (user 322 trong container lavalink)
 sudo chown -R 322:322 lavalink/
