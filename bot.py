@@ -24,6 +24,7 @@ class MusicBot(commands.Cog):
         self.is_playing = False
         self.playlist_tracks = []
         self.current_track_index = 0
+        self.repeat_mode = "all"  # Options: "off", "one", "all"
         
     async def setup_lavalink(self):
         """Setup Lavalink connection"""
@@ -187,9 +188,20 @@ class MusicBot(commands.Cog):
                 if self.current_channel:
                     await self.current_channel.send("❌ Không còn bài hát nào trong playlist")
                 return False
+            
+            # Handle different repeat modes
+            if self.repeat_mode == "one":
+                # Stay on current track
+                next_track = self.playlist_tracks[self.current_track_index]
+            else:
+                # Move to next track (default behavior)
+                self.current_track_index = (self.current_track_index + 1) % len(self.playlist_tracks)
+                next_track = self.playlist_tracks[self.current_track_index]
                 
-            self.current_track_index = (self.current_track_index + 1) % len(self.playlist_tracks)
-            next_track = self.playlist_tracks[self.current_track_index]
+                # Notify when playlist loops back to beginning
+                if self.repeat_mode == "all" and self.current_track_index == 0 and len(self.playlist_tracks) > 1:
+                    if self.current_channel:
+                        await self.current_channel.send("🔄 Playlist bắt đầu lại từ đầu")
                 
             # Validate track before playing
             if not next_track or not hasattr(next_track, 'title'):
@@ -413,6 +425,9 @@ class MusicBot(commands.Cog):
             ("!resume", "Tiếp tục phát"),
             ("!volume [0-100]", "Điều chỉnh âm lượng"),
             ("!now", "Hiển thị bài hát đang phát"),
+            ("!queue", "Hiển thị danh sách phát"),
+            ("!repeat [off/one/all]", "Đặt chế độ lặp lại"),
+            ("!remove <số>", "Xóa bài hát khỏi danh sách phát"),
         ]
         
         for cmd, desc in commands_list:
@@ -421,41 +436,157 @@ class MusicBot(commands.Cog):
         embed.set_footer(text="Ví dụ: !play despacito hoặc !play https://youtu.be/...")
         await ctx.send(embed=embed)
 
-@commands.command(name='now', aliases=['np', 'current'])
-async def now_playing(self, ctx):
-    """Show currently playing track"""
-    player = ctx.voice_client
-    
-    if not player or not player.playing:
-        return await ctx.send("❌ Không có bài hát nào đang phát")
-    
-    track = player.current
-    if not track:
-        return await ctx.send("❌ Không thể lấy thông tin bài hát hiện tại")
-    
-    position = player.position
-    duration = track.length
-    
-    # Format times
-    pos_min, pos_sec = divmod(position // 1000, 60)
-    dur_min, dur_sec = divmod(duration // 1000, 60)
-    
-    embed = discord.Embed(
-        title="🎵 Đang phát",
-        description=f"**{track.title}**\n{track.author}",
-        color=discord.Color.blue()
-    )
-    
-    embed.add_field(
-        name="Thời gian",
-        value=f"{pos_min}:{pos_sec:02d} / {dur_min}:{dur_sec:02d}",
-        inline=True
-    )
-    
-    if track.artwork_url:
-        embed.set_thumbnail(url=track.artwork_url)
+    @commands.command(name='now', aliases=['np', 'current'])
+    async def now_playing(self, ctx):
+        """Show currently playing track"""
+        player = ctx.voice_client
         
-    await ctx.send(embed=embed)
+        if not player or not player.playing:
+            return await ctx.send("❌ Không có bài hát nào đang phát")
+        
+        track = player.current
+        if not track:
+            return await ctx.send("❌ Không thể lấy thông tin bài hát hiện tại")
+        
+        position = player.position
+        duration = track.length
+        
+        # Format times
+        pos_min, pos_sec = divmod(position // 1000, 60)
+        dur_min, dur_sec = divmod(duration // 1000, 60)
+        
+        embed = discord.Embed(
+            title="🎵 Đang phát",
+            description=f"**{track.title}**\n{track.author}",
+            color=discord.Color.blue()
+        )
+        
+        embed.add_field(
+            name="Thời gian",
+            value=f"{pos_min}:{pos_sec:02d} / {dur_min}:{dur_sec:02d}",
+            inline=True
+        )
+        
+        if track.artwork_url:
+            embed.set_thumbnail(url=track.artwork_url)
+            
+        await ctx.send(embed=embed)
+
+    @commands.command(name='repeat', aliases=['loop'])
+    async def set_repeat(self, ctx, mode: str = None):
+        """Set repeat mode: off, one, all"""
+        if mode is None:
+            # Display current mode
+            modes = {
+                "off": "Tắt lặp lại",
+                "one": "Lặp lại bài hiện tại",
+                "all": "Lặp lại toàn bộ playlist"
+            }
+            current_mode = modes.get(self.repeat_mode, "Không xác định")
+            return await ctx.send(f"🔄 Chế độ lặp lại hiện tại: **{current_mode}**")
+        
+        mode = mode.lower()
+        if mode in ["off", "one", "all"]:
+            self.repeat_mode = mode
+            modes = {
+                "off": "Đã tắt lặp lại",
+                "one": "Lặp lại bài hiện tại",
+                "all": "Lặp lại toàn bộ playlist"
+            }
+            await ctx.send(f"🔄 {modes[mode]}")
+        else:
+            await ctx.send("❌ Chế độ không hợp lệ. Sử dụng: off, one, hoặc all")
+
+    @commands.command(name='queue', aliases=['q', 'list'])
+    async def show_queue(self, ctx):
+        """Show current playlist queue"""
+        if not self.playlist_tracks:
+            return await ctx.send("❌ Playlist trống")
+        
+        # Create embed for queue
+        embed = discord.Embed(
+            title="🎵 Danh sách phát",
+            color=discord.Color.blue()
+        )
+        
+        # Add repeat mode info
+        repeat_modes = {
+            "off": "Tắt lặp lại",
+            "one": "Lặp lại bài hiện tại",
+            "all": "Lặp lại toàn bộ playlist"
+        }
+        embed.add_field(
+            name="Chế độ lặp lại",
+            value=repeat_modes.get(self.repeat_mode, "Không xác định"),
+            inline=False
+        )
+        
+        # Add tracks (current + next 9)
+        total_tracks = len(self.playlist_tracks)
+        embed.set_footer(text=f"Hiển thị {min(10, total_tracks)}/{total_tracks} bài hát")
+        
+        for i in range(min(10, total_tracks)):
+            idx = (self.current_track_index + i) % total_tracks
+            track = self.playlist_tracks[idx]
+            
+            # Format duration
+            minutes = track.length // 60000
+            seconds = (track.length // 1000) % 60
+            duration = f"{minutes}:{seconds:02d}"
+            
+            # Mark current track
+            prefix = "▶️ " if i == 0 else f"{i}. "
+            
+            embed.add_field(
+                name=f"{prefix}{track.title[:50]}{'...' if len(track.title) > 50 else ''}",
+                value=f"**Tác giả:** {track.author}\n**Thời lượng:** {duration}",
+                inline=False
+            )
+        
+        await ctx.send(embed=embed)
+
+    @commands.command(name='remove', aliases=['rm'])
+    async def remove_track(self, ctx, position: int = None):
+        """Remove track from playlist by position"""
+        if not self.playlist_tracks:
+            return await ctx.send("❌ Playlist trống")
+        
+        if position is None:
+            return await ctx.send("❌ Vui lòng chỉ định vị trí bài hát cần xóa")
+        
+        # Convert position to index
+        try:
+            position = int(position)
+            if position < 1 or position > len(self.playlist_tracks):
+                return await ctx.send(f"❌ Vị trí không hợp lệ. Phải từ 1 đến {len(self.playlist_tracks)}")
+            
+            index = position - 1
+            track = self.playlist_tracks[index]
+            
+            # Handle removing current track
+            if index == self.current_track_index:
+                player = ctx.voice_client
+                if player and player.playing:
+                    # Stop current track and play next
+                    await player.stop()
+                    self.playlist_tracks.pop(index)
+                    # Adjust current index if needed
+                    if self.current_track_index >= len(self.playlist_tracks):
+                        self.current_track_index = 0
+                    return await ctx.send(f"✅ Đã xóa và bỏ qua bài hát: **{track.title}**")
+            
+            # Remove track and adjust current index if needed
+            self.playlist_tracks.pop(index)
+            if index < self.current_track_index:
+                self.current_track_index -= 1
+            
+            await ctx.send(f"✅ Đã xóa bài hát: **{track.title}**")
+            
+        except ValueError:
+            await ctx.send("❌ Vị trí phải là số nguyên")
+        except Exception as e:
+            logger.error(f"Error removing track: {e}")
+            await ctx.send(f"❌ Lỗi khi xóa bài hát: {str(e)[:100]}")
 
 # Add cog and run bot
 async def main():
