@@ -24,19 +24,19 @@ services:
       retries: 3
       start_period: 40s
 
-  # discord-bot:
-  #   build: .
-  #   container_name: discord-music-bot
-  #   restart: unless-stopped
-  #   depends_on:
-  #     - lavalink
-  #   environment:
-  #     - DISCORD_TOKEN=${DISCORD_TOKEN}
-  #     - LAVALINK_HOST=lavalink
-  #     - LAVALINK_PORT=2333
-  #     - LAVALINK_PASSWORD=youshallnotpass
-  #   networks:
-  #     - lavalink-network
+  bot:
+    build: .
+    container_name: discord-music-bot
+    restart: unless-stopped
+    depends_on:
+      - lavalink
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - LAVALINK_HOST=lavalink
+      - LAVALINK_PORT=2333
+      - LAVALINK_PASSWORD=youshallnotpass
+    networks:
+      - lavalink-network
 
 networks:
   lavalink-network:

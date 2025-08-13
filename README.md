@@ -151,3 +151,48 @@ docker-compose logs -f
 - Đặt password mạnh cho Lavalink
 - Sử dụng non-root user trong container
 - Giới hạn quyền bot trong Discord server
+
+# Project Structure
+
+The project has been restructured for better maintainability:
+
+```
+discord-music-bot/
+├── src/                    # Source code
+│   ├── cogs/               # Discord bot command modules
+│   │   └── music.py        # Music commands implementation
+│   ├── utils/              # Utility modules
+│   │   ├── logger.py       # Logging utility
+│   │   └── player.py       # Music player implementation
+│   └── main.py             # Main entry point
+├── config.py               # Configuration settings
+├── requirements.txt        # Python dependencies
+├── docker-compose.yml      # Docker Compose configuration
+└── README.md               # This file
+```
+
+## Architecture
+
+- `main.py`: Initializes the bot and loads cogs
+- `cogs/music.py`: Contains all the bot commands and event handlers
+- `utils/player.py`: Handles music playback logic
+- `utils/logger.py`: Centralized logging configuration
+- `config.py`: Stores bot configuration settings
+
+## How to Run
+
+From the project root directory:
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Start the bot
+python src/main.py
+```
+
+Or use Docker:
+
+```bash
+docker-compose up -d
+```

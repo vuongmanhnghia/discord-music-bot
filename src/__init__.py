@@ -1,0 +1,3 @@
+"""
+Discord Music Bot Package
+""" 

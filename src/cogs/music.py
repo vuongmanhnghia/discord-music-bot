@@ -1,56 +1,22 @@
 import discord
-from discord.ext import commands, tasks
 import wavelink
 import asyncio
-import logging
+from discord.ext import commands, tasks
 import config
+from utils.logger import logger
+from utils.player import MusicPlayer
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Bot setup
-intents = discord.Intents.default()
-intents.message_content = True
-intents.voice_states = True
-
-bot = commands.Bot(command_prefix=config.COMMAND_PREFIX, intents=intents)
-
-class MusicBot(commands.Cog):
+class MusicCog(commands.Cog):
+    """Music commands and functionality cog"""
+    
     def __init__(self, bot):
         self.bot = bot
-        self.current_channel = None
-        self.current_voice_channel = None
-        self.is_playing = False
-        self.playlist_tracks = []
-        self.current_track_index = 0
-        self.repeat_mode = "all"  # Options: "off", "one", "all"
-        
-    async def setup_lavalink(self):
-        """Setup Lavalink connection"""
-        max_retries = 5
-        retry_count = 0
-        
-        while retry_count < max_retries:
-            try:
-                logger.info(f"Connecting to Lavalink at {config.LAVALINK_HOST}:{config.LAVALINK_PORT}")
-                node = wavelink.Node(
-                    uri=f"http://{config.LAVALINK_HOST}:{config.LAVALINK_PORT}",
-                    password=config.LAVALINK_PASSWORD,
-                )
-                await wavelink.Pool.connect(client=self.bot, nodes=[node])
-                logger.info("Lavalink connected successfully!")
-                return
-            except Exception as e:
-                retry_count += 1
-                logger.error(f"Failed to connect to Lavalink (attempt {retry_count}/{max_retries}): {e}")
-                # Increase wait time between retries
-                wait_time = 10 * retry_count
-                logger.info(f"Retrying in {wait_time} seconds...")
-                await asyncio.sleep(wait_time)
-                # Remove this recursive call which causes issues
-        
-        logger.error("Maximum retries reached. Could not connect to Lavalink.")
+        self.player = MusicPlayer()
+        self.keep_alive_task.start()
+    
+    def cog_unload(self):
+        """Called when the cog is unloaded"""
+        self.keep_alive_task.cancel()
     
     @commands.Cog.listener()
     async def on_ready(self):
@@ -59,16 +25,12 @@ class MusicBot(commands.Cog):
         
         # Wait for Lavalink to be ready
         await asyncio.sleep(5)
-        await self.setup_lavalink()
+        await self.player.setup_lavalink(self.bot)
         
         # Auto-connect to voice channel if configured
         if config.DEFAULT_VOICE_CHANNEL_ID:
             await asyncio.sleep(2)  # Wait a bit more for full initialization
             await self.auto_connect()
-            
-        # Start keep alive task
-        if not self.keep_alive_task.is_running():
-            self.keep_alive_task.start()
     
     @commands.Cog.listener()
     async def on_wavelink_track_end(self, payload: wavelink.TrackEndEventPayload):
@@ -79,7 +41,7 @@ class MusicBot(commands.Cog):
                 logger.info(f"Track ended with reason: {payload.reason}")
                 
                 # Check if we have tracks in playlist
-                if not self.playlist_tracks:
+                if not self.player.playlist_tracks:
                     logger.info("No tracks in playlist, nothing to play next")
                     return
                     
@@ -87,12 +49,12 @@ class MusicBot(commands.Cog):
                 await asyncio.sleep(0.2)
                 
                 # Play next track
-                await self.play_next_track(payload.player)
+                await self.player.play_next_track(payload.player)
                 
         except Exception as e:
             logger.error(f"Error in track end event: {e}")
-            if self.current_channel:
-                await self.current_channel.send(f"❌ Lỗi khi chuyển bài: {str(e)[:100]}")
+            if self.player.current_channel:
+                await self.player.current_channel.send(f"❌ Lỗi khi chuyển bài: {str(e)[:100]}")
     
     @commands.Cog.listener()
     async def on_wavelink_node_ready(self, payload: wavelink.NodeReadyEventPayload):
@@ -107,8 +69,8 @@ class MusicBot(commands.Cog):
             
             if voice_channel:
                 player = await voice_channel.connect(cls=wavelink.Player)
-                self.current_voice_channel = voice_channel
-                self.current_channel = text_channel
+                self.player.current_voice_channel = voice_channel
+                self.player.current_channel = text_channel
                 await player.set_volume(config.VOLUME_DEFAULT)
                 logger.info(f"Connected to {voice_channel.name}")
                 
@@ -117,132 +79,17 @@ class MusicBot(commands.Cog):
                 
                 # Load default playlist if configured
                 if config.DEFAULT_PLAYLIST_URL:
-                    await self.load_playlist(config.DEFAULT_PLAYLIST_URL, player)
+                    await self.player.load_playlist(config.DEFAULT_PLAYLIST_URL, player)
                     
         except Exception as e:
             logger.error(f"Auto-connect failed: {e}")
-    
-    async def load_playlist(self, url: str, player: wavelink.Player):
-        """Load playlist from URL"""
-        try:
-            # Add ytsearch prefix if it's just text
-            if not url.startswith(('http://', 'https://')):
-                url = f"ytsearch:{url}"
-                
-            tracks = await wavelink.Playable.search(url)
-            if not tracks:
-                if self.current_channel:
-                    await self.current_channel.send("❌ Không thể tải playlist. Kiểm tra lại URL!")
-                return
-                
-            # Handle different return types from wavelink.Playable.search
-            if hasattr(tracks, 'tracks'):  # If it's a playlist object
-                self.playlist_tracks = tracks.tracks
-            elif isinstance(tracks, list):  # If it's a list of tracks
-                self.playlist_tracks = tracks
-            else:  # If it's a single track
-                self.playlist_tracks = [tracks]
-                
-            if not self.playlist_tracks:
-                if self.current_channel:
-                    await self.current_channel.send("❌ Playlist trống!")
-                return
-                
-            self.current_track_index = 0
-            await self.play_track(player, self.playlist_tracks[0])
-            
-            if self.current_channel:
-                await self.current_channel.send(f"🎵 Đã tải playlist với {len(self.playlist_tracks)} bài hát")
-                    
-        except Exception as e:
-            logger.error(f"Failed to load playlist: {e}")
-            if self.current_channel:
-                await self.current_channel.send(f"❌ Không thể tải playlist: {str(e)[:100]}")
-    
-    async def play_track(self, player: wavelink.Player, track):
-        """Play a specific track"""
-        try:
-            # Ensure we have a valid playable track
-            if not track or not hasattr(track, 'title'):
-                logger.error("Invalid track object")
-                if self.current_channel:
-                    await self.current_channel.send("❌ Không thể phát: Bài hát không hợp lệ")
-                return False
-            
-            await player.play(track, replace=True)
-            self.is_playing = True
-            
-            if self.current_channel:
-                embed = discord.Embed(
-                    title="🎵 Đang phát",
-                    description=f"**{track.title}**\n{track.author}",
-                    color=discord.Color.blue()
-                )
-                
-                # Format duration properly
-                minutes = track.length // 60000
-                seconds = (track.length // 1000) % 60
-                embed.add_field(name="Thời lượng", value=f"{minutes}:{seconds:02d}", inline=True)
-                
-                # Add thumbnail if available
-                if hasattr(track, 'artwork_url') and track.artwork_url:
-                    embed.set_thumbnail(url=track.artwork_url)
-                    
-                await self.current_channel.send(embed=embed)
-                return True
-                
-        except Exception as e:
-            logger.error(f"Failed to play track: {e}")
-            self.is_playing = False
-            if self.current_channel:
-                await self.current_channel.send(f"❌ Lỗi khi phát nhạc: {str(e)[:100]}")
-            return False
-    
-    async def play_next_track(self, player: wavelink.Player):
-        """Play next track in playlist"""
-        try:
-            if not self.playlist_tracks or len(self.playlist_tracks) == 0:
-                logger.info("No tracks in playlist to play next")
-                if self.current_channel:
-                    await self.current_channel.send("❌ Không còn bài hát nào trong playlist")
-                return False
-            
-            # Handle different repeat modes
-            if self.repeat_mode == "one":
-                # Stay on current track
-                next_track = self.playlist_tracks[self.current_track_index]
-            else:
-                # Move to next track (default behavior)
-                self.current_track_index = (self.current_track_index + 1) % len(self.playlist_tracks)
-                next_track = self.playlist_tracks[self.current_track_index]
-                
-                # Notify when playlist loops back to beginning
-                if self.repeat_mode == "all" and self.current_track_index == 0 and len(self.playlist_tracks) > 1:
-                    if self.current_channel:
-                        await self.current_channel.send("🔄 Playlist bắt đầu lại từ đầu")
-                
-            # Validate track before playing
-            if not next_track or not hasattr(next_track, 'title'):
-                logger.error("Invalid next track in playlist")
-                if self.current_channel:
-                    await self.current_channel.send("❌ Bài hát tiếp theo không hợp lệ, đang bỏ qua...")
-                # Try to get the next track
-                return await self.play_next_track(player)
-                
-            return await self.play_track(player, next_track)
-                
-        except Exception as e:
-            logger.error(f"Error playing next track: {e}")
-            if self.current_channel:
-                await self.current_channel.send(f"❌ Lỗi khi phát bài tiếp theo: {str(e)[:100]}")
-            return False
     
     @tasks.loop(minutes=5)
     async def keep_alive_task(self):
         """Keep bot alive and reconnect if needed"""
         try:
-            if config.AUTO_RECONNECT and self.current_voice_channel:
-                voice_client = discord.utils.get(self.bot.voice_clients, channel=self.current_voice_channel)
+            if config.AUTO_RECONNECT and self.player.current_voice_channel:
+                voice_client = discord.utils.get(self.bot.voice_clients, channel=self.player.current_voice_channel)
                 
                 if not voice_client or not voice_client.is_connected():
                     logger.info("Attempting to reconnect...")
@@ -262,8 +109,8 @@ class MusicBot(commands.Cog):
         
         try:
             player = await channel.connect(cls=wavelink.Player)
-            self.current_voice_channel = channel
-            self.current_channel = ctx.channel
+            self.player.current_voice_channel = channel
+            self.player.current_channel = ctx.channel
             await player.set_volume(config.VOLUME_DEFAULT)
             await ctx.send(f"🎵 Đã kết nối đến {channel.name}")
             
@@ -276,8 +123,8 @@ class MusicBot(commands.Cog):
         voice_client = ctx.voice_client
         if voice_client:
             await voice_client.disconnect()
-            self.current_voice_channel = None
-            self.is_playing = False
+            self.player.current_voice_channel = None
+            self.player.is_playing = False
             await ctx.send("👋 Đã rời khỏi voice channel")
         else:
             await ctx.send("❌ Bot không ở trong voice channel nào")
@@ -320,14 +167,14 @@ class MusicBot(commands.Cog):
             
             # Handle different return types
             if hasattr(tracks, 'tracks'):  # It's a playlist object
-                await self.load_playlist(search, player)
+                await self.player.load_playlist(search, player)
                 return
             elif isinstance(tracks, list):  # It's a list of tracks
                 track = tracks[0]
             else:  # It's a single track
                 track = tracks
             
-            await self.play_track(player, track)
+            await self.player.play_track(player, track)
             
         except Exception as e:
             logger.error(f"Play command error: {e}")
@@ -343,7 +190,7 @@ class MusicBot(commands.Cog):
             await self.join(ctx)
             
         player = ctx.voice_client
-        await self.load_playlist(url, player)
+        await self.player.load_playlist(url, player)
     
     @commands.command(name='skip')
     async def skip(self, ctx):
@@ -352,7 +199,7 @@ class MusicBot(commands.Cog):
         if not player or not player.playing:
             return await ctx.send("❌ Không có bài hát nào đang phát")
             
-        if not self.playlist_tracks:
+        if not self.player.playlist_tracks:
             return await ctx.send("❌ Không có bài hát nào trong playlist để bỏ qua")
             
         # Save current track info for the message
@@ -366,7 +213,7 @@ class MusicBot(commands.Cog):
         
         # If still on the same track or not playing, force play next
         if not player.playing:
-            await self.play_next_track(player)
+            await self.player.play_next_track(player)
             
         await ctx.send(f"⏭️ Đã bỏ qua bài hát: **{current_track.title if current_track else ''}**")
     
@@ -437,7 +284,7 @@ class MusicBot(commands.Cog):
         except Exception as e:
             logger.error(f"Search error: {e}")
             await ctx.send("❌ Lỗi khi tìm kiếm!")
-    
+            
     @commands.command(name='commands', aliases=['cmd', 'cmds'])
     async def help_command(self, ctx):
         """Show bot commands"""
@@ -457,7 +304,6 @@ class MusicBot(commands.Cog):
             ("!pause", "Tạm dừng"),
             ("!resume", "Tiếp tục phát"),
             ("!volume [0-100]", "Điều chỉnh âm lượng"),
-            # ("!now", "Hiển thị bài hát đang phát"),
             ("!queue", "Hiển thị danh sách phát"),
             ("!repeat [off/one/all]", "Đặt chế độ lặp lại"),
             ("!remove <số>", "Xóa bài hát khỏi danh sách phát"),
@@ -470,72 +316,11 @@ class MusicBot(commands.Cog):
         
         embed.set_footer(text="Ví dụ: !play despacito hoặc !play https://youtu.be/...")
         await ctx.send(embed=embed)
-
-    # @commands.command(name='now', aliases=['np', 'current'])
-    # async def now_playing(self, ctx):
-    #     """Show currently playing track"""
-    #     player = ctx.voice_client
         
-    #     if not player or not player.playing:
-    #         return await ctx.send("❌ Không có bài hát nào đang phát")
-        
-    #     track = player.current
-    #     if not track:
-    #         return await ctx.send("❌ Không thể lấy thông tin bài hát hiện tại")
-        
-    #     position = player.position
-    #     duration = track.length
-        
-    #     # Format times
-    #     pos_min, pos_sec = divmod(position // 1000, 60)
-    #     dur_min, dur_sec = divmod(duration // 1000, 60)
-        
-    #     embed = discord.Embed(
-    #         title="🎵 Đang phát",
-    #         description=f"**{track.title}**\n{track.author}",
-    #         color=discord.Color.blue()
-    #     )
-        
-    #     embed.add_field(
-    #         name="Thời gian",
-    #         value=f"{pos_min}:{pos_sec:02d} / {dur_min}:{dur_sec:02d}",
-    #         inline=True
-    #     )
-        
-    #     if track.artwork_url:
-    #         embed.set_thumbnail(url=track.artwork_url)
-            
-    #     await ctx.send(embed=embed)
-
-    @commands.command(name='repeat', aliases=['loop'])
-    async def set_repeat(self, ctx, mode: str = None):
-        """Set repeat mode: off, one, all"""
-        if mode is None:
-            # Display current mode
-            modes = {
-                "off": "Tắt lặp lại",
-                "one": "Lặp lại bài hiện tại",
-                "all": "Lặp lại toàn bộ playlist"
-            }
-            current_mode = modes.get(self.repeat_mode, "Không xác định")
-            return await ctx.send(f"🔄 Chế độ lặp lại hiện tại: **{current_mode}**")
-        
-        mode = mode.lower()
-        if mode in ["off", "one", "all"]:
-            self.repeat_mode = mode
-            modes = {
-                "off": "Đã tắt lặp lại",
-                "one": "Lặp lại bài hiện tại",
-                "all": "Lặp lại toàn bộ playlist"
-            }
-            await ctx.send(f"🔄 {modes[mode]}")
-        else:
-            await ctx.send("❌ Chế độ không hợp lệ. Sử dụng: off, one, hoặc all")
-
     @commands.command(name='queue', aliases=['q', 'list'])
     async def show_queue(self, ctx):
         """Show current playlist queue"""
-        if not self.playlist_tracks:
+        if not self.player.playlist_tracks:
             return await ctx.send("❌ Playlist trống")
         
         # Create embed for queue
@@ -552,17 +337,17 @@ class MusicBot(commands.Cog):
         }
         embed.add_field(
             name="Chế độ lặp lại",
-            value=repeat_modes.get(self.repeat_mode, "Không xác định"),
+            value=repeat_modes.get(self.player.repeat_mode, "Không xác định"),
             inline=False
         )
         
         # Add tracks (current + next 9)
-        total_tracks = len(self.playlist_tracks)
+        total_tracks = len(self.player.playlist_tracks)
         embed.set_footer(text=f"Hiển thị {min(10, total_tracks)}/{total_tracks} bài hát")
         
         for i in range(min(10, total_tracks)):
-            idx = (self.current_track_index + i) % total_tracks
-            track = self.playlist_tracks[idx]
+            idx = (self.player.current_track_index + i) % total_tracks
+            track = self.player.playlist_tracks[idx]
             
             # Format duration
             minutes = track.length // 60000
@@ -579,11 +364,36 @@ class MusicBot(commands.Cog):
             )
         
         await ctx.send(embed=embed)
-
+        
+    @commands.command(name='repeat', aliases=['loop'])
+    async def set_repeat(self, ctx, mode: str = None):
+        """Set repeat mode: off, one, all"""
+        if mode is None:
+            # Display current mode
+            modes = {
+                "off": "Tắt lặp lại",
+                "one": "Lặp lại bài hiện tại",
+                "all": "Lặp lại toàn bộ playlist"
+            }
+            current_mode = modes.get(self.player.repeat_mode, "Không xác định")
+            return await ctx.send(f"🔄 Chế độ lặp lại hiện tại: **{current_mode}**")
+        
+        mode = mode.lower()
+        if mode in ["off", "one", "all"]:
+            self.player.repeat_mode = mode
+            modes = {
+                "off": "Đã tắt lặp lại",
+                "one": "Lặp lại bài hiện tại",
+                "all": "Lặp lại toàn bộ playlist"
+            }
+            await ctx.send(f"🔄 {modes[mode]}")
+        else:
+            await ctx.send("❌ Chế độ không hợp lệ. Sử dụng: off, one, hoặc all")
+            
     @commands.command(name='remove', aliases=['rm'])
     async def remove_track(self, ctx, position: int = None):
         """Remove track from playlist by position"""
-        if not self.playlist_tracks:
+        if not self.player.playlist_tracks:
             return await ctx.send("❌ Playlist trống")
         
         if position is None:
@@ -592,28 +402,28 @@ class MusicBot(commands.Cog):
         # Convert position to index
         try:
             position = int(position)
-            if position < 1 or position > len(self.playlist_tracks):
-                return await ctx.send(f"❌ Vị trí không hợp lệ. Phải từ 1 đến {len(self.playlist_tracks)}")
+            if position < 1 or position > len(self.player.playlist_tracks):
+                return await ctx.send(f"❌ Vị trí không hợp lệ. Phải từ 1 đến {len(self.player.playlist_tracks)}")
             
             index = position - 1
-            track = self.playlist_tracks[index]
+            track = self.player.playlist_tracks[index]
             
             # Handle removing current track
-            if index == self.current_track_index:
+            if index == self.player.current_track_index:
                 player = ctx.voice_client
                 if player and player.playing:
                     # Stop current track and play next
                     await player.stop()
-                    self.playlist_tracks.pop(index)
+                    self.player.playlist_tracks.pop(index)
                     # Adjust current index if needed
-                    if self.current_track_index >= len(self.playlist_tracks):
-                        self.current_track_index = 0
+                    if self.player.current_track_index >= len(self.player.playlist_tracks):
+                        self.player.current_track_index = 0
                     return await ctx.send(f"✅ Đã xóa và bỏ qua bài hát: **{track.title}**")
             
             # Remove track and adjust current index if needed
-            self.playlist_tracks.pop(index)
-            if index < self.current_track_index:
-                self.current_track_index -= 1
+            self.player.playlist_tracks.pop(index)
+            if index < self.player.current_track_index:
+                self.player.current_track_index -= 1
             
             await ctx.send(f"✅ Đã xóa bài hát: **{track.title}**")
             
@@ -622,11 +432,11 @@ class MusicBot(commands.Cog):
         except Exception as e:
             logger.error(f"Error removing track: {e}")
             await ctx.send(f"❌ Lỗi khi xóa bài hát: {str(e)[:100]}")
-
+    
     @commands.command(name='clear')
     async def clear_playlist(self, ctx):
         """Clear the playlist"""
-        if not self.playlist_tracks:
+        if not self.player.playlist_tracks:
             return await ctx.send("❌ Playlist đã trống")
         
         # Save current track if playing
@@ -638,14 +448,13 @@ class MusicBot(commands.Cog):
             await player.stop()
             
         # Clear playlist
-        self.playlist_tracks = []
-        self.current_track_index = 0
+        self.player.clear_queue()
         
         # Add current track back if needed
         if current_track:
-            self.playlist_tracks = [current_track]
+            self.player.playlist_tracks = [current_track]
             # Restart the current track
-            await self.play_track(player, current_track)
+            await self.player.play_track(player, current_track)
             await ctx.send("🧹 Đã xóa tất cả bài hát khỏi playlist (ngoại trừ bài đang phát)")
         else:
             await ctx.send("🧹 Đã xóa tất cả bài hát khỏi playlist")
@@ -653,37 +462,12 @@ class MusicBot(commands.Cog):
     @commands.command(name='shuffle')
     async def shuffle_playlist(self, ctx):
         """Shuffle the playlist"""
-        if not self.playlist_tracks or len(self.playlist_tracks) < 2:
+        if not self.player.playlist_tracks or len(self.player.playlist_tracks) < 2:
             return await ctx.send("❌ Cần ít nhất 2 bài hát để xáo trộn playlist")
-        
-        # Save current track
-        current_track = None
-        if self.playlist_tracks and len(self.playlist_tracks) > self.current_track_index:
-            current_track = self.playlist_tracks[self.current_track_index]
-        
-        # Remove current track from list temporarily
-        if current_track:
-            self.playlist_tracks.pop(self.current_track_index)
-        
-        # Shuffle remaining tracks
-        import random
-        random.shuffle(self.playlist_tracks)
-        
-        # Add current track back at position 0
-        if current_track:
-            self.playlist_tracks.insert(0, current_track)
-            self.current_track_index = 0
-        
-        await ctx.send("🔀 Đã xáo trộn playlist")
-        
-        # Show the new queue
-        await self.show_queue(ctx)
-
-# Add cog and run bot
-async def main():
-    async with bot:
-        await bot.add_cog(MusicBot(bot))
-        await bot.start(config.DISCORD_TOKEN)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+            
+        if self.player.shuffle_queue():
+            await ctx.send("🔀 Đã xáo trộn playlist")
+            # Show the new queue
+            await self.show_queue(ctx)
+        else:
+            await ctx.send("❌ Không thể xáo trộn playlist") 

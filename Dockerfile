@@ -1,22 +1,26 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Copy requirements first for better cache utilization
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY bot.py .
-COPY config.py .
+# Copy the rest of the application
+COPY . .
 
-# Create non-root user
-RUN useradd -m -u 1000 botuser && chown -R botuser:botuser /app
+# Create a non-root user to run the application
+RUN useradd -m botuser
 USER botuser
 
-CMD ["python", "bot.py"]
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+
+# Run the bot using the new entry point
+CMD ["python", "src/main.py"]
