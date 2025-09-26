@@ -3,21 +3,21 @@ import os
 import glob
 from dotenv import load_dotenv
 
-from src.bot import MusicBot
+from src.bot.main import MusicBot
 
 load_dotenv()
 
 # Opus library setup
 opus_paths = [
-    'libopus.so',
-    'libopus.so.0',
-    '/usr/lib/x86_64-linux-gnu/libopus.so.0',
-    '/usr/lib/libopus.so.0'
+    "libopus.so",
+    "libopus.so.0",
+    "/usr/lib/x86_64-linux-gnu/libopus.so.0",
+    "/usr/lib/libopus.so.0",
 ]
 
 # Thêm các đường dẫn từ Nix store nếu có
-if 'NIX_STORE' in os.environ:
-    nix_opus = glob.glob('/nix/store/*/lib/libopus.so*')
+if "NIX_STORE" in os.environ:
+    nix_opus = glob.glob("/nix/store/*/lib/libopus.so*")
     opus_paths.extend(nix_opus)
 
 opus_loaded = False
