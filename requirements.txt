@@ -1,4 +1,7 @@
-discord.py>=2.3.0
-python-dotenv>=1.0.0
-watchdog>=3.0.0
-spotdl>=4.2.0
+# Modern Music Bot Requirements
+# Clean, minimal dependencies for optimal performance
+
+discord.py
+yt-dlp
+PyNaCl
+aiohttp
