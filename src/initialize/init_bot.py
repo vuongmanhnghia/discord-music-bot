@@ -1,9 +1,5 @@
 from src.bot.main import MusicBot
 
 
-def init_bot(spotify_client, downloader) -> MusicBot:
-    return MusicBot(
-        # spotify_client=spotify_client,
-        # downloader=downloader,
-        # loop=None,
-    )
+def init_bot(spotdl_instance) -> MusicBot:
+    return MusicBot(spotdl_instance=spotdl_instance)

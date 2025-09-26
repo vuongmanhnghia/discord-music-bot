@@ -1,0 +1,4 @@
+discord
+dotenv
+PyNaCl
+watchdog

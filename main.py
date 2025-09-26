@@ -68,7 +68,7 @@ if __name__ == "__main__":
     spotdl = init_spotdl(client, downloader)
 
     # Initialize the Bot
-    bot = init_bot(spotdl, downloader)
+    bot = init_bot(spotdl)
 
     song_links = [
         "https://open.spotify.com/track/5IO873C4IP8pXdsXcJiBes?si=2e354799844a47b9",

@@ -44,7 +44,7 @@ class QueueView(View):
         queue_text = self.get_queue_text()
 
         embed = discord.Embed(
-            title="🎵 Current Queue", description=queue_text, color=0x00FF00
+            title="Current Queue", description=queue_text, color=0x00FF00
         )
 
         embed.set_footer(
