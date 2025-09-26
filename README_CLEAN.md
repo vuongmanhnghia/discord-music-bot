@@ -37,13 +37,13 @@ cp .env.example .env
 2. **Install Dependencies**:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements_clean.txt
 ```
 
 3. **Run Bot**:
 
 ```bash
-python main.py
+python main_clean.py
 ```
 
 ## 📋 Required Environment Variables
@@ -88,7 +88,7 @@ project/
 │   ├── playlist1/      # Songs for playlist1
 │   └── playlist2/      # Songs for playlist2
 ├── *.spotdl           # Playlist files (SPOTDL_DIR)
-└── main.py            # Entry point
+└── main_clean.py      # Entry point
 ```
 
 ## 🔧 Key Improvements
@@ -106,7 +106,7 @@ project/
 The new architecture is completely self-contained in the `lofi_bot/` package. Simply:
 
 1. Set up environment variables
-2. Run `python main.py`
+2. Run `python main_clean.py`
 3. Your existing `.spotdl` files and music folders will work unchanged
 
 ## 🐛 Troubleshooting
