@@ -1,15 +1,10 @@
-#!/usr/bin/env python3
-"""
-LoFi Music Bot - Optimized entry point
-"""
-
 import asyncio
 import discord
 import glob
 import os
-from lofi_bot.bot import LoFiBot
-from lofi_bot.config import config
-from lofi_bot.logger import logger
+from bot.bot import MusicBot
+from bot.config import config
+from bot.logger import logger
 
 
 def setup_opus():
@@ -43,15 +38,14 @@ def setup_opus():
 
 
 async def main():
-    """Main entry point"""
     try:
         logger.info(f"🚀 Starting {config.BOT_NAME}...")
-        logger.info(f"🔗 Command prefix: {config.COMMAND_PREFIX}...")
+        logger.info(f"🔑 Command prefix: {config.COMMAND_PREFIX}...")
 
         # Setup Opus before starting bot
         setup_opus()
 
-        bot = LoFiBot()
+        bot = MusicBot()
         await bot.start(config.BOT_TOKEN)
 
     except KeyboardInterrupt:

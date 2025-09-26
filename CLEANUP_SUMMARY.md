@@ -5,7 +5,7 @@
 ### 🗑️ **Removed Files/Directories:**
 
 -   `src/` - Entire old source directory (777+ lines)
-    -   `src/bot/main.py` - Old monolithic bot file
+-   `src/bot/main.py` - Old monolithic bot file
     -   `src/bot/utils.py` - Old utilities
     -   `src/initialize/` - Old initialization modules
     -   `src/playlist_manage.py` - Old playlist management

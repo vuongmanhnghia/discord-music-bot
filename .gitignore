@@ -1,7 +1,9 @@
-playlist/*
+music/*
 .env
 venv/
 .DS_Store
+
+*.log
 
 .direnv/
 

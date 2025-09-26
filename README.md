@@ -50,7 +50,7 @@ python main.py
 
 ```env
 BOT_TOKEN=your_discord_bot_token
-MUSIC_FOLDER=/path/to/music/storage
+MUSIC_DIR=/path/to/music/storage
 ```
 
 ## 📋 Optional Environment Variables
@@ -58,7 +58,7 @@ MUSIC_FOLDER=/path/to/music/storage
 ```env
 BOT_NAME="LoFi Bot"
 COMMAND_PREFIX="!"
-SPOTDL_DIR="."
+PLAYLIST_DIR="."
 LOG_LEVEL="INFO"
 LOG_FILE=""
 ```
@@ -84,10 +84,10 @@ LOG_FILE=""
 ```
 project/
 ├── lofi_bot/           # Clean bot code
-├── music/              # Music storage (MUSIC_FOLDER)
+├── music/              # Music storage (MUSIC_DIR)
 │   ├── playlist1/      # Songs for playlist1
 │   └── playlist2/      # Songs for playlist2
-├── *.spotdl           # Playlist files (SPOTDL_DIR)
+├── *.spotdl           # Playlist files (PLAYLIST_DIR)
 └── main.py            # Entry point
 ```
 
@@ -111,7 +111,7 @@ The new architecture is completely self-contained in the `lofi_bot/` package. Si
 
 ## 🐛 Troubleshooting
 
--   **Bot won't start**: Check `BOT_TOKEN` and `MUSIC_FOLDER` environment variables
+-   **Bot won't start**: Check `BOT_TOKEN` and `MUSIC_DIR` environment variables
 -   **Sync fails**: Ensure `spotdl` is installed and accessible
 -   **No audio**: Check Discord permissions and voice channel connection
 -   **Format issues**: Use `!fix <playlist>` to repair `.spotdl` files
