@@ -38,13 +38,15 @@ class AudioPlayer:
         """Set event loop for async callbacks"""
         self._loop = loop
 
-    async def play_song(self, song: Song) -> bool:
-        """Play a song"""
+    async def play_song(self, song: Song, retry_count: int = 0) -> bool:
+        """Play a song with retry mechanism"""
         if not song.is_ready:
             logger.error(f"Cannot play song that is not ready: {song.display_name}")
             return False
 
-        logger.info(f"Starting playback: {song.display_name} in guild {self.guild_id}")
+        logger.info(
+            f"Starting playback: {song.display_name} in guild {self.guild_id} (attempt {retry_count + 1})"
+        )
 
         try:
             # Validate stream URL
@@ -60,17 +62,32 @@ class AudioPlayer:
             audio_source = self._create_audio_source(song.stream_url)
             if not audio_source:
                 logger.error(f"Failed to create audio source for: {song.display_name}")
-                return False
+
+                # Retry logic for stream issues
+                if retry_count < 2:  # Max 3 attempts
+                    logger.info(f"Retrying playback for: {song.display_name}")
+                    await asyncio.sleep(2)  # Wait 2 seconds before retry
+                    return await self.play_song(song, retry_count + 1)
+                else:
+                    return False
 
             # Stop current playback if any
             if self.voice_client.is_playing() or self.voice_client.is_paused():
                 self.voice_client.stop()
                 await asyncio.sleep(0.5)
 
-            # Start playing with simple error callback
+            # Start playing with enhanced error callback
             def after_callback(error):
                 if error:
                     logger.error(f"Discord playback error: {error}")
+                    # Check if it's a network/stream error
+                    if (
+                        "Connection reset" in str(error)
+                        or "corrupt" in str(error).lower()
+                    ):
+                        logger.warning(
+                            f"Stream error detected for: {song.display_name}"
+                        )
                 self._on_playback_finished(error, song)
 
             self.voice_client.play(audio_source, after=after_callback)
@@ -85,6 +102,15 @@ class AudioPlayer:
 
         except Exception as e:
             logger.error(f"Error playing song {song.display_name}: {e}")
+
+            # Retry on network errors
+            if retry_count < 2 and (
+                "Connection reset" in str(e) or "corrupt" in str(e).lower()
+            ):
+                logger.info(f"Retrying due to network error: {song.display_name}")
+                await asyncio.sleep(2)
+                return await self.play_song(song, retry_count + 1)
+
             return False
 
     def pause(self) -> bool:
@@ -131,13 +157,17 @@ class AudioPlayer:
         return True
 
     def _create_audio_source(self, stream_url: str) -> Optional[discord.AudioSource]:
-        """Create Discord audio source from stream URL"""
+        """Create Discord audio source from stream URL with better error handling"""
         try:
-            # Simple working FFmpeg options
-            ffmpeg_options = {"before_options": "-nostdin", "options": "-vn"}
+            # Enhanced FFmpeg options for better stream handling
+            ffmpeg_options = {
+                "before_options": "-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2 -timeout 30000000",
+                "options": "-vn -bufsize 64k -maxrate 128k -avoid_negative_ts make_zero",
+            }
 
-            # Create base audio source with simple options
-            logger.debug(f"Creating FFmpeg source with options: {ffmpeg_options}")
+            logger.debug(
+                f"Creating FFmpeg source with enhanced options: {ffmpeg_options}"
+            )
 
             audio_source = FFmpegPCMAudio(stream_url, **ffmpeg_options)
 
@@ -319,12 +349,17 @@ class AudioService:
 
         # Auto-play next song
         queue_manager = self._queue_managers.get(guild_id)
-        if queue_manager:
-            next_song = queue_manager.next_song()
-            if next_song and next_song.is_ready:
-                await self.play_next_song(guild_id)
-            else:
-                logger.info(f"No more songs to play in guild {guild_id}")
+        if not queue_manager:
+            logger.warning(f"No queue manager found for guild {guild_id}")
+            return
+
+        # Get next song
+        next_song = queue_manager.next_song()
+        
+        if next_song and next_song.is_ready:
+            await self.play_next_song(guild_id)
+        else:
+            logger.info(f"No more songs to play in guild {guild_id}")
 
     async def _on_playback_error(self, error, song: Song):
         """Called when playback error occurs"""

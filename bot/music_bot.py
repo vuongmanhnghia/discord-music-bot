@@ -8,6 +8,7 @@ from typing import Dict, Optional
 
 import discord
 from discord.ext import commands
+from discord import app_commands
 
 from .config import config
 from .logger import logger
@@ -40,6 +41,13 @@ class MusicBot(commands.Bot):
             # Services are initialized on first use
             logger.info("✅ Bot components ready")
 
+            # Sync slash commands
+            try:
+                synced = await self.tree.sync()
+                logger.info(f"✅ Synced {len(synced)} slash commands")
+            except Exception as e:
+                logger.error(f"❌ Failed to sync slash commands: {e}")
+
         except Exception as e:
             logger.error(f"❌ Failed to initialize bot: {e}")
             raise
@@ -54,7 +62,7 @@ class MusicBot(commands.Bot):
         # Set bot status
         activity = discord.Activity(
             type=discord.ActivityType.listening,
-            name=f"{config.COMMAND_PREFIX}help | High-quality streaming",
+            name="/help | High-quality streaming",
         )
         await self.change_presence(activity=activity)
 
@@ -156,346 +164,433 @@ class MusicBot(commands.Bot):
                 await audio_service.disconnect_from_guild(member.guild.id)
 
     def _setup_commands(self):
-        """Setup all bot commands with clean implementation"""
+        """Setup all bot slash commands with clean implementation"""
 
-        @self.command(name="join", aliases=["connect"])
-        async def join_voice(ctx):
-            """🔗 Join your voice channel"""
-            if not ctx.author.voice:
-                await ctx.send("❌ You need to be in a voice channel!")
+        @self.tree.command(name="join", description="Tham gia voice channel")
+        async def join_voice(interaction: discord.Interaction):
+            """Join your voice channel"""
+            if not interaction.user.voice:
+                await interaction.response.send_message(
+                    "❌ Bạn cần ở trong voice channel!", ephemeral=True
+                )
                 return
 
-            channel = ctx.author.voice.channel
+            channel = interaction.user.voice.channel
             success = await audio_service.connect_to_channel(channel)
 
             if success:
                 embed = discord.Embed(
-                    title="✅ Connected",
-                    description=f"Joined {channel.mention}",
+                    title=f"Đã tham gia kênh voice {channel.mention}",
+                    description=f"{config.BOT_NAME} ・ /help",
                     color=discord.Color.green(),
                 )
             else:
                 embed = discord.Embed(
-                    title="❌ Connection Failed",
-                    description="Failed to join voice channel",
+                    title="Không thể tham gia voice channel",
+                    description=f"{config.BOT_NAME} ・ /help",
                     color=discord.Color.red(),
                 )
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
 
-        @self.command(name="leave", aliases=["disconnect"])
-        async def leave_voice(ctx):
+        @self.tree.command(name="leave", description="Rời voice channel")
+        async def leave_voice(interaction: discord.Interaction):
             """👋 Leave voice channel"""
-            success = await audio_service.disconnect_from_guild(ctx.guild.id)
+            success = await audio_service.disconnect_from_guild(interaction.guild.id)
 
             if success:
                 embed = discord.Embed(
-                    title="👋 Disconnected",
-                    description="Left voice channel",
+                    title=f"Đã ngắt kết nối kênh voice {interaction.user.voice.channel.mention}",
+                    description=f"{config.BOT_NAME} ・ /help",
                     color=discord.Color.blue(),
                 )
             else:
                 embed = discord.Embed(
-                    title="❌ Not Connected",
-                    description="Not connected to any voice channel",
+                    title="Chưa kết nối",
+                    description=f"{config.BOT_NAME} ・ /help",
                     color=discord.Color.red(),
                 )
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
 
-        @self.command(name="play", aliases=["p"])
-        async def play_music(ctx, *, query: str):
+        @self.tree.command(name="play", description="Phát nhạc từ URL hoặc tìm kiếm")
+        @app_commands.describe(query="URL hoặc từ khóa tìm kiếm")
+        async def play_music(interaction: discord.Interaction, query: str):
             """▶️ Play music from URL or search query"""
             # Ensure bot is connected to voice
-            if not audio_service.is_connected(ctx.guild.id):
-                if ctx.author.voice:
-                    await audio_service.connect_to_channel(ctx.author.voice.channel)
+            if not audio_service.is_connected(interaction.guild.id):
+                if interaction.user.voice:
+                    await audio_service.connect_to_channel(
+                        interaction.user.voice.channel
+                    )
                 else:
-                    await ctx.send("❌ Join a voice channel first!")
+                    await interaction.response.send_message(
+                        "Hãy tham gia voice channel trước!", ephemeral=True
+                    )
                     return
 
             # Send processing message
-            message = await ctx.send(
-                f"🔍 Processing: **{query[:50]}{'...' if len(query) > 50 else ''}**"
+            await interaction.response.send_message(
+                f"**{query[:50]}{'...' if len(query) > 50 else ''}**"
             )
 
             try:
                 # Process the play request
                 success, response_message, song = await playback_service.play_request(
                     user_input=query,
-                    guild_id=ctx.guild.id,
-                    requested_by=str(ctx.author),
+                    guild_id=interaction.guild.id,
+                    requested_by=str(interaction.user),
                     auto_play=True,
                 )
 
                 if success and song:
                     embed = discord.Embed(
-                        title="✅ Added to Queue",
+                        title="Đã thêm vào hàng đợi",
                         description=response_message,
                         color=discord.Color.green(),
                     )
 
                     # Add source type info
                     embed.add_field(
-                        name="Source Type",
+                        name="Nguồn",
                         value=song.source_type.value.title(),
                         inline=True,
                     )
 
                     embed.add_field(
-                        name="Status", value=song.status.value.title(), inline=True
+                        name="Trạng thái", value=song.status.value.title(), inline=True
                     )
 
                     if song.metadata:
                         embed.add_field(
-                            name="Duration",
-                            value=song.metadata.duration_formatted,
+                            name="Thời lượng",
+                            value=song.duration_formatted,
                             inline=True,
                         )
 
-                        if song.metadata.thumbnail_url:
-                            embed.set_thumbnail(url=song.metadata.thumbnail_url)
+                    # Update the processing message
+                    await interaction.edit_original_response(embed=embed)
+
                 else:
                     embed = discord.Embed(
-                        title="❌ Failed",
+                        title="❌ Lỗi phát nhạc",
                         description=response_message,
                         color=discord.Color.red(),
                     )
-
-                await message.edit(content=None, embed=embed)
+                    await interaction.edit_original_response(embed=embed)
 
             except Exception as e:
                 logger.error(f"Error in play command: {e}")
                 embed = discord.Embed(
-                    title="❌ Error",
-                    description=f"An error occurred: {str(e)}",
+                    title="❌ Lỗi không mong muốn",
+                    description=f"Đã xảy ra lỗi: {str(e)}",
                     color=discord.Color.red(),
                 )
-                await message.edit(content=None, embed=embed)
+                await interaction.edit_original_response(embed=embed)
 
-        @self.command(name="skip", aliases=["next"])
-        async def skip_song(ctx):
+        @self.tree.command(name="skip", description="Bỏ qua bài hiện tại")
+        async def skip_song(interaction: discord.Interaction):
             """⏭️ Skip current song"""
-            success, message = await playback_service.skip_current_song(ctx.guild.id)
+            if not audio_service.is_connected(interaction.guild.id):
+                await interaction.response.send_message(
+                    "❌ Bot chưa kết nối voice!", ephemeral=True
+                )
+                return
+
+            success = await audio_service.skip_to_next(interaction.guild.id)
 
             if success:
                 embed = discord.Embed(
-                    title="⏭️ Skipped", description=message, color=discord.Color.blue()
+                    title="Đã bỏ qua bài hiện tại",
+                    description=f"{config.BOT_NAME} ・ /help",
+                    color=discord.Color.blue(),
                 )
             else:
                 embed = discord.Embed(
-                    title="❌ Cannot Skip",
-                    description=message,
+                    title="❌ Không có bài nào",
+                    description="Không có bài nào để bỏ qua",
                     color=discord.Color.red(),
                 )
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
 
-        @self.command(name="pause")
-        async def pause_music(ctx):
+        @self.tree.command(name="pause", description="⏸️ Tạm dừng phát")
+        async def pause_music(interaction: discord.Interaction):
             """⏸️ Pause current playback"""
-            success, message = await playback_service.pause_playback(ctx.guild.id)
-
-            color = discord.Color.orange() if success else discord.Color.red()
-            title = "⏸️ Paused" if success else "❌ Cannot Pause"
-
-            embed = discord.Embed(title=title, description=message, color=color)
-            await ctx.send(embed=embed)
-
-        @self.command(name="resume")
-        async def resume_music(ctx):
-            """▶️ Resume paused playback"""
-            success, message = await playback_service.resume_playback(ctx.guild.id)
-
-            color = discord.Color.green() if success else discord.Color.red()
-            title = "▶️ Resumed" if success else "❌ Cannot Resume"
-
-            embed = discord.Embed(title=title, description=message, color=color)
-            await ctx.send(embed=embed)
-
-        @self.command(name="stop")
-        async def stop_music(ctx):
-            """⏹️ Stop playback and clear queue"""
-            success, message = await playback_service.stop_playback(ctx.guild.id)
-
-            color = discord.Color.blue() if success else discord.Color.red()
-            title = "⏹️ Stopped" if success else "❌ Cannot Stop"
-
-            embed = discord.Embed(title=title, description=message, color=color)
-            await ctx.send(embed=embed)
-
-        @self.command(name="queue", aliases=["q"])
-        async def show_queue(ctx):
-            """📋 Show current queue"""
-            status = await playback_service.get_queue_status(ctx.guild.id)
-
-            if not status:
-                await ctx.send("❌ No queue information available")
+            audio_player = audio_service.get_audio_player(interaction.guild.id)
+            if not audio_player:
+                await interaction.response.send_message(
+                    "❌ Bot chưa kết nối voice!", ephemeral=True
+                )
                 return
 
-            embed = discord.Embed(title="📋 Current Queue", color=discord.Color.blue())
-
-            # Current song
-            current = status["current_song"]
-            if current:
-                current_info = f"**{current.display_name}**"
-                if current.metadata:
-                    current_info += f" ({current.metadata.duration_formatted})"
-
-                status_emoji = (
-                    "▶️" if status["is_playing"] else "⏸️" if status["is_paused"] else "⏹️"
-                )
-                embed.add_field(
-                    name=f"{status_emoji} Now Playing", value=current_info, inline=False
-                )
-
-            # Upcoming songs
-            upcoming = status["upcoming_songs"]
-            if upcoming:
-                upcoming_list = []
-                for i, song in enumerate(upcoming, 1):
-                    song_info = f"{i}. {song.display_name}"
-                    if song.metadata:
-                        song_info += f" ({song.metadata.duration_formatted})"
-                    upcoming_list.append(song_info)
-
-                embed.add_field(
-                    name="⏭️ Up Next", value="\\n".join(upcoming_list), inline=False
-                )
-
-            # Queue stats
-            position = status["position"]
-            embed.add_field(
-                name="📊 Stats",
-                value=f"Position: {position[0]}/{position[1]}\\nVolume: {status['volume']:.0%}",
-                inline=True,
-            )
-
-            await ctx.send(embed=embed)
-
-        @self.command(name="volume", aliases=["vol"])
-        async def set_volume(ctx, volume: int = None):
-            """🔊 Set playback volume (0-100)"""
-            if volume is None:
-                status = await playback_service.get_queue_status(ctx.guild.id)
-                if status:
-                    current_vol = int(status["volume"] * 100)
-                    embed = discord.Embed(
-                        title="🔊 Current Volume",
-                        description=f"Volume is **{current_vol}%**",
-                        color=discord.Color.blue(),
-                    )
-                    await ctx.send(embed=embed)
-                return
-
-            if not (0 <= volume <= 100):
-                await ctx.send("❌ Volume must be between 0 and 100")
-                return
-
-            success, message = await playback_service.set_volume(
-                ctx.guild.id, volume / 100.0
-            )
+            success = audio_player.pause()
 
             if success:
-                emoji = (
-                    "🔇"
-                    if volume == 0
-                    else "🔈" if volume < 30 else "🔉" if volume < 70 else "🔊"
-                )
                 embed = discord.Embed(
-                    title=f"{emoji} Volume Set",
-                    description=message,
+                    title="Đã tạm dừng",
+                    description=f"{config.BOT_NAME} ・ /help",
+                    color=discord.Color.orange(),
+                )
+            else:
+                embed = discord.Embed(
+                    title="❌ Không có gì đang phát",
+                    description="Không có nhạc nào đang phát",
+                    color=discord.Color.red(),
+                )
+            await interaction.response.send_message(embed=embed)
+
+        @self.tree.command(name="resume", description="Tiếp tục phát nhạc")
+        async def resume_music(interaction: discord.Interaction):
+            """▶️ Resume paused playback"""
+            audio_player = audio_service.get_audio_player(interaction.guild.id)
+            if not audio_player:
+                await interaction.response.send_message(
+                    "❌ Bot chưa kết nối voice!", ephemeral=True
+                )
+                return
+
+            success = audio_player.resume()
+
+            if success:
+                embed = discord.Embed(
+                    title="Đã tiếp tục phát nhạc",
+                    description=f"{config.BOT_NAME} ・ /help",
                     color=discord.Color.green(),
                 )
             else:
                 embed = discord.Embed(
-                    title="❌ Volume Error",
-                    description=message,
+                    title="❌ Không có gì bị tạm dừng",
+                    description="Không có nhạc nào bị tạm dừng",
                     color=discord.Color.red(),
                 )
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
 
-        @self.command(name="nowplaying", aliases=["np"])
-        async def now_playing(ctx):
-            """🎵 Show currently playing song"""
-            status = await playback_service.get_queue_status(ctx.guild.id)
-
-            if not status or not status["current_song"]:
-                await ctx.send("❌ Nothing is currently playing")
+        @self.tree.command(name="stop", description="Dừng và xóa hàng đợi")
+        async def stop_music(interaction: discord.Interaction):
+            """⏹️ Stop playback and clear queue"""
+            audio_player = audio_service.get_audio_player(interaction.guild.id)
+            if not audio_player:
+                await interaction.response.send_message(
+                    "❌ Bot chưa kết nối voice!", ephemeral=True
+                )
                 return
 
-            song = status["current_song"]
+            audio_player.stop()
+            queue_manager = audio_service.get_queue_manager(interaction.guild.id)
+            if queue_manager:
+                queue_manager.clear_queue()
+
             embed = discord.Embed(
-                title="🎵 Now Playing",
-                description=f"**{song.display_name}**",
+                title="Đã dừng",
+                description=f"{config.BOT_NAME} ・ /help",
+                color=discord.Color.red(),
+            )
+            await interaction.response.send_message(embed=embed)
+
+        @self.tree.command(name="queue", description="Hiển thị hàng đợi hiện tại")
+        async def show_queue(interaction: discord.Interaction):
+            """📋 Show current queue"""
+            queue_manager = audio_service.get_queue_manager(interaction.guild.id)
+            if not queue_manager:
+                await interaction.response.send_message(
+                    "❌ Không có hàng đợi nào!", ephemeral=True
+                )
+                return
+
+            current_song = queue_manager.current_song
+            upcoming_songs = queue_manager.get_upcoming(limit=10)
+
+            if not current_song and not upcoming_songs:
+                embed = discord.Embed(
+                    title="Không có bài nào trong hàng đợi",
+                    description=f"{config.BOT_NAME} ・ /help",
+                    color=discord.Color.blue(),
+                )
+                await interaction.response.send_message(embed=embed)
+                return
+
+            embed = discord.Embed(
+                title="Hàng đợi hiện tại",
+                color=discord.Color.blue(),
+            )
+
+            # Current song
+            if current_song:
+                embed.add_field(
+                    name="Đang phát",
+                    value=f"**{current_song.display_name}**",
+                    inline=False,
+                )
+
+            # Upcoming songs
+            if upcoming_songs:
+                queue_text = ""
+                for i, song in enumerate(upcoming_songs[:10], 1):
+                    queue_text += f"{i}. {song.display_name}\n"
+
+                if len(upcoming_songs) > 10:
+                    queue_text += f"... và {len(upcoming_songs) - 10} bài khác"
+
+                embed.add_field(
+                    name="Tiếp theo",
+                    value=queue_text or "Không có",
+                    inline=False,
+                )
+
+            await interaction.response.send_message(embed=embed)
+
+        @self.tree.command(name="volume", description="Đặt âm lượng (0-100)")
+        @app_commands.describe(volume="Âm lượng từ 0 đến 100")
+        async def set_volume(interaction: discord.Interaction, volume: int = None):
+            """🔊 Set playback volume (0-100)"""
+            audio_player = audio_service.get_audio_player(interaction.guild.id)
+            if not audio_player:
+                await interaction.response.send_message(
+                    "❌ Bot chưa kết nối voice!", ephemeral=True
+                )
+                return
+
+            if volume is None:
+                # Show current volume
+                current_volume = int(audio_player.volume * 100)
+                embed = discord.Embed(
+                    title=f"Âm lượng hiện tại: {current_volume}%",
+                    description=f"{config.BOT_NAME} ・ /help",
+                    color=discord.Color.blue(),
+                )
+                await interaction.response.send_message(embed=embed)
+                return
+
+            # Validate volume
+            if volume < 0 or volume > 100:
+                await interaction.response.send_message(
+                    "❌ Âm lượng phải từ 0 đến 100!", ephemeral=True
+                )
+                return
+
+            # Set volume
+            audio_player.set_volume(volume / 100.0)
+
+            embed = discord.Embed(
+                title=f"Đã đặt âm lượng: {volume}%",
+                description=f"{config.BOT_NAME} ・ /help",
+                color=discord.Color.green(),
+            )
+            await interaction.response.send_message(embed=embed)
+
+        @self.tree.command(name="nowplaying", description="Hiển thị bài đang phát")
+        async def now_playing(interaction: discord.Interaction):
+            """🎵 Show currently playing song"""
+            audio_player = audio_service.get_audio_player(interaction.guild.id)
+            if not audio_player or not audio_player.current_song:
+                await interaction.response.send_message(
+                    "❌ Không có bài nào đang phát!", ephemeral=True
+                )
+                return
+
+            song = audio_player.current_song
+
+            embed = discord.Embed(
+                title=f"Đang phát: {song.display_name}",
+                description=f"{config.BOT_NAME} ・ /help",
                 color=discord.Color.green(),
             )
 
+            # Add metadata if available
             if song.metadata:
                 embed.add_field(
-                    name="Duration", value=song.metadata.duration_formatted, inline=True
+                    name="Thời lượng",
+                    value=song.duration_formatted,
+                    inline=True,
                 )
-                embed.add_field(
-                    name="Source", value=song.source_type.value.title(), inline=True
-                )
+
+                if song.metadata.artist:
+                    embed.add_field(
+                        name="Nghệ sĩ",
+                        value=song.metadata.artist,
+                        inline=True,
+                    )
 
                 if song.metadata.album:
                     embed.add_field(
-                        name="Album", value=song.metadata.album, inline=True
+                        name="Album",
+                        value=song.metadata.album,
+                        inline=True,
                     )
 
-                if song.metadata.thumbnail_url:
-                    embed.set_thumbnail(url=song.metadata.thumbnail_url)
+            embed.add_field(
+                name="Trạng thái",
+                value="Đang phát" if audio_player.is_playing else "Tạm dừng",
+                inline=True,
+            )
 
-            # Playback status
-            status_parts = []
-            if status["is_paused"]:
-                status_parts.append("⏸️ Paused")
-            elif status["is_playing"]:
-                status_parts.append("▶️ Playing")
-            else:
-                status_parts.append("⏹️ Stopped")
+            embed.add_field(
+                name="Âm lượng",
+                value=f"{int(audio_player.volume * 100)}%",
+                inline=True,
+            )
 
-            position = status["position"]
-            status_parts.append(f"Position: {position[0]}/{position[1]}")
+            await interaction.response.send_message(embed=embed)
 
-            embed.add_field(name="Status", value=" • ".join(status_parts), inline=False)
+        @self.tree.command(name="repeat", description="Set repeat mode")
+        @app_commands.describe(mode="Repeat mode: off, song, queue")
+        async def repeat_mode(interaction: discord.Interaction, mode: str):
+            """Set repeat mode for the queue"""
+            if not interaction.guild:
+                await interaction.response.send_message("This command can only be used in a server.")
+                return
 
-            if song.requested_by:
-                embed.set_footer(text=f"Requested by {song.requested_by}")
+            guild_id = interaction.guild.id
+            queue_manager = audio_service.get_queue_manager(guild_id)
+            
+            if not queue_manager:
+                await interaction.response.send_message("No queue found. Use `/play` first.")
+                return
 
-            await ctx.send(embed=embed)
+            if mode.lower() not in ["off", "song", "queue"]:
+                await interaction.response.send_message("Invalid mode. Use: off, song, or queue")
+                return
 
-        @self.command(name="help", aliases=["h"])
-        async def show_help(ctx):
+            queue_manager._repeat_mode = mode.lower()
+            
+            mode_names = {
+                "off": "Tắt lặp",
+                "song": "Lặp bài hát",
+                "queue": "Lặp hàng đợi"
+            }
+            
+            await interaction.response.send_message(f"Repeat mode set to: **{mode_names[mode.lower()]}**")
+
+        @self.tree.command(name="help", description="Hiển thị thông tin trợ giúp")
+        async def show_help(interaction: discord.Interaction):
             """❓ Show help information"""
             embed = discord.Embed(
-                title=f"{config.BOT_NAME} - Help",
-                # description="Modern music bot with intelligent processing",
+                title=f"{config.BOT_NAME} - Trợ giúp",
                 color=discord.Color.blue(),
             )
 
             # Connection commands
             connection_cmds = [
-                f"> `{config.COMMAND_PREFIX}join`  - Tham gia voice channel",
-                f"> `{config.COMMAND_PREFIX}leave` - Rời voice channel",
+                f"> `/join`  - Tham gia voice channel",
+                f"> `/leave` - Rời voice channel",
             ]
 
             embed.add_field(name="", value="\n".join(connection_cmds), inline=False)
 
             # Playback commands
             playback_cmds = [
-                f"> `{config.COMMAND_PREFIX}play <query>` - Phát nhạc (URL hoặc tìm kiếm)",
-                f"> `{config.COMMAND_PREFIX}pause`        - Tạm dừng phát",
-                f"> `{config.COMMAND_PREFIX}resume`       - Tiếp tục phát",
-                f"> `{config.COMMAND_PREFIX}skip`         - Bỏ qua bài hiện tại",
-                f"> `{config.COMMAND_PREFIX}stop`         - Dừng và xóa hàng đợi",
+                f"> `/play <query>` - Phát nhạc (URL hoặc tìm kiếm)",
+                f"> `/pause`        - Tạm dừng phát",
+                f"> `/resume`       - Tiếp tục phát",
+                f"> `/skip`         - Bỏ qua bài hiện tại",
+                f"> `/stop`         - Dừng và xóa hàng đợi",
             ]
 
             embed.add_field(name="", value="\n".join(playback_cmds), inline=False)
 
             # Queue commands
             queue_cmds = [
-                f"> `{config.COMMAND_PREFIX}queue`          - Hiển thị hàng đợi hiện tại",
-                f"> `{config.COMMAND_PREFIX}nowplaying`     - Hiển thị bài hiện tại",
-                f"> `{config.COMMAND_PREFIX}volume <0-100>` - Đặt âm lượng",
+                f"> `/queue`          - Hiển thị hàng đợi hiện tại",
+                f"> `/nowplaying`     - Hiển thị bài hiện tại",
+                f"> `/volume <0-100>` - Đặt âm lượng",
             ]
 
             embed.add_field(name="", value="\n".join(queue_cmds), inline=False)
@@ -506,11 +601,7 @@ class MusicBot(commands.Bot):
                 inline=False,
             )
 
-            # embed.set_footer(
-            #     text="Bot sử dụng xử lý thông minh để xử lý các nguồn nhạc khác nhau"
-            # )
-
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
 
     async def close(self):
         """Clean shutdown"""
