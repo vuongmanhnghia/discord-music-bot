@@ -4,7 +4,7 @@ Implements the complete playback flow with proper separation of concerns
 """
 
 import asyncio
-from typing import Dict, Optional
+from typing import Optional
 
 import discord
 from discord.ext import commands
@@ -41,10 +41,25 @@ class MusicBot(commands.Bot):
             # Services are initialized on first use
             logger.info("✅ Bot components ready")
 
-            # Sync slash commands
+            # Sync slash commands globally only
             try:
                 synced = await self.tree.sync()
-                logger.info(f"✅ Synced {len(synced)} slash commands")
+                logger.info(f"✅ Synced {len(synced)} slash commands globally")
+                
+                # Remove guild-specific syncing to avoid rate limits
+                # Guild commands will inherit from global commands
+                
+            except discord.RateLimited as e:
+                logger.warning(f"⚠️ Rate limited while syncing commands. Retry after: {e.retry_after}s")
+                await asyncio.sleep(e.retry_after)
+                # Retry once
+                try:
+                    synced = await self.tree.sync()
+                    logger.info(f"✅ Retried and synced {len(synced)} slash commands")
+                except Exception as retry_e:
+                    logger.error(f"❌ Failed to sync commands after retry: {retry_e}")
+            except discord.HTTPException as e:
+                logger.error(f"❌ HTTP error syncing commands: {e}")
             except Exception as e:
                 logger.error(f"❌ Failed to sync slash commands: {e}")
 
@@ -57,7 +72,8 @@ class MusicBot(commands.Bot):
         logger.info(f"🎵 {config.BOT_NAME} is ready!")
         logger.info(f"📊 Connected to {len(self.guilds)} guilds")
         logger.info(f"🔑 Command prefix: {config.COMMAND_PREFIX}")
-        logger.info(f"🎯 Bot ID: {self.user.id}")
+        if self.user:
+            logger.info(f"🎯 Bot ID: {self.user.id}")
 
         # Set bot status
         activity = discord.Activity(
@@ -69,7 +85,7 @@ class MusicBot(commands.Bot):
     async def on_guild_join(self, guild: discord.Guild):
         """Handle joining new guild"""
         logger.info(f"🆕 Joined new guild: {guild.name} (ID: {guild.id})")
-        self._ensure_guild_state(guild.id)
+        # Guild state is managed by services automatically
 
     async def on_guild_remove(self, guild: discord.Guild):
         """Handle leaving guild"""
@@ -116,6 +132,15 @@ class MusicBot(commands.Bot):
                 description=f"Command is on cooldown. Try again in {error.retry_after:.1f} seconds.",
                 color=discord.Color.orange(),
             )
+    
+        # Add rate limit handling
+        elif isinstance(error, discord.HTTPException) and error.status == 429:
+            retry_after = getattr(error, 'retry_after', None) or error.response.headers.get('Retry-After', '60')
+            embed = discord.Embed(
+                title="⚠️ Rate Limited",
+                description=f"Bot is being rate limited. Please wait {retry_after} seconds and try again.",
+                color=discord.Color.orange(),
+            )
 
         else:
             # Unexpected error
@@ -130,22 +155,25 @@ class MusicBot(commands.Bot):
 
         try:
             await ctx.send(embed=embed, delete_after=30)
-        except discord.HTTPException:
-            # Fallback to simple message if embed fails
-            try:
-                await ctx.send(f"❌ Error: {str(error)}", delete_after=30)
-            except discord.HTTPException:
-                pass  # Can't send message, give up
+        except discord.HTTPException as send_error:
+            if send_error.status == 429:
+                # If we're rate limited sending the error message, just log it
+                logger.warning(f"Rate limited when sending error message: {send_error}")
+            else:
+                # Fallback to simple message if embed fails
+                try:
+                    await ctx.send(f"❌ Error: {str(error)}", delete_after=30)
+                except discord.HTTPException:
+                    pass  # Can't send message, give up
 
     async def on_voice_state_update(
-        self,
-        member: discord.Member,
-        before: discord.VoiceState,
-        after: discord.VoiceState,
+        self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState
     ):
-        """Handle voice state changes - auto disconnect if alone"""
-        if member == self.user:
-            return
+        """Handle voice state changes"""
+        # Only handle when someone leaves
+        if before.channel and not after.channel and member.guild:
+            # No need for _ensure_guild_state method - services handle this automatically
+            pass
 
         voice_client = discord.utils.get(self.voice_clients, guild=member.guild)
         if not voice_client:
@@ -153,14 +181,19 @@ class MusicBot(commands.Bot):
 
         # Check if bot is alone in voice channel
         channel = voice_client.channel
-        if channel and len([m for m in channel.members if not m.bot]) == 0:
-            logger.info(
-                f"Bot is alone in voice channel, will disconnect from {member.guild.name}"
-            )
+        if (channel and 
+            isinstance(channel, (discord.VoiceChannel, discord.StageChannel)) and 
+            hasattr(channel, 'members') and
+            len([m for m in channel.members if not m.bot]) == 0):
+            logger.info(f"Bot is alone in voice channel, will disconnect from {member.guild.name}")
+            
             await asyncio.sleep(60)  # Wait 60 seconds
 
             # Double-check still alone
-            if channel and len([m for m in channel.members if not m.bot]) == 0:
+            if (channel and 
+                isinstance(channel, (discord.VoiceChannel, discord.StageChannel)) and 
+                hasattr(channel, 'members') and
+                len([m for m in channel.members if not m.bot]) == 0):
                 await audio_service.disconnect_from_guild(member.guild.id)
 
     def _setup_commands(self):
@@ -169,13 +202,20 @@ class MusicBot(commands.Bot):
         @self.tree.command(name="join", description="Tham gia voice channel")
         async def join_voice(interaction: discord.Interaction):
             """Join your voice channel"""
-            if not interaction.user.voice:
+            # Check if user is a Member and has voice state
+            if not isinstance(interaction.user, discord.Member) or not interaction.user.voice:
                 await interaction.response.send_message(
                     "❌ Bạn cần ở trong voice channel!", ephemeral=True
                 )
                 return
 
             channel = interaction.user.voice.channel
+            if not isinstance(channel, (discord.VoiceChannel, discord.StageChannel)):
+                await interaction.response.send_message(
+                    "❌ Không thể tham gia channel này!", ephemeral=True
+                )
+                return
+
             success = await audio_service.connect_to_channel(channel)
 
             if success:
@@ -195,11 +235,15 @@ class MusicBot(commands.Bot):
         @self.tree.command(name="leave", description="Rời voice channel")
         async def leave_voice(interaction: discord.Interaction):
             """👋 Leave voice channel"""
+            if not interaction.guild:
+                await interaction.response.send_message("❌ Chỉ sử dụng trong server!", ephemeral=True)
+                return
+                
             success = await audio_service.disconnect_from_guild(interaction.guild.id)
 
             if success:
                 embed = discord.Embed(
-                    title=f"Đã ngắt kết nối kênh voice {interaction.user.voice.channel.mention}",
+                    title="Đã ngắt kết nối voice channel",
                     description=f"{config.BOT_NAME} ・ /help",
                     color=discord.Color.blue(),
                 )
@@ -213,14 +257,24 @@ class MusicBot(commands.Bot):
 
         @self.tree.command(name="play", description="Phát nhạc từ URL hoặc tìm kiếm")
         @app_commands.describe(query="URL hoặc từ khóa tìm kiếm")
+        @app_commands.checks.cooldown(1, 3.0, key=lambda i: (i.guild_id, i.user.id))  # 3 second cooldown per user per guild
         async def play_music(interaction: discord.Interaction, query: str):
             """▶️ Play music from URL or search query"""
+            if not interaction.guild:
+                await interaction.response.send_message("❌ Chỉ sử dụng trong server!", ephemeral=True)
+                return
+                
             # Ensure bot is connected to voice
             if not audio_service.is_connected(interaction.guild.id):
-                if interaction.user.voice:
-                    await audio_service.connect_to_channel(
-                        interaction.user.voice.channel
-                    )
+                if isinstance(interaction.user, discord.Member) and interaction.user.voice:
+                    channel = interaction.user.voice.channel
+                    if isinstance(channel, (discord.VoiceChannel, discord.StageChannel)):
+                        await audio_service.connect_to_channel(channel)
+                    else:
+                        await interaction.response.send_message(
+                            "❌ Không thể tham gia channel này!", ephemeral=True
+                        )
+                        return
                 else:
                     await interaction.response.send_message(
                         "Hãy tham gia voice channel trước!", ephemeral=True
@@ -287,8 +341,13 @@ class MusicBot(commands.Bot):
                 await interaction.edit_original_response(embed=embed)
 
         @self.tree.command(name="skip", description="Bỏ qua bài hiện tại")
+        @app_commands.checks.cooldown(1, 2.0, key=lambda i: (i.guild_id, i.user.id))  # 2 second cooldown
         async def skip_song(interaction: discord.Interaction):
             """⏭️ Skip current song"""
+            if not interaction.guild:
+                await interaction.response.send_message("❌ Chỉ sử dụng trong server!", ephemeral=True)
+                return
+                
             if not audio_service.is_connected(interaction.guild.id):
                 await interaction.response.send_message(
                     "❌ Bot chưa kết nối voice!", ephemeral=True
@@ -314,6 +373,10 @@ class MusicBot(commands.Bot):
         @self.tree.command(name="pause", description="⏸️ Tạm dừng phát")
         async def pause_music(interaction: discord.Interaction):
             """⏸️ Pause current playback"""
+            if not interaction.guild:
+                await interaction.response.send_message("❌ Chỉ sử dụng trong server!", ephemeral=True)
+                return
+                
             audio_player = audio_service.get_audio_player(interaction.guild.id)
             if not audio_player:
                 await interaction.response.send_message(
@@ -340,6 +403,10 @@ class MusicBot(commands.Bot):
         @self.tree.command(name="resume", description="Tiếp tục phát nhạc")
         async def resume_music(interaction: discord.Interaction):
             """▶️ Resume paused playback"""
+            if not interaction.guild:
+                await interaction.response.send_message("❌ Chỉ sử dụng trong server!", ephemeral=True)
+                return
+                
             audio_player = audio_service.get_audio_player(interaction.guild.id)
             if not audio_player:
                 await interaction.response.send_message(
@@ -366,6 +433,10 @@ class MusicBot(commands.Bot):
         @self.tree.command(name="stop", description="Dừng và xóa hàng đợi")
         async def stop_music(interaction: discord.Interaction):
             """⏹️ Stop playback and clear queue"""
+            if not interaction.guild:
+                await interaction.response.send_message("❌ Chỉ sử dụng trong server!", ephemeral=True)
+                return
+                
             audio_player = audio_service.get_audio_player(interaction.guild.id)
             if not audio_player:
                 await interaction.response.send_message(
@@ -376,7 +447,7 @@ class MusicBot(commands.Bot):
             audio_player.stop()
             queue_manager = audio_service.get_queue_manager(interaction.guild.id)
             if queue_manager:
-                queue_manager.clear_queue()
+                queue_manager.clear()
 
             embed = discord.Embed(
                 title="Đã dừng",
@@ -388,6 +459,10 @@ class MusicBot(commands.Bot):
         @self.tree.command(name="queue", description="Hiển thị hàng đợi hiện tại")
         async def show_queue(interaction: discord.Interaction):
             """📋 Show current queue"""
+            if not interaction.guild:
+                await interaction.response.send_message("❌ Chỉ sử dụng trong server!", ephemeral=True)
+                return
+                
             queue_manager = audio_service.get_queue_manager(interaction.guild.id)
             if not queue_manager:
                 await interaction.response.send_message(
@@ -439,8 +514,12 @@ class MusicBot(commands.Bot):
 
         @self.tree.command(name="volume", description="Đặt âm lượng (0-100)")
         @app_commands.describe(volume="Âm lượng từ 0 đến 100")
-        async def set_volume(interaction: discord.Interaction, volume: int = None):
+        async def set_volume(interaction: discord.Interaction, volume: Optional[int] = None):
             """🔊 Set playback volume (0-100)"""
+            if not interaction.guild:
+                await interaction.response.send_message("❌ Chỉ sử dụng trong server!", ephemeral=True)
+                return
+                
             audio_player = audio_service.get_audio_player(interaction.guild.id)
             if not audio_player:
                 await interaction.response.send_message(
@@ -479,6 +558,10 @@ class MusicBot(commands.Bot):
         @self.tree.command(name="nowplaying", description="Hiển thị bài đang phát")
         async def now_playing(interaction: discord.Interaction):
             """🎵 Show currently playing song"""
+            if not interaction.guild:
+                await interaction.response.send_message("❌ Chỉ sử dụng trong server!", ephemeral=True)
+                return
+                
             audio_player = audio_service.get_audio_player(interaction.guild.id)
             if not audio_player or not audio_player.current_song:
                 await interaction.response.send_message(
@@ -558,6 +641,7 @@ class MusicBot(commands.Bot):
             }
             
             await interaction.response.send_message(f"Repeat mode set to: **{mode_names[mode.lower()]}**")
+
 
         @self.tree.command(name="help", description="Hiển thị thông tin trợ giúp")
         async def show_help(interaction: discord.Interaction):

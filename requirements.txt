@@ -1,7 +1,18 @@
-# Modern Music Bot Requirements
-# Clean, minimal dependencies for optimal performance
+# Discord Music Bot - Multi-platform Requirements
+# Optimized for both x86_64 and ARM64 architectures
 
+# Core Discord functionality
 discord.py
+
+# Audio processing with cross-platform support
 yt-dlp
 PyNaCl
+
+# Network and async support
 aiohttp
+
+# Environment management
+python-dotenv
+
+# System monitoring (optional but useful)
+psutil

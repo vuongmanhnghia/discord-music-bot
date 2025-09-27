@@ -1,5 +1,5 @@
 {
-  description = "Dev shell for lofi-music discord bot";
+  description = "Dev shell for Discord Music Bot";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

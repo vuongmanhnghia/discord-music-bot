@@ -2,10 +2,11 @@
 Audio service for Discord playback
 Clean integration with Discord.py voice system
 """
-
+import platform
+import os
 import asyncio
 import subprocess
-from typing import Dict, Optional, Callable
+from typing import Dict, Optional, Callable, Union
 import discord
 from discord import FFmpegPCMAudio, PCMVolumeTransformer
 
@@ -88,6 +89,17 @@ class AudioPlayer:
                         logger.warning(
                             f"Stream error detected for: {song.display_name}"
                         )
+                    # Check for voice connection errors
+                    elif "voice" in str(error).lower() or "websocket" in str(error).lower():
+                        logger.warning(f"Voice connection error detected: {error}")
+                        # Trigger error callback for reconnection handling
+                        if self.on_error:
+                            try:
+                                if self._loop:
+                                    self._loop.create_task(self.on_error(error, song))
+                            except Exception as e:
+                                logger.error(f"Error in error callback: {e}")
+                                
                 self._on_playback_finished(error, song)
 
             self.voice_client.play(audio_source, after=after_callback)
@@ -159,17 +171,47 @@ class AudioPlayer:
     def _create_audio_source(self, stream_url: str) -> Optional[discord.AudioSource]:
         """Create Discord audio source from stream URL with better error handling"""
         try:
-            # Enhanced FFmpeg options for better stream handling
-            ffmpeg_options = {
-                "before_options": "-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2 -timeout 30000000",
-                "options": "-vn -bufsize 64k -maxrate 128k -avoid_negative_ts make_zero",
-            }
+            # Smart FFmpeg options with automatic platform optimization    
+            arch = platform.machine()
+            
+            # Try to get system info, fallback to defaults if psutil not available
+            try:
+                import psutil
+                cpu_count = psutil.cpu_count(logical=False) or 1
+                memory_mb = psutil.virtual_memory().total // (1024 * 1024)
+            except ImportError:
+                cpu_count = os.cpu_count() or 1
+                # Estimate memory from container limits or assume moderate
+                memory_mb = 1024  # Default assumption
+            
+            # Base configuration
+            base_before_options = "-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2"
+            base_options = "-vn -avoid_negative_ts make_zero"
+            
+            # Platform-aware optimization
+            if arch in ['aarch64', 'arm64', 'armv7l'] or memory_mb < 2048:
+                # ARM/Low-memory optimization (Raspberry Pi)
+                threads = min(1, cpu_count)
+                buffer_size = "32k"
+                max_rate = "96k"
+                timeout = "20000000"
+                logger.debug(f"🍓 ARM/Low-mem optimization: {threads} threads, {buffer_size} buffer")
+            else:
+                # x86_64/High-memory optimization
+                threads = min(2, cpu_count)
+                buffer_size = "64k"
+                max_rate = "128k"
+                timeout = "30000000"
+                logger.debug(f"💻 x86_64/High-mem optimization: {threads} threads, {buffer_size} buffer")
+            
+            before_options = f"{base_before_options} -timeout {timeout}"
+            options = f"{base_options} -bufsize {buffer_size} -maxrate {max_rate} -threads {threads}"
 
             logger.debug(
-                f"Creating FFmpeg source with enhanced options: {ffmpeg_options}"
+                f"Creating FFmpeg source with enhanced options: before_options='{before_options}', options='{options}'"
             )
 
-            audio_source = FFmpegPCMAudio(stream_url, **ffmpeg_options)
+            audio_source = FFmpegPCMAudio(stream_url, before_options=before_options, options=options)
 
             # Apply volume transformation
             if self.volume != 1.0:
@@ -222,7 +264,7 @@ class AudioService:
         self._audio_players: Dict[int, AudioPlayer] = {}
         self._queue_managers: Dict[int, QueueManager] = {}
 
-    async def connect_to_channel(self, channel: discord.VoiceChannel) -> bool:
+    async def connect_to_channel(self, channel: Union[discord.VoiceChannel, discord.StageChannel]) -> bool:
         """Connect to a voice channel"""
         guild_id = channel.guild.id
 
@@ -231,8 +273,11 @@ class AudioService:
             if guild_id in self._voice_clients:
                 await self.disconnect_from_guild(guild_id)
 
+            logger.info(f"Attempting to connect to voice channel: {channel.name}")
+
             # Connect to new channel
             voice_client = await channel.connect()
+            
             self._voice_clients[guild_id] = voice_client
 
             # Create audio player
@@ -249,12 +294,15 @@ class AudioService:
                 self._queue_managers[guild_id] = QueueManager(guild_id)
 
             logger.info(
-                f"Connected to voice channel: {channel.name} in guild {guild_id}"
+                f"✅ Successfully connected to voice channel: {channel.name} in guild {guild_id}"
             )
             return True
 
+        except asyncio.TimeoutError:
+            logger.error(f"❌ Timeout connecting to voice channel {channel.name} (>35s)")
+            return False
         except Exception as e:
-            logger.error(f"Failed to connect to voice channel {channel.name}: {e}")
+            logger.error(f"❌ Failed to connect to voice channel {channel.name}: {e}")
             return False
 
     async def disconnect_from_guild(self, guild_id: int) -> bool:
@@ -355,7 +403,7 @@ class AudioService:
 
         # Get next song
         next_song = queue_manager.next_song()
-        
+
         if next_song and next_song.is_ready:
             await self.play_next_song(guild_id)
         else:

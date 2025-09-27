@@ -62,6 +62,10 @@ class PlaybackService:
 
             # Step 3: Add to queue after processing is complete
             queue_manager = audio_service.get_queue_manager(guild_id)
+            if not queue_manager:
+                logger.error(f"No queue manager found for guild {guild_id}")
+                return (False, "Lỗi hệ thống: Không tìm thấy queue manager", None)
+                
             position = queue_manager.add_song(song)
 
             logger.info(
@@ -205,7 +209,8 @@ class PlaybackService:
 
             success = audio_player.pause()
             if success:
-                return (True, f"Paused: **{audio_player.current_song.display_name}**")
+                song_name = audio_player.current_song.display_name if audio_player.current_song else "Unknown"
+                return (True, f"Paused: **{song_name}**")
             else:
                 return (False, "Failed to pause playback")
 
@@ -225,7 +230,8 @@ class PlaybackService:
 
             success = audio_player.resume()
             if success:
-                return (True, f"Resumed: **{audio_player.current_song.display_name}**")
+                song_name = audio_player.current_song.display_name if audio_player.current_song else "Unknown"
+                return (True, f"Resumed: **{song_name}**")
             else:
                 return (False, "Failed to resume playback")
 

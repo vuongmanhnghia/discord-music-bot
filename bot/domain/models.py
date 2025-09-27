@@ -265,23 +265,23 @@ class QueueManager:
         """Move to next song"""
         if self._repeat_mode == "song":
             return self.current_song
-        
+
         # Add current to history
         if self.current_song:
             self._history.append(self.current_song)
             # Limit history size
             if len(self._history) > 50:
                 self._history = self._history[-50:]
-        
+
         self._current_index += 1
-        
+
         if self._current_index >= len(self._songs):
             if self._repeat_mode == "queue":
                 self._current_index = 0
                 return self.current_song
             else:
                 return None
-        
+
         return self.current_song
 
     def previous_song(self) -> Optional[Song]:
