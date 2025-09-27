@@ -1,15 +1,12 @@
-"""
-Playback orchestration service
-Implements the complete playback flow as specified
-"""
-
 import asyncio
 from typing import Optional
 
-from ..domain.models import Song, InputAnalyzer, QueueManager
+from ..domain.entities.song import Song
+from ..domain.entities.input import InputAnalyzer
+
 from ..pkg.logger import logger
 from .processing import SongProcessingService
-from .audio import audio_service
+from .audio_service import audio_service
 
 
 class PlaybackService:
@@ -65,7 +62,7 @@ class PlaybackService:
             if not queue_manager:
                 logger.error(f"No queue manager found for guild {guild_id}")
                 return (False, "Lỗi hệ thống: Không tìm thấy queue manager", None)
-                
+
             position = queue_manager.add_song(song)
 
             logger.info(
@@ -209,7 +206,11 @@ class PlaybackService:
 
             success = audio_player.pause()
             if success:
-                song_name = audio_player.current_song.display_name if audio_player.current_song else "Unknown"
+                song_name = (
+                    audio_player.current_song.display_name
+                    if audio_player.current_song
+                    else "Unknown"
+                )
                 return (True, f"Paused: **{song_name}**")
             else:
                 return (False, "Failed to pause playback")
@@ -230,7 +231,11 @@ class PlaybackService:
 
             success = audio_player.resume()
             if success:
-                song_name = audio_player.current_song.display_name if audio_player.current_song else "Unknown"
+                song_name = (
+                    audio_player.current_song.display_name
+                    if audio_player.current_song
+                    else "Unknown"
+                )
                 return (True, f"Resumed: **{song_name}**")
             else:
                 return (False, "Failed to resume playback")
@@ -312,6 +317,4 @@ class PlaybackService:
 
 
 # Global playback service instance
-playback_service = PlaybackService()
-
 playback_service = PlaybackService()

@@ -5,7 +5,7 @@ from pathlib import Path
 from ..config.config import config
 
 
-def setup_logger(name: str = "discord-music-bot") -> logging.Logger:
+def setup_logger(name: str = config.BOT_NAME) -> logging.Logger:
     """Setup logger with config-based settings"""
     logger = logging.getLogger(name)
 

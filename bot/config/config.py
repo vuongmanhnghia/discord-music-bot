@@ -14,7 +14,7 @@ class Config:
     BOT_TOKEN: str = os.getenv("BOT_TOKEN") or ""
 
     # Optional with defaults
-    BOT_NAME: str = os.getenv("BOT_NAME", "Advanced Music Bot")
+    BOT_NAME: str = os.getenv("BOT_NAME", "Discord Music Bot")
     COMMAND_PREFIX: str = os.getenv("COMMAND_PREFIX", "!")
     PLAYLIST_DIR: str = os.getenv("PLAYLIST_DIR", "./playlist")
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
