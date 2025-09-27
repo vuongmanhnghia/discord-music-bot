@@ -8,3 +8,5 @@ venv/
 .direnv/
 
 TASK.md
+
+playlist/*

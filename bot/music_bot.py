@@ -14,6 +14,9 @@ from .config.config import config
 from .pkg.logger import logger
 from .services.audio_service import audio_service
 from .services.playback import playback_service
+from .services.playlist_service import PlaylistService
+from .domain.entities.library import LibraryManager
+from .domain.valueobjects.source_type import SourceType
 
 
 class MusicBot(commands.Bot):
@@ -29,6 +32,13 @@ class MusicBot(commands.Bot):
             help_command=None,
             description="Modern Music Bot with intelligent processing",
         )
+
+        # Initialize playlist services
+        self.library_manager = LibraryManager()
+        self.playlist_service = PlaylistService(self.library_manager)
+
+        # Track current active playlist for each guild
+        self.active_playlists: dict[int, str] = {}
 
         # Setup commands
         self._setup_commands()
@@ -209,6 +219,17 @@ class MusicBot(commands.Bot):
     def _setup_commands(self):
         """Setup all bot slash commands with clean implementation"""
 
+        @self.tree.command(name="ping", description="Kiểm tra độ trễ bot")
+        async def ping_bot(interaction: discord.Interaction):
+            """🏓 Check bot latency"""
+            latency_ms = int(self.latency * 1000)
+            embed = discord.Embed(
+                title="🏓 Pong!",
+                description=f"Độ trễ bot: {latency_ms}ms",
+                color=discord.Color.blue(),
+            )
+            await interaction.response.send_message(embed=embed)
+
         @self.tree.command(name="join", description="Tham gia voice channel")
         async def join_voice(interaction: discord.Interaction):
             """Join your voice channel"""
@@ -270,13 +291,20 @@ class MusicBot(commands.Bot):
                 )
             await interaction.response.send_message(embed=embed)
 
-        @self.tree.command(name="play", description="Phát nhạc từ URL hoặc tìm kiếm")
-        @app_commands.describe(query="URL hoặc từ khóa tìm kiếm")
+        @self.tree.command(
+            name="play",
+            description="Phát nhạc từ URL/tìm kiếm hoặc từ playlist hiện tại",
+        )
+        @app_commands.describe(
+            query="URL hoặc từ khóa tìm kiếm (để trống để phát từ playlist hiện tại)"
+        )
         @app_commands.checks.cooldown(
             1, 3.0, key=lambda i: (i.guild_id, i.user.id)
         )  # 3 second cooldown per user per guild
-        async def play_music(interaction: discord.Interaction, query: str):
-            """▶️ Play music from URL or search query"""
+        async def play_music(
+            interaction: discord.Interaction, query: Optional[str] = None
+        ):
+            """▶️ Play music from URL/search query or from active playlist"""
             if not interaction.guild:
                 await interaction.response.send_message(
                     "❌ Chỉ sử dụng trong server!", ephemeral=True
@@ -305,10 +333,51 @@ class MusicBot(commands.Bot):
                     )
                     return
 
-            # Send processing message
-            await interaction.response.send_message(
-                f"**{query[:50]}{'...' if len(query) > 50 else ''}**"
-            )
+            # Handle two modes: with query or from active playlist
+            if query:
+                # Mode 1: Play from URL/search query (existing logic)
+                await interaction.response.send_message(
+                    f"🔍 **{query[:50]}{'...' if len(query) > 50 else ''}**"
+                )
+            else:
+                # Mode 2: Play from active playlist
+                guild_id = interaction.guild.id
+                active_playlist = self.active_playlists.get(guild_id)
+
+                if not active_playlist:
+                    await interaction.response.send_message(
+                        "❌ Chưa có playlist nào được chọn! Sử dụng `/use <playlist>` trước hoặc cung cấp query để tìm kiếm.",
+                        ephemeral=True,
+                    )
+                    return
+
+                queue_manager = audio_service.get_queue_manager(guild_id)
+                if not queue_manager:
+                    await interaction.response.send_message(
+                        "❌ Không tìm thấy queue manager!", ephemeral=True
+                    )
+                    return
+
+                await interaction.response.defer()
+
+                # Load more songs from active playlist
+                success, message = await self.playlist_service.load_playlist_to_queue(
+                    active_playlist, queue_manager, str(interaction.user), guild_id
+                )
+
+                if success:
+                    embed = discord.Embed(
+                        title="✅ Đã thêm từ playlist",
+                        description=f"📋 **{active_playlist}**\n{message}",
+                        color=discord.Color.green(),
+                    )
+                else:
+                    embed = discord.Embed(
+                        title="❌ Lỗi", description=message, color=discord.Color.red()
+                    )
+
+                await interaction.followup.send(embed=embed)
+                return
 
             try:
                 # Process the play request
@@ -692,6 +761,279 @@ class MusicBot(commands.Bot):
                 f"Repeat mode set to: **{mode_names[mode.lower()]}**"
             )
 
+        # ===============================
+        # PLAYLIST COMMANDS
+        # ===============================
+
+        @self.tree.command(
+            name="use", description="Chuyển sang playlist và nạp vào queue"
+        )
+        @app_commands.describe(playlist_name="Tên playlist cần nạp")
+        async def use_playlist(interaction: discord.Interaction, playlist_name: str):
+            """🎵 Load playlist into queue"""
+            if not interaction.guild:
+                await interaction.response.send_message(
+                    "❌ Chỉ sử dụng trong server!", ephemeral=True
+                )
+                return
+
+            # Check if bot is connected to voice
+            if not audio_service.is_connected(interaction.guild.id):
+                await interaction.response.send_message(
+                    "❌ Bot cần kết nối voice channel trước! Sử dụng `/join`",
+                    ephemeral=True,
+                )
+                return
+
+            queue_manager = audio_service.get_queue_manager(interaction.guild.id)
+            if not queue_manager:
+                await interaction.response.send_message(
+                    "❌ Không tìm thấy queue manager!", ephemeral=True
+                )
+                return
+
+            await interaction.response.defer()
+
+            success, message = await self.playlist_service.load_playlist_to_queue(
+                playlist_name,
+                queue_manager,
+                str(interaction.user),
+                interaction.guild.id,
+            )
+
+            if success:
+                # Track the active playlist for this guild
+                self.active_playlists[interaction.guild.id] = playlist_name
+
+                embed = discord.Embed(
+                    title="✅ Đã nạp playlist",
+                    description=message
+                    + f"\n🎵 Playlist hiện tại: **{playlist_name}**",
+                    color=discord.Color.green(),
+                )
+            else:
+                embed = discord.Embed(
+                    title="❌ Lỗi", description=message, color=discord.Color.red()
+                )
+
+            await interaction.followup.send(embed=embed)
+
+        @self.tree.command(name="create", description="Tạo playlist mới")
+        @app_commands.describe(name="Tên playlist")
+        async def create_playlist(interaction: discord.Interaction, name: str):
+            """📝 Create new playlist"""
+            success, message = self.playlist_service.create_playlist(name)
+
+            if success:
+                embed = discord.Embed(
+                    title="✅ Tạo thành công",
+                    description=message,
+                    color=discord.Color.green(),
+                )
+            else:
+                embed = discord.Embed(
+                    title="❌ Lỗi", description=message, color=discord.Color.red()
+                )
+
+            await interaction.response.send_message(embed=embed)
+
+        @self.tree.command(name="add", description="Thêm bài hát vào playlist hiện tại")
+        @app_commands.describe(song_input="URL hoặc tên bài hát")
+        async def add_to_active_playlist(
+            interaction: discord.Interaction, song_input: str
+        ):
+            """➕ Add song to active playlist"""
+            if not interaction.guild:
+                await interaction.response.send_message(
+                    "❌ Chỉ sử dụng trong server!", ephemeral=True
+                )
+                return
+
+            # Check if there's an active playlist
+            guild_id = interaction.guild.id
+            active_playlist = self.active_playlists.get(guild_id)
+
+            if not active_playlist:
+                await interaction.response.send_message(
+                    "❌ Chưa có playlist nào được chọn! Sử dụng `/use <playlist>` trước hoặc sử dụng `/addto <playlist> <song>`",
+                    ephemeral=True,
+                )
+                return
+
+            # Detect source type from input
+            source_type = SourceType.YOUTUBE  # Default
+            if "spotify.com" in song_input:
+                source_type = SourceType.SPOTIFY
+            elif "soundcloud.com" in song_input:
+                source_type = SourceType.SOUNDCLOUD
+            elif not ("http://" in song_input or "https://" in song_input):
+                source_type = SourceType.SEARCH_QUERY
+
+            success, message = self.playlist_service.add_to_playlist(
+                active_playlist, song_input, source_type, song_input
+            )
+
+            if success:
+                embed = discord.Embed(
+                    title="✅ Đã thêm vào playlist hiện tại",
+                    description=f"📋 **{active_playlist}**\n{message}",
+                    color=discord.Color.green(),
+                )
+            else:
+                embed = discord.Embed(
+                    title="❌ Lỗi", description=message, color=discord.Color.red()
+                )
+
+            await interaction.response.send_message(embed=embed)
+
+        @self.tree.command(
+            name="addto", description="Thêm bài hát vào playlist chỉ định"
+        )
+        @app_commands.describe(
+            playlist_name="Tên playlist", song_input="URL hoặc tên bài hát"
+        )
+        async def add_to_specific_playlist(
+            interaction: discord.Interaction, playlist_name: str, song_input: str
+        ):
+            """➕ Add song to specific playlist"""
+            # Detect source type from input
+            source_type = SourceType.YOUTUBE  # Default
+            if "spotify.com" in song_input:
+                source_type = SourceType.SPOTIFY
+            elif "soundcloud.com" in song_input:
+                source_type = SourceType.SOUNDCLOUD
+            elif not ("http://" in song_input or "https://" in song_input):
+                source_type = SourceType.SEARCH_QUERY
+
+            success, message = self.playlist_service.add_to_playlist(
+                playlist_name, song_input, source_type, song_input
+            )
+
+            if success:
+                embed = discord.Embed(
+                    title="✅ Đã thêm vào playlist",
+                    description=message,
+                    color=discord.Color.green(),
+                )
+            else:
+                embed = discord.Embed(
+                    title="❌ Lỗi", description=message, color=discord.Color.red()
+                )
+
+            await interaction.response.send_message(embed=embed)
+
+        @self.tree.command(name="remove", description="Xóa bài hát khỏi playlist")
+        @app_commands.describe(
+            playlist_name="Tên playlist", index="Số thứ tự bài hát (bắt đầu từ 1)"
+        )
+        async def remove_from_playlist(
+            interaction: discord.Interaction, playlist_name: str, index: int
+        ):
+            """➖ Remove song from playlist"""
+            success, message = self.playlist_service.remove_from_playlist(
+                playlist_name, index
+            )
+
+            if success:
+                embed = discord.Embed(
+                    title="✅ Đã xóa khỏi playlist",
+                    description=message,
+                    color=discord.Color.green(),
+                )
+            else:
+                embed = discord.Embed(
+                    title="❌ Lỗi", description=message, color=discord.Color.red()
+                )
+
+            await interaction.response.send_message(embed=embed)
+
+        @self.tree.command(name="playlists", description="Liệt kê tất cả playlist")
+        async def list_playlists(interaction: discord.Interaction):
+            """📋 List all playlists"""
+            playlists = self.playlist_service.list_playlists()
+
+            if not playlists:
+                embed = discord.Embed(
+                    title="📋 Danh sách playlist",
+                    description="Chưa có playlist nào. Sử dụng `/create` để tạo playlist mới.",
+                    color=discord.Color.blue(),
+                )
+            else:
+                playlist_text = "\n".join([f"• {name}" for name in playlists])
+                embed = discord.Embed(
+                    title="📋 Danh sách playlist",
+                    description=playlist_text,
+                    color=discord.Color.blue(),
+                )
+                embed.set_footer(text=f"Tổng: {len(playlists)} playlist")
+
+            await interaction.response.send_message(embed=embed)
+
+        @self.tree.command(name="playlist", description="Hiển thị nội dung playlist")
+        @app_commands.describe(name="Tên playlist")
+        async def show_playlist(interaction: discord.Interaction, name: str):
+            """📄 Show playlist contents"""
+            playlist_info = self.playlist_service.get_playlist_info(name)
+
+            if not playlist_info:
+                embed = discord.Embed(
+                    title="❌ Không tìm thấy",
+                    description=f"Playlist '{name}' không tồn tại.",
+                    color=discord.Color.red(),
+                )
+            else:
+                embed = discord.Embed(
+                    title=f"📄 Playlist: {playlist_info['name']}",
+                    color=discord.Color.blue(),
+                )
+
+                embed.add_field(
+                    name="Thông tin",
+                    value=f"Tổng số bài: {playlist_info['total_songs']}\n"
+                    f"Tạo: {playlist_info['created_at'].strftime('%d/%m/%Y %H:%M')}\n"
+                    f"Cập nhật: {playlist_info['updated_at'].strftime('%d/%m/%Y %H:%M')}",
+                    inline=False,
+                )
+
+                if playlist_info["entries"]:
+                    songs_text = ""
+                    for i, entry in enumerate(playlist_info["entries"][:10], 1):
+                        songs_text += f"{i}. {entry['title'][:50]}{'...' if len(entry['title']) > 50 else ''}\n"
+
+                    if len(playlist_info["entries"]) > 10:
+                        songs_text += (
+                            f"... và {len(playlist_info['entries']) - 10} bài khác"
+                        )
+
+                    embed.add_field(
+                        name="Bài hát", value=songs_text or "Trống", inline=False
+                    )
+                else:
+                    embed.add_field(
+                        name="Bài hát", value="Playlist trống", inline=False
+                    )
+
+            await interaction.response.send_message(embed=embed)
+
+        @self.tree.command(name="delete", description="Xóa playlist")
+        @app_commands.describe(name="Tên playlist cần xóa")
+        async def delete_playlist(interaction: discord.Interaction, name: str):
+            """🗑️ Delete playlist"""
+            success, message = self.playlist_service.delete_playlist(name)
+
+            if success:
+                embed = discord.Embed(
+                    title="✅ Đã xóa playlist",
+                    description=message,
+                    color=discord.Color.green(),
+                )
+            else:
+                embed = discord.Embed(
+                    title="❌ Lỗi", description=message, color=discord.Color.red()
+                )
+
+            await interaction.response.send_message(embed=embed)
+
         @self.tree.command(name="help", description="Hiển thị thông tin trợ giúp")
         async def show_help(interaction: discord.Interaction):
             """❓ Show help information"""
@@ -706,31 +1048,55 @@ class MusicBot(commands.Bot):
                 f"> `/leave` - Rời voice channel",
             ]
 
-            embed.add_field(name="", value="\n".join(connection_cmds), inline=False)
+            embed.add_field(
+                name="🔗 Kết nối", value="\n".join(connection_cmds), inline=False
+            )
+
+            # Playlist commands
+            playlist_cmds = [
+                f"> `/use <playlist>`     - Nạp playlist vào queue",
+                f"> `/create <name>`      - Tạo playlist mới",
+                f"> `/add <song>`         - Thêm bài vào playlist hiện tại",
+                f"> `/addto <name> <song>` - Thêm bài vào playlist chỉ định",
+                f"> `/remove <name> <#>`  - Xóa bài khỏi playlist",
+                f"> `/playlists`          - Liệt kê tất cả playlist",
+                f"> `/playlist <name>`    - Hiển thị playlist",
+                f"> `/delete <name>`      - Xóa playlist",
+            ]
+
+            embed.add_field(
+                name="🎵 Playlist", value="\n".join(playlist_cmds), inline=False
+            )
 
             # Playback commands
             playback_cmds = [
-                f"> `/play <query>` - Phát nhạc (URL hoặc tìm kiếm)",
-                f"> `/pause`        - Tạm dừng phát",
-                f"> `/resume`       - Tiếp tục phát",
-                f"> `/skip`         - Bỏ qua bài hiện tại",
-                f"> `/stop`         - Dừng và xóa hàng đợi",
+                f"> `/play`           - Phát từ playlist hiện tại",
+                f"> `/play <query>`   - Phát nhạc từ URL/tìm kiếm",
+                f"> `/pause`          - Tạm dừng phát",
+                f"> `/resume`         - Tiếp tục phát",
+                f"> `/skip`           - Bỏ qua bài hiện tại",
+                f"> `/stop`           - Dừng và xóa hàng đợi",
             ]
 
-            embed.add_field(name="", value="\n".join(playback_cmds), inline=False)
+            embed.add_field(
+                name="▶️ Điều khiển", value="\n".join(playback_cmds), inline=False
+            )
 
             # Queue commands
             queue_cmds = [
                 f"> `/queue`          - Hiển thị hàng đợi hiện tại",
                 f"> `/nowplaying`     - Hiển thị bài hiện tại",
                 f"> `/volume <0-100>` - Đặt âm lượng",
+                f"> `/repeat <mode>`  - Đặt chế độ lặp",
             ]
 
-            embed.add_field(name="", value="\n".join(queue_cmds), inline=False)
+            embed.add_field(
+                name="📋 Hàng đợi", value="\n".join(queue_cmds), inline=False
+            )
 
             embed.add_field(
-                name="",
-                value="• YouTube URLs\n• Spotify URLs (chuyển đổi thành YouTube)\n• Tìm kiếm\n• SoundCloud URLs",
+                name="🎶 Nguồn hỗ trợ",
+                value="• YouTube URLs\n• Spotify URLs (chuyển đổi thành YouTube)\n• Tìm kiếm từ khóa\n• SoundCloud URLs",
                 inline=False,
             )
 
