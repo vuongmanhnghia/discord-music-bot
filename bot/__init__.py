@@ -1,3 +1,3 @@
-"""Discord Music Bot - Clean modular architecture"""
+"""Discord Music Bot"""
 
-__version__ = "2.0.0"
+__version__ = "1.0.0"

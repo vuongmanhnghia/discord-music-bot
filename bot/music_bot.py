@@ -10,8 +10,8 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
-from .config import config
-from .logger import logger
+from .config.config import config
+from .pkg.logger import logger
 from .services.audio import audio_service
 from .services.playback import playback_service
 

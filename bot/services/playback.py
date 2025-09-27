@@ -7,7 +7,7 @@ import asyncio
 from typing import Optional
 
 from ..domain.models import Song, InputAnalyzer, QueueManager
-from ..logger import logger
+from ..pkg.logger import logger
 from .processing import SongProcessingService
 from .audio import audio_service
 

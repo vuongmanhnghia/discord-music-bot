@@ -3,6 +3,11 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
+      args:
+        - TARGETPLATFORM=${DOCKER_PLATFORM:-linux/amd64}
+        - BUILDPLATFORM=${BUILDPLATFORM:-linux/amd64}
+        - TARGETARCH=${TARGETARCH:-amd64}
+    platform: ${DOCKER_PLATFORM:-linux/amd64}
     container_name: discord-music-bot
     restart: unless-stopped
     env_file:

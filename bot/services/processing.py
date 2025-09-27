@@ -12,7 +12,7 @@ from typing import Optional, Dict, Any, List
 from urllib.parse import urlparse, parse_qs
 
 from ..domain.models import Song, SongMetadata, SongProcessor, SourceType
-from ..logger import logger
+from ..pkg.logger import logger
 
 
 class SpotifyService(SongProcessor):

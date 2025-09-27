@@ -11,7 +11,7 @@ import discord
 from discord import FFmpegPCMAudio, PCMVolumeTransformer
 
 from ..domain.models import Song, QueueManager
-from ..logger import logger
+from ..pkg.logger import logger
 
 
 class AudioPlayer:

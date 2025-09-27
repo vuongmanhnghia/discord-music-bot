@@ -3,7 +3,7 @@ import os
 import discord
 import glob
 from bot.music_bot import MusicBot
-from bot.logger import setup_logger
+from bot.pkg.logger import setup_logger
 
 logger = setup_logger(__name__)
 

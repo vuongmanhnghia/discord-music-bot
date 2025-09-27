@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Optional, Dict, Any, List
 from urllib.parse import urlparse
 
-from ..logger import logger
+from ..pkg.logger import logger
 
 
 class SourceType(Enum):

@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from .config import config
+from ..config.config import config
 
 
 def setup_logger(name: str = "discord-music-bot") -> logging.Logger:
