@@ -118,6 +118,85 @@ discord-music-bot/
 └── build-multiplatform.sh # Multi-platform build script
 ```
 
+## 🎵 Features & Commands
+
+### Enhanced Playlist System
+
+This bot features a sophisticated playlist system with clean architecture and intelligent command workflows:
+
+#### Core Features
+
+-   **Persistent Storage**: Playlists saved as JSON files
+-   **Active Playlist Tracking**: One active playlist per Discord server
+-   **Smart Commands**: Intelligent parameter detection and workflow optimization
+-   **Auto-Playback**: Enhanced `/play` command with playlist integration
+
+#### Playlist Commands
+
+```
+/create <name>              Create new playlist
+/add <song>                 Add song to active playlist
+/addto <playlist> <song>    Add song to specific playlist
+/remove <playlist> <index>  Remove song by index
+/use <playlist>             Set active playlist & load to queue
+/playlist <name>            Show playlist contents
+/playlists                  List all playlists
+/delete <name>              Delete playlist
+```
+
+#### Enhanced /play Command
+
+```
+/play                       Auto-play from active playlist (NEW!)
+/play <query>               Search/URL play (existing behavior)
+```
+
+**Key Enhancement**: `/play` without parameters now automatically plays from your active playlist, eliminating the need to manually copy URLs!
+
+#### Music Control Commands
+
+```
+/join                       Join your voice channel
+/leave                      Leave voice channel
+/pause                      Pause current song
+/resume                     Resume playback
+/skip                       Skip to next song
+/stop                       Stop and clear queue
+/queue                      Show current queue
+/nowplaying                 Show current song info
+/volume <0-100>             Set playback volume
+/repeat <mode>              Set repeat mode (off/song/queue)
+```
+
+### Supported Audio Sources
+
+-   **YouTube URLs**: Direct video links
+-   **Spotify URLs**: Automatically converted to YouTube
+-   **SoundCloud URLs**: Direct SoundCloud links
+-   **Search Queries**: Find songs by title/artist
+
+### Workflow Examples
+
+#### Basic Playlist Usage
+
+```
+/create my_favorites        # Create new playlist
+/addto my_favorites https://youtube.com/watch?v=abc123
+/addto my_favorites never gonna give you up
+/use my_favorites          # Set as active & load to queue
+/play                      # Auto-start playing!
+```
+
+#### Enhanced Workflow
+
+```
+/use rock_playlist         # Load rock playlist as active
+/play                      # Start from rock playlist
+/play bohemian rhapsody    # Search for specific song
+/add stairway to heaven    # Add to active rock playlist
+/play                      # Resume from rock playlist
+```
+
 ## 🔧 Configuration
 
 ### Platform-Specific Optimizations
@@ -184,16 +263,18 @@ python run_bot.py
 The Dockerfile uses a sophisticated multi-stage build approach for optimal image size and performance:
 
 #### Stage 1: Builder (`python:3.12-slim AS builder`)
-- **Purpose**: Compile dependencies and create wheels
-- **Includes**: Full build toolchain (gcc, g++, make, pkg-config)
-- **Platform optimization**: ARM64-specific cross-compilation tools
-- **Output**: Pre-compiled Python wheels for all dependencies
 
-#### Stage 2: Runtime (`python:3.12-slim AS runtime`)  
-- **Purpose**: Minimal production environment
-- **Includes**: Only runtime libraries (no build tools)
-- **Size**: ~70% smaller than single-stage builds
-- **Security**: Non-root user execution
+-   **Purpose**: Compile dependencies and create wheels
+-   **Includes**: Full build toolchain (gcc, g++, make, pkg-config)
+-   **Platform optimization**: ARM64-specific cross-compilation tools
+-   **Output**: Pre-compiled Python wheels for all dependencies
+
+#### Stage 2: Runtime (`python:3.12-slim AS runtime`)
+
+-   **Purpose**: Minimal production environment
+-   **Includes**: Only runtime libraries (no build tools)
+-   **Size**: ~70% smaller than single-stage builds
+-   **Security**: Non-root user execution
 
 ### Build Process Benefits
 
@@ -204,10 +285,10 @@ The Dockerfile uses a sophisticated multi-stage build approach for optimal image
 
 ### Image Specifications
 
-- **Base**: `python:3.12-slim` (Debian-based for better compatibility)
-- **Final size**: ~200MB (vs ~400MB+ single-stage)
-- **Security**: Non-root user (`bot:1000`)
-- **Optimization**: Platform-specific compiler flags
+-   **Base**: `python:3.12-slim` (Debian-based for better compatibility)
+-   **Final size**: ~200MB (vs ~400MB+ single-stage)
+-   **Security**: Non-root user (`bot:1000`)
+-   **Optimization**: Platform-specific compiler flags
 
 ### Volume Mounts
 

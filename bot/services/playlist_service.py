@@ -6,6 +6,7 @@ from ..domain.entities.queue import QueueManager
 from ..domain.entities.song import Song
 from ..domain.valueobjects.source_type import SourceType
 from ..domain.valueobjects.song_status import SongStatus
+from ..pkg.logger import logger
 
 
 class PlaylistService:
@@ -27,10 +28,23 @@ class PlaylistService:
             return False, f"Playlist '{playlist_name}' not found"
 
         if playlist.total_songs == 0:
-            return False, f"Playlist '{playlist_name}' is empty"
+            return (
+                True,
+                f"Playlist '{playlist_name}' is empty. Use `/add <song>` to add songs first.",
+            )
 
-        # Convert playlist entries to Song objects
+        # Convert playlist entries to Song objects and process them
         added_count = 0
+        processing_service = None
+
+        # Import processing service (lazy import to avoid circular dependency)
+        try:
+            from .processing import SongProcessingService
+
+            processing_service = SongProcessingService()
+        except ImportError:
+            logger.error("Failed to import SongProcessingService")
+
         for entry in playlist.entries:
             song = Song(
                 original_input=entry.original_input,
@@ -39,6 +53,21 @@ class PlaylistService:
                 requested_by=requested_by,
                 guild_id=guild_id,
             )
+
+            # Process song to get metadata and stream_url (like in play_request)
+            if processing_service:
+                try:
+                    success = await processing_service.process_song(song)
+                    if not success:
+                        logger.warning(
+                            f"Failed to process playlist song: {song.original_input}"
+                        )
+                        # Still add to queue even if processing failed
+                except Exception as e:
+                    logger.error(
+                        f"Error processing playlist song {song.original_input}: {e}"
+                    )
+
             queue_manager.add_song(song)
             added_count += 1
 

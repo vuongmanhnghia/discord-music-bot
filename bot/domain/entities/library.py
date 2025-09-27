@@ -85,3 +85,7 @@ class LibraryManager:
 
         playlist.clear()
         return self.save_playlist(playlist)
+
+    def exists(self, playlist_name: str) -> bool:
+        """Check if a playlist exists"""
+        return self._repository.exists(playlist_name)

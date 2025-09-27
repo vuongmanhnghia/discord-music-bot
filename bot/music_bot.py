@@ -367,10 +367,38 @@ class MusicBot(commands.Bot):
 
                 if success:
                     embed = discord.Embed(
-                        title="✅ Đã thêm từ playlist",
+                        title="✅ Đã nạp playlist",
                         description=f"📋 **{active_playlist}**\n{message}",
                         color=discord.Color.green(),
                     )
+
+                    # Auto-start playing if not currently playing
+                    audio_player = audio_service.get_audio_player(guild_id)
+                    if audio_player and not audio_player.is_playing:
+                        # Start playing the first song in queue
+                        try:
+                            started = await audio_service.play_next_song(guild_id)
+                            if started:
+                                embed.add_field(
+                                    name="🎵 Trạng thái",
+                                    value="Đã bắt đầu phát nhạc!",
+                                    inline=False,
+                                )
+                            else:
+                                embed.add_field(
+                                    name="⚠️ Lưu ý",
+                                    value="Đã thêm vào queue, nhưng chưa có bài nào sẵn sàng phát",
+                                    inline=False,
+                                )
+                        except Exception as e:
+                            logger.error(
+                                f"Failed to start playback after loading playlist: {e}"
+                            )
+                            embed.add_field(
+                                name="⚠️ Lưu ý",
+                                value="Đã thêm vào queue, có lỗi khi bắt đầu phát",
+                                inline=False,
+                            )
                 else:
                     embed = discord.Embed(
                         title="❌ Lỗi", description=message, color=discord.Color.red()
@@ -802,15 +830,25 @@ class MusicBot(commands.Bot):
             )
 
             if success:
-                # Track the active playlist for this guild
+                # Always track the active playlist for this guild, even if empty
                 self.active_playlists[interaction.guild.id] = playlist_name
 
-                embed = discord.Embed(
-                    title="✅ Đã nạp playlist",
-                    description=message
-                    + f"\n🎵 Playlist hiện tại: **{playlist_name}**",
-                    color=discord.Color.green(),
-                )
+                # Check if playlist was empty
+                if "is empty" in message:
+                    embed = discord.Embed(
+                        title="✅ Đã chọn playlist trống",
+                        description=f"📋 **{playlist_name}** đã được đặt làm playlist hiện tại\n"
+                        + f"⚠️ {message}\n"
+                        + f"💡 Sử dụng `/add <song>` để thêm bài hát",
+                        color=discord.Color.orange(),
+                    )
+                else:
+                    embed = discord.Embed(
+                        title="✅ Đã nạp playlist",
+                        description=message
+                        + f"\n🎵 Playlist hiện tại: **{playlist_name}**",
+                        color=discord.Color.green(),
+                    )
             else:
                 embed = discord.Embed(
                     title="❌ Lỗi", description=message, color=discord.Color.red()
