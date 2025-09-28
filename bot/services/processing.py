@@ -197,20 +197,23 @@ class YouTubeService(SongProcessor):
 
             # Extract metadata and stream URL
             result = await self._extract_youtube_data(search_query)
-            if not result:
-                song.mark_failed("Failed to extract YouTube data")
-                return False
 
-            metadata, stream_url = result
+            if result:
+                metadata, stream_url = result
+                self._cache[cache_key] = result
+                song.mark_ready(metadata, stream_url)
+                return True
 
-            # Cache the result
-            self._cache[cache_key] = result
+            # Fallback: Basic info extraction
+            logger.warning("Full extraction failed, trying basic extraction...")
+            basic_result = await self._extract_basic_info(search_query)
 
-            # Mark as ready
-            song.mark_ready(metadata, stream_url)
+            if basic_result:
+                song.mark_ready(basic_result, "")  # No stream URL yet
+                return True
 
-            logger.info(f"Successfully processed YouTube: {metadata.display_name}")
-            return True
+            song.mark_failed("Failed to extract YouTube data")
+            return False
 
         except Exception as e:
             logger.error(f"Error processing YouTube {song.original_input}: {e}")
@@ -254,84 +257,110 @@ class YouTubeService(SongProcessor):
             return False
 
     async def _extract_youtube_data(
-        self, query: str
+        self, query: str, max_retries: int = 3
     ) -> Optional[tuple[SongMetadata, str]]:
-        """Extract both metadata and stream URL from YouTube"""
-        try:
-            # First get metadata
-            metadata_cmd = [
-                "yt-dlp",
-                "--dump-json",
-                "--no-playlist",
-                "--quiet",
-                "--no-warnings",
-                "--ignore-errors",
-                "--skip-download",
-                query,
-            ]
+        """Extract both metadata and stream URL from YouTube with retries"""
 
-            metadata_process = await asyncio.create_subprocess_exec(
-                *metadata_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+        for attempt in range(max_retries):
+            try:
+                # Increase timeout based on attempt
+                timeout = 30 + (attempt * 15)  # 30s, 45s, 60s
 
-            stdout, stderr = await asyncio.wait_for(
-                metadata_process.communicate(), timeout=30
-            )
+                # Faster metadata extraction
+                metadata_cmd = [
+                    "yt-dlp",
+                    "--dump-json",
+                    "--no-playlist",
+                    "--quiet",
+                    "--no-warnings",
+                    "--ignore-errors",
+                    "--skip-download",
+                    "--no-check-certificate",  # Skip cert checks
+                    "--socket-timeout",
+                    "20",  # Socket timeout
+                    "--fragment-retries",
+                    "3",  # Retry fragments
+                    "--retries",
+                    "3",  # Retry requests
+                    "--concurrent-fragments",
+                    "1",  # Reduce concurrency
+                    query,
+                ]
 
-            if metadata_process.returncode != 0:
-                logger.warning(f"yt-dlp metadata extraction failed: {stderr.decode()}")
+                metadata_process = await asyncio.create_subprocess_exec(
+                    *metadata_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+
+                stdout, stderr = await asyncio.wait_for(
+                    metadata_process.communicate(), timeout=timeout
+                )
+
+                if metadata_process.returncode != 0:
+                    logger.warning(
+                        f"yt-dlp metadata extraction failed: {stderr.decode()}"
+                    )
+                    return None
+
+                if not stdout.strip():
+                    logger.warning("Empty metadata response from yt-dlp")
+                    return None
+
+                # Parse metadata
+                info = json.loads(stdout.decode())
+                metadata = self._parse_youtube_metadata(info)
+                if not metadata:
+                    return None
+
+                # Get stream URL
+                stream_url = await self._get_stream_url(query)
+                if not stream_url:
+                    logger.error("Failed to get YouTube stream URL")
+                    return None
+
+                return (metadata, stream_url)
+
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Timeout attempt {attempt + 1}/{max_retries} for: {query}"
+                )
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2**attempt)  # exponential backoff: 1s, 2s, 4s
+                    continue
+                logger.error("Final timeout extracting YouTube data")
                 return None
-
-            if not stdout.strip():
-                logger.warning("Empty metadata response from yt-dlp")
+            except Exception as e:
+                logger.error(f"Unexpected error on attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1)
+                    continue
                 return None
-
-            # Parse metadata
-            info = json.loads(stdout.decode())
-            metadata = self._parse_youtube_metadata(info)
-            if not metadata:
-                return None
-
-            # Get stream URL
-            stream_url = await self._get_stream_url(query)
-            if not stream_url:
-                logger.error("Failed to get YouTube stream URL")
-                return None
-
-            return (metadata, stream_url)
-
-        except asyncio.TimeoutError:
-            logger.error("Timeout extracting YouTube data")
-            return None
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse YouTube metadata JSON: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error extracting YouTube data: {e}")
-            return None
 
     async def _get_stream_url(self, query: str) -> Optional[str]:
-        """Get direct stream URL from YouTube optimized for Discord"""
+        """Extract stream URL with better format selection"""
         try:
-            # Try with specific format for better compatibility
-            cmd = [
+            # Better format selection for audio streaming
+            stream_cmd = [
                 "yt-dlp",
                 "--get-url",
-                "--format",
-                "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
                 "--no-playlist",
-                "--no-check-certificate",
                 "--quiet",
                 "--no-warnings",
-                "--user-agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "--format",
+                "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",  # Better format fallback
+                "--no-check-certificate",
+                "--socket-timeout",
+                "20",
+                "--retries",
+                "3",
                 query,
             ]
 
             process = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *stream_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
 
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
@@ -340,18 +369,15 @@ class YouTubeService(SongProcessor):
                 logger.error(f"Failed to get stream URL: {stderr.decode()}")
                 return None
 
-            stream_url = stdout.decode().strip()
-            if stream_url:
-                logger.debug("Successfully obtained YouTube stream URL")
-                return stream_url
+            url = stdout.decode().strip()
+            if url:
+                logger.info("Successfully extracted stream URL")
+                return url
 
             return None
 
-        except asyncio.TimeoutError:
-            logger.error("Timeout getting YouTube stream URL")
-            return None
         except Exception as e:
-            logger.error(f"Error getting YouTube stream URL: {e}")
+            logger.error(f"Error extracting stream URL: {e}")
             return None
 
     def _parse_youtube_metadata(self, info: Dict[str, Any]) -> Optional[SongMetadata]:
@@ -381,6 +407,58 @@ class YouTubeService(SongProcessor):
         except Exception as e:
             logger.error(f"Error parsing YouTube metadata: {e}")
             return None
+
+    async def _extract_basic_info(self, query: str) -> Optional[SongMetadata]:
+        """Fallback: Extract basic info when full extraction fails"""
+        try:
+            # Simplified extraction with basic format
+            cmd = [
+                "yt-dlp",
+                "--dump-json",
+                "--no-playlist",
+                "--quiet",
+                "--no-warnings",
+                "--ignore-errors",
+                "--skip-download",
+                "--format",
+                "worst",  # Use worst quality for basic info
+                "--socket-timeout",
+                "15",
+                query,
+            ]
+
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=20)
+
+            if process.returncode == 0 and stdout.strip():
+                info = json.loads(stdout.decode())
+                return self._parse_youtube_metadata(info)
+
+            # Ultimate fallback: create basic metadata from URL
+            logger.warning("Creating basic metadata from URL")
+            return SongMetadata(
+                title=f"YouTube Video ({query[-11:]})",  # Use video ID as title
+                artist="Unknown Artist",
+                duration=0,
+                thumbnail_url="",
+                source_url=query,
+            )
+
+        except Exception as e:
+            logger.error(f"Basic info extraction failed: {e}")
+            # Last resort: minimal metadata
+            return SongMetadata(
+                title="YouTube Video",
+                artist="Unknown",
+                duration=0,
+                thumbnail_url="",
+                source_url=query,
+            )
 
 
 class SongProcessingService:

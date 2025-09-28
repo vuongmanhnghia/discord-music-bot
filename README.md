@@ -18,8 +18,12 @@
     ```
 
 2. Edit `.env` and add your Discord bot token:
-    ```
+
+    ```bash
     BOT_TOKEN=your_bot_token_here
+
+    # 24/7 Music Bot (stays connected even when alone)
+    STAY_CONNECTED_24_7=true
     ```
 
 ### Running with Docker Compose (Recommended)
@@ -130,6 +134,7 @@ This bot features a sophisticated playlist system with clean architecture and in
 -   **Active Playlist Tracking**: One active playlist per Discord server
 -   **Smart Commands**: Intelligent parameter detection and workflow optimization
 -   **Auto-Playback**: Enhanced `/play` command with playlist integration
+-   **Enhanced /add**: Process songs like `/play` for immediate playability
 
 #### Playlist Commands
 
@@ -181,10 +186,10 @@ This bot features a sophisticated playlist system with clean architecture and in
 
 ```
 /create my_favorites        # Create new playlist
-/addto my_favorites https://youtube.com/watch?v=abc123
-/addto my_favorites never gonna give you up
-/use my_favorites          # Set as active & load to queue
-/play                      # Auto-start playing!
+/use my_favorites          # Set as active playlist
+/add https://youtube.com/watch?v=abc123  # Enhanced: Processed & ready!
+/add never gonna give you up # Enhanced: Searched & processed!
+/play                      # Auto-start playing immediately!
 ```
 
 #### Enhanced Workflow
@@ -192,7 +197,8 @@ This bot features a sophisticated playlist system with clean architecture and in
 ```
 /use rock_playlist         # Load rock playlist as active
 /play                      # Start from rock playlist
-/play bohemian rhapsody    # Search for specific song
+/add bohemian rhapsody     # Enhanced: Add & process immediately
+/play bohemian rhapsody    # Or play directly
 /add stairway to heaven    # Add to active rock playlist
 /play                      # Resume from rock playlist
 ```

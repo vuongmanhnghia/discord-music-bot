@@ -17,6 +17,11 @@ class Config:
     BOT_NAME: str = os.getenv("BOT_NAME", "Discord Music Bot")
     COMMAND_PREFIX: str = os.getenv("COMMAND_PREFIX", "!")
     PLAYLIST_DIR: str = os.getenv("PLAYLIST_DIR", "./playlist")
+    STAY_CONNECTED_24_7: bool = os.getenv("STAY_CONNECTED_24_7", "true").lower() in [
+        "true",
+        "1",
+        "yes",
+    ]
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     LOG_FILE: str = os.getenv("LOG_FILE", "")
 

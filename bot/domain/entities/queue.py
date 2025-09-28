@@ -3,6 +3,7 @@ from typing import Optional, List
 
 from .song import Song
 
+
 class QueueManager:
     """Manages song queue with rich functionality"""
 
@@ -104,3 +105,14 @@ class QueueManager:
                 self._current_index = 0
             return True
         return False
+
+    def get_all_songs(self) -> List[Song]:
+        """Get all songs in the queue"""
+        return self._songs.copy()
+
+    def find_song_by_input(self, original_input: str) -> Optional[Song]:
+        """Find song in queue by original input"""
+        for song in self._songs:
+            if song.original_input == original_input:
+                return song
+        return None

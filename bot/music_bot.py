@@ -201,20 +201,30 @@ class MusicBot(commands.Bot):
             and hasattr(channel, "members")
             and len([m for m in channel.members if not m.bot]) == 0
         ):
-            logger.info(
-                f"Bot is alone in voice channel, will disconnect from {member.guild.name}"
-            )
+            if config.STAY_CONNECTED_24_7:
+                logger.info(
+                    f"Bot is alone in voice channel in {member.guild.name}, but staying connected (24/7 mode)"
+                )
+                # 🎵 24/7 Mode: Bot stays connected for continuous music
+                # No auto-disconnect - bot remains in channel for 24/7 music service
+                # Users can manually use /leave if needed
+            else:
+                logger.info(
+                    f"Bot is alone in voice channel, will disconnect from {member.guild.name}"
+                )
 
-            await asyncio.sleep(60)  # Wait 60 seconds
+                await asyncio.sleep(60)  # Wait 60 seconds
 
-            # Double-check still alone
-            if (
-                channel
-                and isinstance(channel, (discord.VoiceChannel, discord.StageChannel))
-                and hasattr(channel, "members")
-                and len([m for m in channel.members if not m.bot]) == 0
-            ):
-                await audio_service.disconnect_from_guild(member.guild.id)
+                # Double-check still alone
+                if (
+                    channel
+                    and isinstance(
+                        channel, (discord.VoiceChannel, discord.StageChannel)
+                    )
+                    and hasattr(channel, "members")
+                    and len([m for m in channel.members if not m.bot]) == 0
+                ):
+                    await audio_service.disconnect_from_guild(member.guild.id)
 
     def _setup_commands(self):
         """Setup all bot slash commands with clean implementation"""
@@ -239,14 +249,14 @@ class MusicBot(commands.Bot):
                 or not interaction.user.voice
             ):
                 await interaction.response.send_message(
-                    "❌ Bạn cần ở trong voice channel!", ephemeral=True
+                    "💢 Bạn đã ở trong channel nào đâu =))", ephemeral=True
                 )
                 return
 
             channel = interaction.user.voice.channel
             if not isinstance(channel, (discord.VoiceChannel, discord.StageChannel)):
                 await interaction.response.send_message(
-                    "❌ Không thể tham gia channel này!", ephemeral=True
+                    "⛔ Không thể tham gia channel này!", ephemeral=True
                 )
                 return
 
@@ -271,7 +281,7 @@ class MusicBot(commands.Bot):
             """👋 Leave voice channel"""
             if not interaction.guild:
                 await interaction.response.send_message(
-                    "❌ Chỉ sử dụng trong server!", ephemeral=True
+                    "⛔ Bot chưa kết nối voice!", ephemeral=True
                 )
                 return
 
@@ -307,7 +317,7 @@ class MusicBot(commands.Bot):
             """▶️ Play music from URL/search query or from active playlist"""
             if not interaction.guild:
                 await interaction.response.send_message(
-                    "❌ Chỉ sử dụng trong server!", ephemeral=True
+                    "⛔ Bot chưa kết nối voice!", ephemeral=True
                 )
                 return
 
@@ -469,13 +479,13 @@ class MusicBot(commands.Bot):
             """⏭️ Skip current song"""
             if not interaction.guild:
                 await interaction.response.send_message(
-                    "❌ Chỉ sử dụng trong server!", ephemeral=True
+                    "⛔ Bot chưa kết nối voice!", ephemeral=True
                 )
                 return
 
             if not audio_service.is_connected(interaction.guild.id):
                 await interaction.response.send_message(
-                    "❌ Bot chưa kết nối voice!", ephemeral=True
+                    "⛔ Bot chưa kết nối voice!", ephemeral=True
                 )
                 return
 
@@ -495,19 +505,19 @@ class MusicBot(commands.Bot):
                 )
             await interaction.response.send_message(embed=embed)
 
-        @self.tree.command(name="pause", description="⏸️ Tạm dừng phát")
+        @self.tree.command(name="pause", description="Tạm dừng phát")
         async def pause_music(interaction: discord.Interaction):
             """⏸️ Pause current playback"""
             if not interaction.guild:
                 await interaction.response.send_message(
-                    "❌ Chỉ sử dụng trong server!", ephemeral=True
+                    "💢 Chỉ sử dụng trong server!", ephemeral=True
                 )
                 return
 
             audio_player = audio_service.get_audio_player(interaction.guild.id)
             if not audio_player:
                 await interaction.response.send_message(
-                    "❌ Bot chưa kết nối voice!", ephemeral=True
+                    "⛔ Bot chưa kết nối voice!", ephemeral=True
                 )
                 return
 
@@ -521,25 +531,25 @@ class MusicBot(commands.Bot):
                 )
             else:
                 embed = discord.Embed(
-                    title="❌ Không có gì đang phát",
-                    description="Không có nhạc nào đang phát",
+                    title="Không có gì đang phát",
+                    description="💢 Có đang phát nhạc đâu mà tạm dừng",
                     color=discord.Color.red(),
                 )
             await interaction.response.send_message(embed=embed)
 
         @self.tree.command(name="resume", description="Tiếp tục phát nhạc")
         async def resume_music(interaction: discord.Interaction):
-            """▶️ Resume paused playback"""
+            """Resume paused playback"""
             if not interaction.guild:
                 await interaction.response.send_message(
-                    "❌ Chỉ sử dụng trong server!", ephemeral=True
+                    "💢 Chỉ sử dụng trong server!", ephemeral=True
                 )
                 return
 
             audio_player = audio_service.get_audio_player(interaction.guild.id)
             if not audio_player:
                 await interaction.response.send_message(
-                    "❌ Bot chưa kết nối voice!", ephemeral=True
+                    "⛔ Bot chưa kết nối voice!", ephemeral=True
                 )
                 return
 
@@ -553,7 +563,7 @@ class MusicBot(commands.Bot):
                 )
             else:
                 embed = discord.Embed(
-                    title="❌ Không có gì bị tạm dừng",
+                    title=" Không có gì bị tạm dừng",
                     description="Không có nhạc nào bị tạm dừng",
                     color=discord.Color.red(),
                 )
@@ -564,14 +574,14 @@ class MusicBot(commands.Bot):
             """⏹️ Stop playback and clear queue"""
             if not interaction.guild:
                 await interaction.response.send_message(
-                    "❌ Chỉ sử dụng trong server!", ephemeral=True
+                    "⛔ Bot chưa kết nối voice!", ephemeral=True
                 )
                 return
 
             audio_player = audio_service.get_audio_player(interaction.guild.id)
             if not audio_player:
                 await interaction.response.send_message(
-                    "❌ Bot chưa kết nối voice!", ephemeral=True
+                    "⛔ Bot chưa kết nối voice!", ephemeral=True
                 )
                 return
 
@@ -579,6 +589,10 @@ class MusicBot(commands.Bot):
             queue_manager = audio_service.get_queue_manager(interaction.guild.id)
             if queue_manager:
                 queue_manager.clear()
+                # Clear playlist loaded tracking since queue is cleared
+                self.playlist_service.clear_loaded_playlist_tracking(
+                    interaction.guild.id
+                )
 
             embed = discord.Embed(
                 title="Đã dừng",
@@ -592,14 +606,14 @@ class MusicBot(commands.Bot):
             """📋 Show current queue"""
             if not interaction.guild:
                 await interaction.response.send_message(
-                    "❌ Chỉ sử dụng trong server!", ephemeral=True
+                    "⛔ Bot chưa kết nối voice!", ephemeral=True
                 )
                 return
 
             queue_manager = audio_service.get_queue_manager(interaction.guild.id)
             if not queue_manager:
                 await interaction.response.send_message(
-                    "❌ Không có hàng đợi nào!", ephemeral=True
+                    "🚫 Không có hàng đợi nào!", ephemeral=True
                 )
                 return
 
@@ -653,14 +667,14 @@ class MusicBot(commands.Bot):
             """🔊 Set playback volume (0-100)"""
             if not interaction.guild:
                 await interaction.response.send_message(
-                    "❌ Chỉ sử dụng trong server!", ephemeral=True
+                    "⛔ Bot chưa kết nối voice!", ephemeral=True
                 )
                 return
 
             audio_player = audio_service.get_audio_player(interaction.guild.id)
             if not audio_player:
                 await interaction.response.send_message(
-                    "❌ Bot chưa kết nối voice!", ephemeral=True
+                    "⛔ Bot chưa kết nối voice!", ephemeral=True
                 )
                 return
 
@@ -678,7 +692,7 @@ class MusicBot(commands.Bot):
             # Validate volume
             if volume < 0 or volume > 100:
                 await interaction.response.send_message(
-                    "❌ Âm lượng phải từ 0 đến 100!", ephemeral=True
+                    "💢 Âm lượng chỉ có từ 0 đến 100 từ thôi =))", ephemeral=True
                 )
                 return
 
@@ -697,14 +711,14 @@ class MusicBot(commands.Bot):
             """🎵 Show currently playing song"""
             if not interaction.guild:
                 await interaction.response.send_message(
-                    "❌ Chỉ sử dụng trong server!", ephemeral=True
+                    "⛔ Bot chưa kết nối voice!", ephemeral=True
                 )
                 return
 
             audio_player = audio_service.get_audio_player(interaction.guild.id)
             if not audio_player or not audio_player.current_song:
                 await interaction.response.send_message(
-                    "❌ Không có bài nào đang phát!", ephemeral=True
+                    "🚫 Không có bài nào đang phát!", ephemeral=True
                 )
                 return
 
@@ -801,7 +815,7 @@ class MusicBot(commands.Bot):
             """🎵 Load playlist into queue"""
             if not interaction.guild:
                 await interaction.response.send_message(
-                    "❌ Chỉ sử dụng trong server!", ephemeral=True
+                    "⛔ Bot chưa kết nối voice!", ephemeral=True
                 )
                 return
 
@@ -864,7 +878,7 @@ class MusicBot(commands.Bot):
 
             if success:
                 embed = discord.Embed(
-                    title="✅ Tạo thành công",
+                    title=f"Tạo playlist **{name}** thành công",
                     description=message,
                     color=discord.Color.green(),
                 )
@@ -880,10 +894,10 @@ class MusicBot(commands.Bot):
         async def add_to_active_playlist(
             interaction: discord.Interaction, song_input: str
         ):
-            """➕ Add song to active playlist"""
+            """➕ Add song to active playlist (with processing like /play)"""
             if not interaction.guild:
                 await interaction.response.send_message(
-                    "❌ Chỉ sử dụng trong server!", ephemeral=True
+                    "⛔ Bot chưa kết nối voice!", ephemeral=True
                 )
                 return
 
@@ -898,31 +912,95 @@ class MusicBot(commands.Bot):
                 )
                 return
 
-            # Detect source type from input
-            source_type = SourceType.YOUTUBE  # Default
-            if "spotify.com" in song_input:
-                source_type = SourceType.SPOTIFY
-            elif "soundcloud.com" in song_input:
-                source_type = SourceType.SOUNDCLOUD
-            elif not ("http://" in song_input or "https://" in song_input):
-                source_type = SourceType.SEARCH_QUERY
-
-            success, message = self.playlist_service.add_to_playlist(
-                active_playlist, song_input, source_type, song_input
+            # Show processing message
+            await interaction.response.send_message(
+                f"🔍 **Processing:** {song_input[:50]}{'...' if len(song_input) > 50 else ''}"
             )
 
-            if success:
-                embed = discord.Embed(
-                    title="✅ Đã thêm vào playlist hiện tại",
-                    description=f"📋 **{active_playlist}**\n{message}",
-                    color=discord.Color.green(),
-                )
-            else:
-                embed = discord.Embed(
-                    title="❌ Lỗi", description=message, color=discord.Color.red()
+            try:
+                # Step 1: Process song like /play (but without auto_play)
+                success, response_message, song = await playback_service.play_request(
+                    user_input=song_input,
+                    guild_id=interaction.guild.id,
+                    requested_by=str(interaction.user),
+                    auto_play=False,  # Don't auto-start playback
                 )
 
-            await interaction.response.send_message(embed=embed)
+                if success and song:
+                    # Step 2: Add processed song to playlist
+                    # Use processed metadata for better title
+                    title = song.metadata.title if song.metadata else song_input
+                    playlist_success, playlist_message = (
+                        self.playlist_service.add_to_playlist(
+                            active_playlist,
+                            song.original_input,
+                            song.source_type,
+                            title,
+                        )
+                    )
+
+                    if playlist_success:
+                        embed = discord.Embed(
+                            title="✅ Đã thêm vào playlist và queue",
+                            description=f"📋 **{active_playlist}**\n🎵 **{song.display_name}**",
+                            color=discord.Color.green(),
+                        )
+
+                        # Add detailed info like /play
+                        embed.add_field(
+                            name="Nguồn",
+                            value=song.source_type.value.title(),
+                            inline=True,
+                        )
+
+                        embed.add_field(
+                            name="Trạng thái",
+                            value=song.status.value.title(),
+                            inline=True,
+                        )
+
+                        if song.metadata:
+                            embed.add_field(
+                                name="Thời lượng",
+                                value=song.duration_formatted,
+                                inline=True,
+                            )
+
+                        # Show queue position
+                        queue_manager = audio_service.get_queue_manager(guild_id)
+                        if queue_manager:
+                            queue_position = len(queue_manager.get_upcoming()) + 1
+                            embed.add_field(
+                                name="Vị trí queue",
+                                value=f"#{queue_position}",
+                                inline=True,
+                            )
+
+                    else:
+                        embed = discord.Embed(
+                            title="⚠️ Đã thêm vào queue nhưng lỗi playlist",
+                            description=f"🎵 Song: {song.display_name}\n❌ Playlist: {playlist_message}",
+                            color=discord.Color.orange(),
+                        )
+
+                else:
+                    embed = discord.Embed(
+                        title="❌ Lỗi xử lý bài hát",
+                        description=response_message,
+                        color=discord.Color.red(),
+                    )
+
+                # Update the processing message
+                await interaction.edit_original_response(embed=embed)
+
+            except Exception as e:
+                logger.error(f"Error in enhanced add command: {e}")
+                embed = discord.Embed(
+                    title="❌ Lỗi không mong muốn",
+                    description=f"Đã xảy ra lỗi: {str(e)}",
+                    color=discord.Color.red(),
+                )
+                await interaction.edit_original_response(embed=embed)
 
         @self.tree.command(
             name="addto", description="Thêm bài hát vào playlist chỉ định"
@@ -1072,11 +1150,14 @@ class MusicBot(commands.Bot):
 
             await interaction.response.send_message(embed=embed)
 
-        @self.tree.command(name="help", description="Hiển thị thông tin trợ giúp")
+        @self.tree.command(
+            name="help",
+            description=f"Hiển thị thông tin về {config.BOT_NAME} và các tính năng",
+        )
         async def show_help(interaction: discord.Interaction):
             """❓ Show help information"""
             embed = discord.Embed(
-                title=f"{config.BOT_NAME} - Trợ giúp",
+                title=f"{config.BOT_NAME} ・ Tổng quan",
                 color=discord.Color.blue(),
             )
 
@@ -1086,24 +1167,22 @@ class MusicBot(commands.Bot):
                 f"> `/leave` - Rời voice channel",
             ]
 
-            embed.add_field(
-                name="🔗 Kết nối", value="\n".join(connection_cmds), inline=False
-            )
+            embed.add_field(name="", value="\n".join(connection_cmds), inline=False)
 
             # Playlist commands
             playlist_cmds = [
-                f"> `/use <playlist>`     - Nạp playlist vào queue",
-                f"> `/create <name>`      - Tạo playlist mới",
-                f"> `/add <song>`         - Thêm bài vào playlist hiện tại",
-                f"> `/addto <name> <song>` - Thêm bài vào playlist chỉ định",
-                f"> `/remove <name> <#>`  - Xóa bài khỏi playlist",
-                f"> `/playlists`          - Liệt kê tất cả playlist",
-                f"> `/playlist <name>`    - Hiển thị playlist",
-                f"> `/delete <name>`      - Xóa playlist",
+                f"> `/use <name>`      - Chọn playlist và nạp playlist vào `queue`",
+                f"> `/create <name>`       - Tạo playlist mới",
+                f"> `/add <song>`          - Thêm bài vào playlist hiện tại",
+                f"> `/addto <playlist> <song>` - Thêm bài vào playlist chỉ định",
+                f"> `/remove <name> <#>`   - Xóa bài khỏi playlist",
+                f"> `/playlists`           - Liệt kê tất cả playlist",
+                f"> `/playlist <name>`     - Hiển thị thông tin playlist",
+                f"> `/delete <name>`       - Xóa playlist",
             ]
 
             embed.add_field(
-                name="🎵 Playlist", value="\n".join(playlist_cmds), inline=False
+                name="Playlist", value="\n".join(playlist_cmds), inline=False
             )
 
             # Playback commands
@@ -1117,24 +1196,22 @@ class MusicBot(commands.Bot):
             ]
 
             embed.add_field(
-                name="▶️ Điều khiển", value="\n".join(playback_cmds), inline=False
+                name="Điều khiển", value="\n".join(playback_cmds), inline=False
             )
 
             # Queue commands
             queue_cmds = [
                 f"> `/queue`          - Hiển thị hàng đợi hiện tại",
-                f"> `/nowplaying`     - Hiển thị bài hiện tại",
+                f"> `/nowplaying`     - Hiển thị bài đang phát",
                 f"> `/volume <0-100>` - Đặt âm lượng",
                 f"> `/repeat <mode>`  - Đặt chế độ lặp",
             ]
 
-            embed.add_field(
-                name="📋 Hàng đợi", value="\n".join(queue_cmds), inline=False
-            )
+            embed.add_field(name="Queue", value="\n".join(queue_cmds), inline=False)
 
             embed.add_field(
-                name="🎶 Nguồn hỗ trợ",
-                value="• YouTube URLs\n• Spotify URLs (chuyển đổi thành YouTube)\n• Tìm kiếm từ khóa\n• SoundCloud URLs",
+                name="Nguồn hỗ trợ",
+                value="**• YouTube\n• Spotify [comming soon =))]\n• SoundCloud [comming soon too =))]**",
                 inline=False,
             )
 

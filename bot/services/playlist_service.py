@@ -14,6 +14,10 @@ class PlaylistService:
 
     def __init__(self, library_manager: LibraryManager):
         self.library = library_manager
+        # Track loaded playlists per guild to prevent duplicate processing
+        self._loaded_playlists: dict[int, dict[str, int]] = (
+            {}
+        )  # guild_id -> {playlist_name: load_count}
 
     async def load_playlist_to_queue(
         self,
@@ -21,8 +25,9 @@ class PlaylistService:
         queue_manager: QueueManager,
         requested_by: str,
         guild_id: int,
+        force_reload: bool = False,
     ) -> tuple[bool, str]:
-        """Load playlist entries into queue as songs"""
+        """Load playlist entries into queue as songs with smart deduplication"""
         playlist = self.library.get_playlist(playlist_name)
         if not playlist:
             return False, f"Playlist '{playlist_name}' not found"
@@ -32,6 +37,38 @@ class PlaylistService:
                 True,
                 f"Playlist '{playlist_name}' is empty. Use `/add <song>` to add songs first.",
             )
+
+        # Smart deduplication: Check if playlist already loaded
+        if not force_reload:
+            if guild_id in self._loaded_playlists:
+                if playlist_name in self._loaded_playlists[guild_id]:
+                    load_count = self._loaded_playlists[guild_id][playlist_name]
+                    logger.info(
+                        f"Playlist '{playlist_name}' already loaded {load_count} times in guild {guild_id}, skipping duplicate processing"
+                    )
+
+                    # Check if songs from this playlist are still in queue
+                    queue_songs = queue_manager.get_all_songs()
+                    playlist_songs_in_queue = [
+                        song
+                        for song in queue_songs
+                        if any(
+                            entry.original_input == song.original_input
+                            for entry in playlist.entries
+                        )
+                    ]
+
+                    if playlist_songs_in_queue:
+                        return (
+                            True,
+                            f"Playlist '{playlist_name}' already loaded ({len(playlist_songs_in_queue)} songs still in queue)",
+                        )
+                    else:
+                        logger.info(
+                            f"Playlist songs no longer in queue, will reload playlist '{playlist_name}'"
+                        )
+                        # Reset the load tracking for this playlist
+                        del self._loaded_playlists[guild_id][playlist_name]
 
         # Convert playlist entries to Song objects and process them
         added_count = 0
@@ -71,15 +108,49 @@ class PlaylistService:
             queue_manager.add_song(song)
             added_count += 1
 
+        # Track this playlist as loaded for deduplication
+        if guild_id not in self._loaded_playlists:
+            self._loaded_playlists[guild_id] = {}
+
+        if playlist_name not in self._loaded_playlists[guild_id]:
+            self._loaded_playlists[guild_id][playlist_name] = 0
+
+        self._loaded_playlists[guild_id][playlist_name] += 1
+        logger.info(
+            f"Marked playlist '{playlist_name}' as loaded (count: {self._loaded_playlists[guild_id][playlist_name]}) for guild {guild_id}"
+        )
+
         return (
             True,
             f"Added {added_count} songs from playlist '{playlist_name}' to queue",
         )
 
+    def clear_loaded_playlist_tracking(
+        self, guild_id: int, playlist_name: str = None
+    ) -> None:
+        """Clear loaded playlist tracking for deduplication"""
+        if guild_id not in self._loaded_playlists:
+            return
+
+        if playlist_name:
+            # Clear tracking for specific playlist
+            if playlist_name in self._loaded_playlists[guild_id]:
+                del self._loaded_playlists[guild_id][playlist_name]
+                logger.info(
+                    f"Cleared loaded tracking for playlist '{playlist_name}' in guild {guild_id}"
+                )
+        else:
+            # Clear all playlist tracking for guild
+            self._loaded_playlists[guild_id].clear()
+            logger.info(f"Cleared all loaded playlist tracking for guild {guild_id}")
+
     def create_playlist(self, name: str) -> tuple[bool, str]:
         """Create a new playlist"""
         if self.library.create_playlist(name):
-            return True, f"Created playlist '{name}'"
+            return (
+                True,
+                f"Đã tạo playlist **{name}** thành công, hãy sử dụng `/use {name}` để kich hoạt.",
+            )
         return False, f"Playlist '{name}' already exists or failed to create"
 
     def add_to_playlist(
