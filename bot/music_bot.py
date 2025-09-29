@@ -395,7 +395,7 @@ class MusicBot(commands.Bot):
             # Handle two modes: with query or from active playlist
             if query:
                 # Mode 1: Play from URL/search query
-                # Check if it's a YouTube playlist
+                # Check if it's a YouTube playlist (only explicit playlist URLs)
 
                 if YouTubePlaylistHandler.is_playlist_url(query):
                     # Handle YouTube playlist - use InteractionManager for long operation
@@ -427,6 +427,7 @@ class MusicBot(commands.Bot):
                     return
                 else:
                     # Regular single video/search - existing logic
+                    # This now includes single videos with playlist parameters
                     await interaction.response.send_message(
                         f"🔍 **{query[:50]}{'...' if len(query) > 50 else ''}**"
                     )
@@ -823,7 +824,7 @@ class MusicBot(commands.Bot):
 
                 if song.metadata.artist:
                     embed.add_field(
-                        name="Nghệ sĩ",
+                        name="Artist",
                         value=song.metadata.artist,
                         inline=True,
                     )
@@ -993,7 +994,7 @@ class MusicBot(commands.Bot):
                 )
                 return
 
-            # Check if it's a YouTube playlist
+            # Check if it's a YouTube playlist (only explicit playlist URLs)
             from .utils.youtube_playlist_handler import YouTubePlaylistHandler
 
             if YouTubePlaylistHandler.is_playlist_url(song_input):
@@ -1128,7 +1129,7 @@ class MusicBot(commands.Bot):
         ):
             """➕ Add song to specific playlist"""
 
-            # Check if it's a YouTube playlist
+            # Check if it's a YouTube playlist (only explicit playlist URLs)
             from .utils.youtube_playlist_handler import YouTubePlaylistHandler
 
             if YouTubePlaylistHandler.is_playlist_url(song_input):

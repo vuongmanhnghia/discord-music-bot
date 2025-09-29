@@ -16,20 +16,36 @@ class YouTubePlaylistHandler:
 
     @staticmethod
     def is_playlist_url(url: str) -> bool:
-        """Check if URL is a YouTube playlist"""
+        """Check if URL is a YouTube playlist that should be processed as full playlist"""
         if not url or not isinstance(url, str):
             return False
 
-        # Clean URL patterns for playlists
+        # Only consider explicit playlist URLs for full playlist processing
+        # watch URLs with list= parameter should be treated as single video
         playlist_patterns = [
             r"youtube\.com/playlist\?list=",
-            r"youtube\.com/watch\?.*list=",
-            r"youtu\.be/.*\?.*list=",
             r"music\.youtube\.com/playlist\?list=",
         ]
 
         return any(
             re.search(pattern, url, re.IGNORECASE) for pattern in playlist_patterns
+        )
+
+    @staticmethod
+    def is_single_video_with_playlist(url: str) -> bool:
+        """Check if URL is a single YouTube video with playlist parameter"""
+        if not url or not isinstance(url, str):
+            return False
+
+        # Check for watch URLs with list parameter (should be treated as single video)
+        single_video_patterns = [
+            r"youtube\.com/watch\?.*v=.*&.*list=",
+            r"youtube\.com/watch\?.*list=.*&.*v=",
+            r"youtu\.be/.*\?.*list=",
+        ]
+
+        return any(
+            re.search(pattern, url, re.IGNORECASE) for pattern in single_video_patterns
         )
 
     @staticmethod
