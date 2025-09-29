@@ -18,6 +18,7 @@ from .services.playlist_service import PlaylistService
 from .domain.entities.library import LibraryManager
 from .domain.valueobjects.source_type import SourceType
 from .utils.youtube_playlist_handler import YouTubePlaylistHandler
+from .utils.interaction_manager import InteractionManager
 
 
 class MusicBot(commands.Bot):
@@ -41,6 +42,9 @@ class MusicBot(commands.Bot):
         # Track current active playlist for each guild
         self.active_playlists: dict[int, str] = {}
 
+        # Initialize InteractionManager
+        self.interaction_manager = InteractionManager()
+
         # Setup commands
         self._setup_commands()
 
@@ -48,6 +52,10 @@ class MusicBot(commands.Bot):
         """Initialize bot components"""
         try:
             logger.info("🚀 Initializing bot components...")
+
+            # Start ResourceManager for memory leak prevention
+            await audio_service.start_resource_management()
+            logger.info("✅ Resource management started")
 
             # Sync slash commands globally only
             try:
@@ -360,100 +368,33 @@ class MusicBot(commands.Bot):
                 # Check if it's a YouTube playlist
 
                 if YouTubePlaylistHandler.is_playlist_url(query):
-                    # Handle YouTube playlist
-                    await interaction.response.defer()
-
-                    # Extract playlist videos
-                    success, video_urls, message = (
-                        await YouTubePlaylistHandler.extract_playlist_videos(query)
-                    )
-
-                    if success and video_urls:
-                        # Process each video in playlist
-                        added_count = 0
-                        failed_count = 0
-
-                        embed = discord.Embed(
-                            title="🎵 Processing YouTube Playlist",
-                            description=f"{message}\n⏳ Processing videos...",
-                            color=discord.Color.blue(),
+                    # Handle YouTube playlist - use InteractionManager for long operation
+                    async def process_youtube_playlist():
+                        # Extract playlist videos
+                        success, video_urls, message = (
+                            await YouTubePlaylistHandler.extract_playlist_videos(query)
                         )
 
-                        # Send initial message
-                        await interaction.followup.send(embed=embed)
-
-                        # Process videos in batches to avoid timeout
-                        for i, video_url in enumerate(
-                            video_urls[:50]
-                        ):  # Limit to 50 videos
-                            try:
-                                success_video, _, song = (
-                                    await playback_service.play_request(
-                                        user_input=video_url,
-                                        guild_id=interaction.guild.id,
-                                        requested_by=str(interaction.user),
-                                        auto_play=(i == 0),  # Auto-play first song only
-                                    )
-                                )
-
-                                if success_video:
-                                    added_count += 1
-                                else:
-                                    failed_count += 1
-
-                                # Update progress every 10 songs
-                                if (i + 1) % 10 == 0:
-                                    progress_embed = discord.Embed(
-                                        title="🎵 Processing YouTube Playlist",
-                                        description=f"✅ Added: {added_count}\n❌ Failed: {failed_count}\n⏳ Progress: {i+1}/{len(video_urls)}",
-                                        color=discord.Color.blue(),
-                                    )
-                                    await interaction.edit_original_response(
-                                        embed=progress_embed
-                                    )
-
-                            except Exception as e:
-                                logger.error(
-                                    f"Error processing playlist video {video_url}: {e}"
-                                )
-                                failed_count += 1
-
-                        # Final result
-                        final_embed = discord.Embed(
-                            title="✅ YouTube Playlist Processed",
-                            description=f"📋 **Playlist processed**\n"
-                            f"✅ Successfully added: {added_count} videos\n"
-                            f"❌ Failed: {failed_count} videos",
-                            color=(
-                                discord.Color.green()
-                                if added_count > 0
-                                else discord.Color.red()
-                            ),
-                        )
-
-                        if added_count > 0:
-                            final_embed.add_field(
-                                name="🎵 Status",
-                                value=(
-                                    "Started playing!"
-                                    if added_count > 0
-                                    else "Added to queue"
-                                ),
-                                inline=False,
+                        if not success or not video_urls:
+                            return discord.Embed(
+                                title="❌ Playlist Error",
+                                description=message,
+                                color=discord.Color.red(),
                             )
 
-                        await interaction.edit_original_response(embed=final_embed)
-                        return
-
-                    else:
-                        # Failed to process playlist
-                        embed = discord.Embed(
-                            title="❌ YouTube Playlist Error",
-                            description=message,
-                            color=discord.Color.red(),
+                        return await self._process_playlist_videos(
+                            video_urls,
+                            message,
+                            interaction.guild.id,
+                            str(interaction.user),
                         )
-                        await interaction.followup.send(embed=embed)
-                        return
+
+                    result = await self.interaction_manager.handle_long_operation(
+                        interaction,
+                        process_youtube_playlist,
+                        "🎵 Processing YouTube Playlist...",
+                    )
+                    return
                 else:
                     # Regular single video/search - existing logic
                     await interaction.response.send_message(
@@ -944,41 +885,25 @@ class MusicBot(commands.Bot):
                 )
                 return
 
-            await interaction.response.defer()
-
-            success, message = await self.playlist_service.load_playlist_to_queue(
-                playlist_name,
-                queue_manager,
-                str(interaction.user),
-                interaction.guild.id,
-            )
-
-            if success:
-                # Always track the active playlist for this guild, even if empty
-                self.active_playlists[interaction.guild.id] = playlist_name
-
-                # Check if playlist was empty
-                if "is empty" in message:
-                    embed = discord.Embed(
-                        title="✅ Đã chọn playlist trống",
-                        description=f"📋 **{playlist_name}** đã được đặt làm playlist hiện tại\n"
-                        + f"⚠️ {message}\n"
-                        + f"💡 Sử dụng `/add <song>` để thêm bài hát",
-                        color=discord.Color.orange(),
-                    )
-                else:
-                    embed = discord.Embed(
-                        title="Đã load playlist",
-                        description=message
-                        + f"\n🎵 Playlist hiện tại: **{playlist_name}**",
-                        color=discord.Color.green(),
-                    )
-            else:
-                embed = discord.Embed(
-                    title="❌ Lỗi", description=message, color=discord.Color.red()
+            # Use InteractionManager for loading playlist operation
+            async def load_playlist_operation():
+                success, message = await self.playlist_service.load_playlist_to_queue(
+                    playlist_name,
+                    queue_manager,
+                    str(interaction.user),
+                    interaction.guild.id,
                 )
 
-            await interaction.followup.send(embed=embed)
+                return self._create_use_playlist_result(
+                    success, message, playlist_name, interaction.guild.id
+                )
+
+            result = await self.interaction_manager.handle_long_operation(
+                interaction,
+                load_playlist_operation,
+                f"🎵 Loading playlist '{playlist_name}'...",
+            )
+            return
 
         @self.tree.command(name="create", description="Tạo playlist mới")
         @app_commands.describe(name="Tên playlist")
@@ -1026,110 +951,34 @@ class MusicBot(commands.Bot):
             from .utils.youtube_playlist_handler import YouTubePlaylistHandler
 
             if YouTubePlaylistHandler.is_playlist_url(song_input):
-                # Handle YouTube playlist
-                await interaction.response.defer()
+                # Handle YouTube playlist - use InteractionManager for long operation
+                async def process_add_playlist():
+                    # Extract playlist videos
+                    success_playlist, video_urls, message = (
+                        await YouTubePlaylistHandler.extract_playlist_videos(song_input)
+                    )
 
-                # Extract playlist videos
-                success_playlist, video_urls, message = (
-                    await YouTubePlaylistHandler.extract_playlist_videos(song_input)
+                    if not success_playlist or not video_urls:
+                        return discord.Embed(
+                            title="❌ Playlist Error",
+                            description=message,
+                            color=discord.Color.red(),
+                        )
+
+                    return await self._process_add_playlist_videos(
+                        video_urls,
+                        message,
+                        active_playlist,
+                        interaction.guild.id,
+                        str(interaction.user),
+                    )
+
+                result = await self.interaction_manager.handle_long_operation(
+                    interaction,
+                    process_add_playlist,
+                    "🎵 Adding YouTube Playlist to queue and active playlist...",
                 )
-
-                if success_playlist and video_urls:
-                    # Process each video in playlist
-                    added_count = 0
-                    failed_count = 0
-                    playlist_added_count = 0
-
-                    embed = discord.Embed(
-                        title="🎵 Processing YouTube Playlist",
-                        description=f"{message}\n⏳ Adding to playlist and queue...",
-                        color=discord.Color.blue(),
-                    )
-
-                    # Send initial message
-                    await interaction.followup.send(embed=embed)
-
-                    # Process videos
-                    for i, video_url in enumerate(
-                        video_urls[:50]
-                    ):  # Limit to 50 videos
-                        try:
-                            # Step 1: Process song like /play (but without auto_play)
-                            success, response_message, song = (
-                                await playback_service.play_request(
-                                    user_input=video_url,
-                                    guild_id=interaction.guild.id,
-                                    requested_by=str(interaction.user),
-                                    auto_play=False,  # Don't auto-start playback
-                                )
-                            )
-
-                            if success and song:
-                                added_count += 1
-
-                                # Step 2: Add processed song to playlist
-                                title = (
-                                    song.metadata.title if song.metadata else video_url
-                                )
-                                playlist_success, playlist_message = (
-                                    self.playlist_service.add_to_playlist(
-                                        active_playlist,
-                                        song.original_input,
-                                        song.source_type,
-                                        title,
-                                    )
-                                )
-
-                                if playlist_success:
-                                    playlist_added_count += 1
-                            else:
-                                failed_count += 1
-
-                            # Update progress every 10 songs
-                            if (i + 1) % 10 == 0:
-                                progress_embed = discord.Embed(
-                                    title="🎵 Processing YouTube Playlist",
-                                    description=f"✅ Added to queue: {added_count}\n"
-                                    f"✅ Added to playlist: {playlist_added_count}\n"
-                                    f"❌ Failed: {failed_count}\n"
-                                    f"⏳ Progress: {i+1}/{len(video_urls)}",
-                                    color=discord.Color.blue(),
-                                )
-                                await interaction.edit_original_response(
-                                    embed=progress_embed
-                                )
-
-                        except Exception as e:
-                            logger.error(
-                                f"Error processing playlist video {video_url}: {e}"
-                            )
-                            failed_count += 1
-
-                    # Final result
-                    final_embed = discord.Embed(
-                        title=f"Đã cập nhật playlist {active_playlist}",
-                        description=f"**Đã thêm vào queue: {added_count} bài hátn**"
-                        f"**Đã thêm vào playlist: {playlist_added_count} bài hát\n**"
-                        f"**Lỗi: {failed_count} bài hát **",
-                        color=(
-                            discord.Color.green()
-                            if added_count > 0
-                            else discord.Color.red()
-                        ),
-                    )
-
-                    await interaction.edit_original_response(embed=final_embed)
-                    return
-
-                else:
-                    # Failed to process playlist
-                    embed = discord.Embed(
-                        title="❌ YouTube Playlist Error",
-                        description=message,
-                        color=discord.Color.red(),
-                    )
-                    await interaction.followup.send(embed=embed)
-                    return
+                return
 
             # Regular single video/search - existing logic
             # Show processing message
@@ -1461,7 +1310,7 @@ class MusicBot(commands.Bot):
 
             if success:
                 embed = discord.Embed(
-                    title="✅ Đã xóa playlist",
+                    title=f"Đã xóa playlist {name}",
                     description=message,
                     color=discord.Color.green(),
                 )
@@ -1544,6 +1393,236 @@ class MusicBot(commands.Bot):
             )
 
             await interaction.response.send_message(embed=embed)
+
+        # ===============================
+        # 🔧 Resource Management Commands
+        # ===============================
+
+        @self.tree.command(
+            name="resources", description="🔧 [Admin] Hiển thị thống kê tài nguyên bot"
+        )
+        async def show_resources(interaction: discord.Interaction):
+            """🔧 Show bot resource statistics (Admin only)"""
+
+            # Simple admin check (you can enhance this)
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message(
+                    "❌ Chỉ admin mới có quyền xem thống kê tài nguyên!", ephemeral=True
+                )
+                return
+
+            stats = audio_service.get_resource_stats()
+
+            embed = discord.Embed(
+                title="🔧 Bot Resource Statistics",
+                description="Thống kê sử dụng tài nguyên và hiệu suất",
+                color=discord.Color.blue(),
+            )
+
+            # Connection Stats
+            embed.add_field(
+                name="🎵 Audio Connections",
+                value=f"**Active Voice Clients**: {stats['total_voice_clients']}\n"
+                f"**Audio Players**: {stats['total_audio_players']}\n"
+                f"**Queue Managers**: {stats['total_queue_managers']}\n"
+                f"**Connections Created**: {stats['connections_created']}\n"
+                f"**Connections Cleaned**: {stats['connections_cleaned']}",
+                inline=True,
+            )
+
+            # Cache Stats
+            embed.add_field(
+                name="💾 Cache Performance",
+                value=f"**Cache Size**: {stats['cache_size']}\n"
+                f"**Cache Hits**: {stats['cache_hits']}\n"
+                f"**Cache Misses**: {stats['cache_misses']}\n"
+                f"**Hit Rate**: {stats['cache_hit_rate']:.1f}%",
+                inline=True,
+            )
+
+            # Cleanup Stats
+            embed.add_field(
+                name="🧹 Cleanup Statistics",
+                value=f"**Memory Cleanups**: {stats['memory_cleanups']}\n"
+                f"**Active Connections**: {stats['active_connections']}\n"
+                f"**Status**: {'🟢 Healthy' if stats['active_connections'] < 8 else '🟡 High Usage'}",
+                inline=True,
+            )
+
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        @self.tree.command(
+            name="cleanup", description="🧹 [Admin] Force cleanup idle resources"
+        )
+        async def force_cleanup(interaction: discord.Interaction):
+            """🧹 Force cleanup of idle resources (Admin only)"""
+
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message(
+                    "❌ Chỉ admin mới có quyền force cleanup!", ephemeral=True
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True)
+
+            try:
+                cleanup_stats = await audio_service.force_cleanup_idle_connections()
+
+                embed = discord.Embed(
+                    title="🧹 Cleanup Complete",
+                    description="Đã thực hiện dọn dẹp tài nguyên không sử dụng",
+                    color=discord.Color.green(),
+                )
+
+                embed.add_field(
+                    name="📊 Cleanup Results",
+                    value=f"**Expired Cache Items**: {cleanup_stats['expired_cache_items']}\n"
+                    f"**Idle Connections Removed**: {cleanup_stats['idle_connections']}\n"
+                    f"**Remaining Connections**: {cleanup_stats['total_connections'] - cleanup_stats['idle_connections']}",
+                    inline=False,
+                )
+
+                await interaction.followup.send(embed=embed, ephemeral=True)
+
+            except Exception as e:
+                logger.error(f"Error in force cleanup: {e}")
+                await interaction.followup.send(
+                    f"❌ Lỗi khi cleanup: {str(e)}", ephemeral=True
+                )
+
+    async def _process_playlist_videos(
+        self, video_urls: list, playlist_message: str, guild_id: int, requested_by: str
+    ):
+        """Helper method to process YouTube playlist videos with progress tracking"""
+        added_count = 0
+        failed_count = 0
+
+        # Process videos in batches to avoid timeout
+        for i, video_url in enumerate(video_urls[:50]):  # Limit to 50 videos
+            try:
+                success_video, _, song = await playback_service.play_request(
+                    user_input=video_url,
+                    guild_id=guild_id,
+                    requested_by=requested_by,
+                    auto_play=(i == 0),  # Auto-play first song only
+                )
+
+                if success_video:
+                    added_count += 1
+                else:
+                    failed_count += 1
+
+            except Exception as e:
+                logger.error(f"Error processing playlist video {video_url}: {e}")
+                failed_count += 1
+
+        # Return final result embed
+        final_embed = discord.Embed(
+            title="✅ YouTube Playlist Processed",
+            description=f"📋 **{playlist_message}**\n"
+            f"✅ Successfully added: {added_count} videos\n"
+            f"❌ Failed: {failed_count} videos",
+            color=(discord.Color.green() if added_count > 0 else discord.Color.red()),
+        )
+
+        if added_count > 0:
+            final_embed.add_field(
+                name="🎵 Status",
+                value="Started playing!" if added_count > 0 else "Added to queue",
+                inline=False,
+            )
+
+        return final_embed
+
+    async def _process_add_playlist_videos(
+        self,
+        video_urls: list,
+        playlist_message: str,
+        active_playlist: str,
+        guild_id: int,
+        requested_by: str,
+    ):
+        """Helper method to process YouTube playlist videos for /add command"""
+        added_count = 0
+        failed_count = 0
+        playlist_added_count = 0
+
+        # Process videos in batches to avoid timeout
+        for i, video_url in enumerate(video_urls[:50]):  # Limit to 50 videos
+            try:
+                # Step 1: Process song like /play (but without auto_play)
+                success, response_message, song = await playback_service.play_request(
+                    user_input=video_url,
+                    guild_id=guild_id,
+                    requested_by=requested_by,
+                    auto_play=False,  # Don't auto-start playback
+                )
+
+                if success and song:
+                    added_count += 1
+
+                    # Step 2: Add processed song to playlist
+                    title = song.metadata.title if song.metadata else video_url
+                    playlist_success, playlist_message = (
+                        self.playlist_service.add_to_playlist(
+                            active_playlist,
+                            song.original_input,
+                            song.source_type,
+                            title,
+                        )
+                    )
+
+                    if playlist_success:
+                        playlist_added_count += 1
+                else:
+                    failed_count += 1
+
+            except Exception as e:
+                logger.error(f"Error processing add playlist video {video_url}: {e}")
+                failed_count += 1
+
+        # Return final result embed
+        final_embed = discord.Embed(
+            title=f"✅ Đã cập nhật playlist {active_playlist}",
+            description=f"📋 **{playlist_message}**\n"
+            f"✅ Đã thêm vào queue: {added_count} bài hát\n"
+            f"✅ Đã thêm vào playlist: {playlist_added_count} bài hát\n"
+            f"❌ Lỗi: {failed_count} bài hát",
+            color=(discord.Color.green() if added_count > 0 else discord.Color.red()),
+        )
+
+        return final_embed
+
+    def _create_use_playlist_result(
+        self, success: bool, message: str, playlist_name: str, guild_id: int
+    ):
+        """Helper method to create result embed for /use command"""
+        if success:
+            # Always track the active playlist for this guild, even if empty
+            self.active_playlists[guild_id] = playlist_name
+
+            # Check if playlist was empty
+            if "is empty" in message:
+                embed = discord.Embed(
+                    title="✅ Đã chọn playlist trống",
+                    description=f"📋 **{playlist_name}** đã được đặt làm playlist hiện tại\n"
+                    + f"⚠️ {message}\n"
+                    + f"💡 Sử dụng `/add <song>` để thêm bài hát",
+                    color=discord.Color.orange(),
+                )
+            else:
+                embed = discord.Embed(
+                    title="✅ Đã load playlist",
+                    description=message
+                    + f"\n🎵 Playlist hiện tại: **{playlist_name}**",
+                    color=discord.Color.green(),
+                )
+        else:
+            embed = discord.Embed(
+                title="❌ Lỗi", description=message, color=discord.Color.red()
+            )
+
+        return embed
 
     async def close(self):
         """Clean shutdown"""

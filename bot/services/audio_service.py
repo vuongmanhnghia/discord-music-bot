@@ -4,6 +4,7 @@ import discord
 
 from ..domain.entities.song import Song
 from ..domain.entities.queue import QueueManager
+from ..utils.resource_manager import ResourceManager
 
 from ..pkg.logger import logger
 from .audio_player import AudioPlayer
@@ -19,6 +20,12 @@ class AudioService:
         self._voice_clients: Dict[int, discord.VoiceClient] = {}
         self._audio_players: Dict[int, AudioPlayer] = {}
         self._queue_managers: Dict[int, QueueManager] = {}
+
+        # Initialize ResourceManager for memory leak prevention
+        self.resource_manager = ResourceManager(
+            max_connections=10,  # Limit concurrent voice connections
+            cleanup_interval=300,  # Cleanup every 5 minutes
+        )
 
     async def connect_to_channel(
         self, channel: Union[discord.VoiceChannel, discord.StageChannel]
@@ -37,6 +44,9 @@ class AudioService:
             voice_client = await channel.connect()
 
             self._voice_clients[guild_id] = voice_client
+
+            # Register connection with ResourceManager
+            self.resource_manager.register_connection(guild_id, voice_client)
 
             # Create audio player
             audio_player = AudioPlayer(voice_client, guild_id)
@@ -78,6 +88,9 @@ class AudioService:
                 voice_client = self._voice_clients[guild_id]
                 await voice_client.disconnect()
                 del self._voice_clients[guild_id]
+
+            # Unregister from ResourceManager
+            self.resource_manager.unregister_connection(guild_id)
 
             logger.info(f"Disconnected from voice in guild {guild_id}")
             return True
@@ -177,6 +190,51 @@ class AudioService:
         # Try to play next song on error
         if guild_id:
             await self.skip_to_next(guild_id)
+
+    async def start_resource_management(self):
+        """Start ResourceManager background tasks"""
+        await self.resource_manager.start_cleanup_task()
+        logger.info("🔄 AudioService resource management started")
+
+    async def cleanup_all(self):
+        """Cleanup all resources and connections"""
+        logger.info("🧹 AudioService: Starting full cleanup...")
+
+        # Get list of all active guild IDs
+        guild_ids = list(self._voice_clients.keys())
+
+        # Disconnect all voice clients
+        for guild_id in guild_ids:
+            try:
+                await self.disconnect_from_guild(guild_id)
+            except Exception as e:
+                logger.error(f"Error cleaning up guild {guild_id}: {e}")
+
+        # Clear all managers
+        self._queue_managers.clear()
+
+        # Shutdown ResourceManager
+        await self.resource_manager.shutdown()
+
+        logger.info("✅ AudioService cleanup complete")
+
+    async def force_cleanup_idle_connections(self):
+        """Force cleanup of idle connections"""
+        cleanup_stats = await self.resource_manager.perform_cleanup()
+        logger.info(f"🧹 Forced cleanup completed: {cleanup_stats}")
+        return cleanup_stats
+
+    def get_resource_stats(self) -> dict:
+        """Get resource management statistics"""
+        stats = self.resource_manager.get_stats()
+        stats.update(
+            {
+                "total_voice_clients": len(self._voice_clients),
+                "total_audio_players": len(self._audio_players),
+                "total_queue_managers": len(self._queue_managers),
+            }
+        )
+        return stats
 
     async def cleanup_all(self):
         """Cleanup all voice connections"""
