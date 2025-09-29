@@ -127,14 +127,16 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         echo "Applying x86_64 runtime optimizations..."; \
     fi
 
-# Switch to non-root user
-USER bot
-
-# Copy application code (use .dockerignore to exclude build artifacts)
+# Copy application code first
 COPY --chown=bot:bot . .
 
-# Create necessary directories with proper ownership
+# Switch to non-root user AFTER copying
+USER bot
+
+# Create directories as bot user (this ensures correct ownership)
 RUN mkdir -p playlist logs && \
+    # Verify permissions
+    ls -la playlist logs && \
     # Platform-specific user environment setup
     if [ "$TARGETARCH" = "arm64" ]; then \
         echo "export PYTHONOPTIMIZE=2" >> ~/.bashrc; \

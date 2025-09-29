@@ -108,7 +108,7 @@ async def test_empty_playlist_fix():
             print(f"   💡 Discord Hint: 'Sử dụng /add <song> để thêm bài hát'")
         else:
             print(f"   📋 Set as active playlist: '{playlist_name}'")
-            print(f"   🟢 Discord Message: 'Đã nạp playlist'")
+            print(f"   🟢 Discord Message: 'Đã cập nhật playlist'")
     else:
         print(f"   🔴 Discord Message: 'Lỗi: {message}'")
 

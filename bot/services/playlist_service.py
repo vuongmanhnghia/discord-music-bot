@@ -27,7 +27,7 @@ class PlaylistService:
         guild_id: int,
         force_reload: bool = False,
     ) -> tuple[bool, str]:
-        """Load playlist entries into queue as songs with smart deduplication"""
+        """Load playlist entries into queue as songs"""
         playlist = self.library.get_playlist(playlist_name)
         if not playlist:
             return False, f"Playlist '{playlist_name}' not found"
@@ -38,7 +38,7 @@ class PlaylistService:
                 f"Playlist '{playlist_name}' is empty. Use `/add <song>` to add songs first.",
             )
 
-        # Smart deduplication: Check if playlist already loaded
+        # Check if playlist already loaded
         if not force_reload:
             if guild_id in self._loaded_playlists:
                 if playlist_name in self._loaded_playlists[guild_id]:
