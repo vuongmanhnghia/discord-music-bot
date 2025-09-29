@@ -8,6 +8,12 @@ from ..pkg.logger import logger
 from .processing import SongProcessingService
 from .cached_processing import CachedSongProcessor
 from .audio_service import audio_service
+from ..utils.async_processor import (
+    AsyncSongProcessor,
+    ProcessingPriority,
+    initialize_async_processor,
+    get_async_processor,
+)
 
 
 class PlaybackService:
@@ -24,6 +30,9 @@ class PlaybackService:
     def __init__(self):
         self.processing_service = SongProcessingService()
         self.cached_processor = CachedSongProcessor()  # Smart caching processor
+        self.async_processor: Optional[AsyncSongProcessor] = (
+            None  # Will be initialized later
+        )
         self._processing_tasks: dict[int, set[asyncio.Task]] = {}
 
     async def play_request(
@@ -225,6 +234,168 @@ class PlaybackService:
 
         except Exception as e:
             logger.error(f"Error trying to start playback in guild {guild_id}: {e}")
+
+    async def play_request_async(
+        self,
+        user_input: str,
+        guild_id: int,
+        requested_by: str,
+        priority: ProcessingPriority = ProcessingPriority.NORMAL,
+        interaction: Optional[object] = None,
+        auto_play: bool = True,
+    ) -> tuple[bool, str, Optional[Song], Optional[str]]:
+        """
+        Play request with async background processing
+
+        Returns:
+            (success, message, song, task_id)
+        """
+        logger.info(
+            f"Processing async play request: '{user_input}' from {requested_by} in guild {guild_id}"
+        )
+
+        try:
+            # Initialize async processor if needed
+            if self.async_processor is None:
+                self.async_processor = await get_async_processor()
+
+            # Step 1: Analyze input and create song
+            analyzer = InputAnalyzer(user_input)
+            analysis_result = await analyzer.analyze()
+
+            if not analysis_result.is_valid:
+                return (
+                    False,
+                    analysis_result.error_message or "Invalid input",
+                    None,
+                    None,
+                )
+
+            # Step 2: Create song object
+            song = Song(
+                url=analysis_result.processed_input,
+                title=analysis_result.processed_input,
+                guild_id=guild_id,
+                requested_by=requested_by,
+            )
+
+            # Step 3: Add to queue immediately (before processing)
+            queue_manager = audio_service.get_queue_manager(guild_id)
+            if not queue_manager:
+                logger.error(f"No queue manager found for guild {guild_id}")
+                return (False, "Lỗi hệ thống: Không tìm thấy queue manager", None, None)
+
+            position = queue_manager.add_song(song)
+
+            # Step 4: Submit for async processing with enhanced callback
+            callback = None
+            if interaction:
+                from ..utils.discord_progress import EnhancedProgressCallback
+
+                callback = EnhancedProgressCallback(interaction)
+            else:
+                callback = self._create_async_callback(guild_id)
+
+            task_id = await self.async_processor.submit_task(
+                song=song, priority=priority, callback=callback
+            )
+
+            # Step 5: Start playback if not already playing and auto_play is True
+            if auto_play and not audio_service.is_playing(guild_id):
+                await self._try_start_playback(guild_id)
+
+            return (
+                True,
+                f"🔄 **{song.title}** đã được thêm vào hàng đợi ・ *(Vị trí: {position})* ・ *(Đang xử lý...)*",
+                song,
+                task_id,
+            )
+
+        except Exception as e:
+            logger.error(f"Error processing async play request '{user_input}': {e}")
+            return (False, f"Lỗi: {str(e)}", None, None)
+
+    def _create_async_callback(self, guild_id: int):
+        """Create simple callback for async processing completion"""
+
+        async def callback(task):
+            try:
+                if task.status.value == "completed":
+                    logger.info(f"✅ Async processing completed for task {task.id}")
+
+                    # Try to start playbook if not already playing
+                    await self._try_start_playback(guild_id)
+
+                elif task.status.value == "failed":
+                    logger.error(
+                        f"❌ Async processing failed for task {task.id}: {task.error_message}"
+                    )
+
+                    # Mark song as failed
+                    task.song.mark_failed(task.error_message or "Processing failed")
+
+            except Exception as e:
+                logger.error(f"Error in async callback: {e}")
+
+        return callback
+
+    async def get_processing_queue_info(self, guild_id: Optional[int] = None) -> dict:
+        """Get information about processing queue"""
+        try:
+            if self.async_processor is None:
+                return {"error": "Async processor not initialized"}
+
+            queue_info = await self.async_processor.get_queue_info()
+
+            # Add guild-specific information if requested
+            if guild_id:
+                guild_tasks = []
+                for task in self.async_processor.active_tasks.values():
+                    if task.song.guild_id == guild_id:
+                        guild_tasks.append(
+                            {
+                                "id": task.id,
+                                "song": task.song.title,
+                                "status": task.status.value,
+                                "progress": task.progress,
+                                "priority": task.priority.name,
+                            }
+                        )
+
+                queue_info["guild_tasks"] = guild_tasks
+
+            return queue_info
+
+        except Exception as e:
+            logger.error(f"Error getting processing queue info: {e}")
+            return {"error": str(e)}
+
+    async def cancel_processing_task(self, task_id: str) -> tuple[bool, str]:
+        """Cancel a processing task"""
+        try:
+            if self.async_processor is None:
+                return (False, "Async processor not initialized")
+
+            success = await self.async_processor.cancel_task(task_id)
+
+            if success:
+                return (True, f"Task {task_id} cancelled successfully")
+            else:
+                return (False, f"Could not cancel task {task_id}")
+
+        except Exception as e:
+            logger.error(f"Error cancelling task {task_id}: {e}")
+            return (False, f"Error: {str(e)}")
+
+    async def initialize_async_processing(self, bot_instance=None):
+        """Initialize async processing system"""
+        try:
+            self.async_processor = await initialize_async_processor(bot_instance)
+            logger.info("🚀 Async processing system initialized")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize async processing: {e}")
+            return False
 
     async def skip_current_song(self, guild_id: int) -> tuple[bool, str]:
         """Skip current song"""

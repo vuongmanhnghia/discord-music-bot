@@ -1,0 +1,12 @@
+{
+  "popular_urls": {},
+  "stats": {
+    "hits": 0,
+    "misses": 0,
+    "evictions": 0,
+    "cache_saves": 0,
+    "cache_loads": 0,
+    "processing_time_saved": 0.0
+  },
+  "saved_at": 1759130363.028204
+}

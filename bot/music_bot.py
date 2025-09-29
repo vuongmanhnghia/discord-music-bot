@@ -58,6 +58,13 @@ class MusicBot(commands.Bot):
             await audio_service.start_resource_management()
             logger.info("✅ Resource management started")
 
+            # Initialize async processing system
+            success = await playback_service.initialize_async_processing(self)
+            if success:
+                logger.info("✅ Async processing system started")
+            else:
+                logger.warning("⚠️ Failed to start async processing system")
+
             # Initialize SmartCache system
             try:
                 # Warm cache with popular songs (async, non-blocking)
@@ -1371,6 +1378,7 @@ class MusicBot(commands.Bot):
             playback_cmds = [
                 f"> `/play`           - Phát từ playlist hiện tại",
                 f"> `/play <query>`   - Phát nhạc từ URL/tìm kiếm",
+                f"> `/aplay <url>`    - Phát toàn bộ playlist từ URL (Async)",
                 f"> `/pause`          - Tạm dừng phát",
                 f"> `/resume`         - Tiếp tục phát",
                 f"> `/skip`           - Bỏ qua bài hiện tại",
@@ -1384,6 +1392,8 @@ class MusicBot(commands.Bot):
             # Queue commands
             queue_cmds = [
                 f"> `/queue`          - Hiển thị hàng đợi hiện tại",
+                f"> `/queue_status`   - Hiển thị trạng thái hàng đợi",
+                f"> `/cancel_task`    - Hủy tác vụ xử lý đang chạy",
                 f"> `/nowplaying`     - Hiển thị bài đang phát",
                 f"> `/volume <0-100>` - Đặt âm lượng",
                 f"> `/repeat <mode>`  - Đặt chế độ lặp",
@@ -1649,6 +1659,207 @@ class MusicBot(commands.Bot):
                 logger.error(f"Error cleaning cache: {e}")
                 await interaction.followup.send(
                     f"❌ Lỗi khi clean cache: {str(e)}", ephemeral=True
+                )
+
+        @self.tree.command(
+            name="aplay", description="🚀 Phát nhạc với xử lý bất đồng bộ (nhanh hơn)"
+        )
+        @app_commands.describe(
+            query="URL YouTube hoặc từ khóa tìm kiếm",
+            priority="Mức độ ưu tiên xử lý (normal/high/urgent)",
+        )
+        async def async_play(
+            interaction: discord.Interaction,
+            query: str,
+            priority: Optional[str] = "normal",
+        ):
+            """🚀 Play music with async processing for faster response"""
+
+            # Import here to avoid circular import
+            from .utils.async_processor import ProcessingPriority
+
+            # Parse priority
+            priority_map = {
+                "low": ProcessingPriority.LOW,
+                "normal": ProcessingPriority.NORMAL,
+                "high": ProcessingPriority.HIGH,
+                "urgent": ProcessingPriority.URGENT,
+            }
+
+            processing_priority = priority_map.get(
+                priority.lower(), ProcessingPriority.NORMAL
+            )
+
+            # Handle with InteractionManager for timeout prevention
+            async def async_play_handler():
+                # Check voice connection
+                if (
+                    not isinstance(interaction.user, discord.Member)
+                    or not interaction.user.voice
+                ):
+                    return (False, "❌ Bạn cần vào voice channel trước!")
+
+                voice_channel = interaction.user.voice.channel
+                guild_id = interaction.guild_id
+
+                # Connect to voice if not already connected
+                if not audio_service.is_connected(guild_id):
+                    try:
+                        await audio_service.connect_to_voice_channel(voice_channel)
+                    except Exception as e:
+                        return (False, f"❌ Không thể kết nối voice: {str(e)}")
+
+                # Process with async processing
+                success, message, song, task_id = (
+                    await playback_service.play_request_async(
+                        user_input=query,
+                        guild_id=guild_id,
+                        requested_by=str(interaction.user),
+                        priority=processing_priority,
+                        interaction=interaction,
+                        auto_play=True,
+                    )
+                )
+
+                if success and song and task_id:
+                    priority_emoji = "🔥" if processing_priority.value >= 3 else "⚡"
+                    return (True, f"{priority_emoji} {message}\n*Task ID: `{task_id}`*")
+                else:
+                    return (False, message)
+
+            await self.interaction_manager.handle_long_operation(
+                interaction, async_play_handler, "Đang xử lý yêu cầu phát nhạc..."
+            )
+
+        @self.tree.command(
+            name="queue_status", description="📊 Xem trạng thái hàng đợi xử lý"
+        )
+        async def processing_queue_status(interaction: discord.Interaction):
+            """📊 Show processing queue status"""
+            await interaction.response.defer(ephemeral=True)
+
+            try:
+                guild_id = interaction.guild_id
+                queue_info = await playback_service.get_processing_queue_info(guild_id)
+
+                if "error" in queue_info:
+                    await interaction.followup.send(
+                        f"❌ Lỗi: {queue_info['error']}", ephemeral=True
+                    )
+                    return
+
+                embed = discord.Embed(
+                    title="📊 Processing Queue Status",
+                    description="Thông tin hàng đợi xử lý bài hát",
+                    color=discord.Color.blue(),
+                )
+
+                # General queue info
+                embed.add_field(
+                    name="🎯 Overall Queue",
+                    value=f"**Pending**: {queue_info.get('queue_size', 0)}\n"
+                    f"**Processing**: {queue_info.get('active_tasks', 0)}\n"
+                    f"**Total Processed**: {queue_info.get('total_processed', 0)}",
+                    inline=True,
+                )
+
+                # Worker stats
+                worker_stats = queue_info.get("worker_stats", {})
+                if worker_stats:
+                    worker_info = []
+                    for worker_id, stats in worker_stats.items():
+                        status = "🟢 Active" if stats["is_active"] else "🔴 Inactive"
+                        current = (
+                            f" *(Processing: {stats['current_task']})*"
+                            if stats["current_task"]
+                            else ""
+                        )
+                        worker_info.append(
+                            f"**{worker_id}**: {status}\n"
+                            f"Completed: {stats['completed']} | Failed: {stats['failed']}{current}"
+                        )
+
+                    embed.add_field(
+                        name="👷 Workers",
+                        value="\n\n".join(
+                            worker_info[:3]
+                        ),  # Limit to 3 workers for space
+                        inline=True,
+                    )
+
+                # Guild-specific tasks
+                guild_tasks = queue_info.get("guild_tasks", [])
+                if guild_tasks:
+                    task_info = []
+                    for task in guild_tasks[:5]:  # Limit to 5 tasks
+                        status_emoji = {
+                            "queued": "⏳",
+                            "processing": "🔄",
+                            "completed": "✅",
+                            "failed": "❌",
+                            "cancelled": "⏹️",
+                        }.get(task["status"], "❓")
+
+                        task_info.append(
+                            f"{status_emoji} **{task['song'][:30]}...** "
+                            f"({task['progress']}%) - {task['priority']}"
+                        )
+
+                    embed.add_field(
+                        name=f"🎵 Guild Tasks ({len(guild_tasks)})",
+                        value="\n".join(task_info),
+                        inline=False,
+                    )
+
+                # Uptime
+                uptime = queue_info.get("uptime")
+                if uptime:
+                    embed.add_field(
+                        name="⏰ Uptime",
+                        value=str(uptime).split(".")[0],  # Remove microseconds
+                        inline=True,
+                    )
+
+                await interaction.followup.send(embed=embed, ephemeral=True)
+
+            except Exception as e:
+                logger.error(f"Error getting queue status: {e}")
+                await interaction.followup.send(
+                    f"❌ Lỗi khi lấy thông tin queue: {str(e)}", ephemeral=True
+                )
+
+        @self.tree.command(name="cancel_task", description="❌ Hủy task xử lý bài hát")
+        @app_commands.describe(task_id="ID của task cần hủy")
+        async def cancel_processing_task(
+            interaction: discord.Interaction, task_id: str
+        ):
+            """❌ Cancel a processing task"""
+            await interaction.response.defer(ephemeral=True)
+
+            try:
+                success, message = await playback_service.cancel_processing_task(
+                    task_id
+                )
+
+                if success:
+                    embed = discord.Embed(
+                        title="❌ Task Cancelled",
+                        description=f"✅ {message}",
+                        color=discord.Color.orange(),
+                    )
+                else:
+                    embed = discord.Embed(
+                        title="❌ Cancel Failed",
+                        description=f"⚠️ {message}",
+                        color=discord.Color.red(),
+                    )
+
+                await interaction.followup.send(embed=embed, ephemeral=True)
+
+            except Exception as e:
+                logger.error(f"Error cancelling task: {e}")
+                await interaction.followup.send(
+                    f"❌ Lỗi khi hủy task: {str(e)}", ephemeral=True
                 )
 
     async def _process_playlist_videos(
