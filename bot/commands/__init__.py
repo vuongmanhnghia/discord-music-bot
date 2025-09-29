@@ -21,18 +21,20 @@ class BaseCommandHandler:
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def ensure_voice_connection(self, interaction: discord.Interaction) -> Optional[discord.VoiceClient]:
+    async def ensure_voice_connection(
+        self, interaction: discord.Interaction
+    ) -> Optional[discord.VoiceClient]:
         """Ensure bot is connected to voice channel, return VoiceClient if connected"""
         if not interaction.guild:
             await interaction.response.send_message(
-                ERROR_MESSAGES['guild_only'], ephemeral=True
+                ERROR_MESSAGES["guild_only"], ephemeral=True
             )
             return None
 
         voice_client = interaction.guild.voice_client
         if not voice_client or not voice_client.is_connected():
             await interaction.response.send_message(
-                ERROR_MESSAGES['not_connected'], ephemeral=True
+                ERROR_MESSAGES["not_connected"], ephemeral=True
             )
             return None
 
@@ -42,7 +44,7 @@ class BaseCommandHandler:
         """Ensure user is in a voice channel"""
         if not interaction.user.voice or not interaction.user.voice.channel:
             await interaction.response.send_message(
-                ERROR_MESSAGES['voice_required'], ephemeral=True
+                ERROR_MESSAGES["voice_required"], ephemeral=True
             )
             return False
         return True
@@ -60,7 +62,7 @@ class BaseCommandHandler:
 
         if voice_client.channel != user_voice.channel:
             await interaction.response.send_message(
-                ERROR_MESSAGES['same_channel_required'], ephemeral=True
+                ERROR_MESSAGES["same_channel_required"], ephemeral=True
             )
             return False
 
@@ -82,20 +84,24 @@ class BaseCommandHandler:
         """Create standardized info embed"""
         return EmbedFactory.create_info_embed(title, description)
 
-    async def handle_command_error(self, interaction: discord.Interaction, error: Exception, command_name: str):
+    async def handle_command_error(
+        self, interaction: discord.Interaction, error: Exception, command_name: str
+    ):
         """Standardized error handling for commands"""
         logger.error(f"Error in /{command_name}: {error}")
-        
+
         error_embed = self.create_error_embed(
-            f"❌ Lỗi trong lệnh /{command_name}",
-            f"Đã xảy ra lỗi: {str(error)}"
+            f"{ERROR_MESSAGES['command_error']} /{command_name}",
+            f"Đã xảy ra lỗi: {str(error)}",
         )
-        
+
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(embed=error_embed, ephemeral=True)
             else:
-                await interaction.response.send_message(embed=error_embed, ephemeral=True)
+                await interaction.response.send_message(
+                    embed=error_embed, ephemeral=True
+                )
         except Exception as e:
             logger.error(f"Failed to send error message: {e}")
 
@@ -116,5 +122,5 @@ class CommandRegistry:
     def setup_all_commands(self):
         """Setup all registered command handlers"""
         for handler in self.handlers:
-            if hasattr(handler, 'setup_commands'):
+            if hasattr(handler, "setup_commands"):
                 handler.setup_commands()

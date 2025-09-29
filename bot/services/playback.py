@@ -3,6 +3,7 @@ from typing import Optional
 
 from ..domain.entities.song import Song
 from ..domain.entities.input import InputAnalyzer
+from ..config.performance import performance_config
 
 from ..pkg.logger import logger
 from .processing import SongProcessingService
@@ -28,6 +29,10 @@ class PlaybackService:
     """
 
     def __init__(self):
+        # Load performance configuration
+        self.config = performance_config
+        self.config.log_config()  # Log current configuration
+
         self.processing_service = SongProcessingService()
         self.cached_processor = CachedSongProcessor()  # Smart caching processor
         self.async_processor: Optional[AsyncSongProcessor] = (
@@ -260,26 +265,17 @@ class PlaybackService:
                 self.async_processor = await get_async_processor()
 
             # Step 1: Analyze input and create song
-            analyzer = InputAnalyzer(user_input)
-            analysis_result = await analyzer.analyze()
+            song = InputAnalyzer.create_song(user_input, requested_by, guild_id)
 
-            if not analysis_result.is_valid:
+            if not song:
                 return (
                     False,
-                    analysis_result.error_message or "Invalid input",
+                    "Invalid input",
                     None,
                     None,
                 )
 
-            # Step 2: Create song object
-            song = Song(
-                url=analysis_result.processed_input,
-                title=analysis_result.processed_input,
-                guild_id=guild_id,
-                requested_by=requested_by,
-            )
-
-            # Step 3: Add to queue immediately (before processing)
+            # Step 2: Add to queue immediately (before processing)
             queue_manager = audio_service.get_queue_manager(guild_id)
             if not queue_manager:
                 logger.error(f"No queue manager found for guild {guild_id}")
@@ -388,10 +384,20 @@ class PlaybackService:
             return (False, f"Error: {str(e)}")
 
     async def initialize_async_processing(self, bot_instance=None):
-        """Initialize async processing system"""
+        """Initialize async processing system with dynamic config"""
         try:
-            self.async_processor = await initialize_async_processor(bot_instance)
-            logger.info("🚀 Async processing system initialized")
+            if not self.config.enable_background_processing:
+                logger.info("🚫 Background processing disabled by config")
+                return True
+
+            self.async_processor = await initialize_async_processor(
+                bot_instance,
+                worker_count=self.config.async_workers,
+                max_queue_size=self.config.processing_queue_size,
+            )
+            logger.info(
+                f"🚀 Async processing system initialized with {self.config.async_workers} workers"
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to initialize async processing: {e}")
@@ -545,6 +551,19 @@ class PlaybackService:
             logger.error(f"Error setting volume in guild {guild_id}: {e}")
             return (False, f"Volume error: {str(e)}")
 
+    async def set_repeat_mode(self, guild_id: int, mode: str) -> bool:
+        """Set repeat mode for queue"""
+        try:
+            queue_manager = audio_service.get_queue_manager(guild_id)
+            if not queue_manager:
+                return False
+
+            return queue_manager.set_repeat_mode(mode)
+
+        except Exception as e:
+            logger.error(f"Error setting repeat mode in guild {guild_id}: {e}")
+            return False
+
     # ===============================
     # Smart Caching Methods
     # ===============================
@@ -572,6 +591,83 @@ class PlaybackService:
     async def shutdown_cache_system(self):
         """Clean shutdown of caching system"""
         await self.cached_processor.shutdown()
+
+    async def start_playlist_playback(self, guild_id: int, playlist_name: str) -> bool:
+        """
+        Start playback from a playlist
+
+        Args:
+            guild_id: Guild ID where to start playback
+            playlist_name: Name of the playlist to play from
+
+        Returns:
+            bool: Success status
+        """
+        try:
+            # Import playlist service (lazy import to avoid circular dependency)
+            from .playlist_service import PlaylistService
+            from ..domain.entities.library import LibraryManager
+
+            # Create library manager instance for reading playlists
+            library_manager = LibraryManager()
+            playlist_service = PlaylistService(library_manager)
+
+            # Get playlist content
+            success, playlist_songs = playlist_service.get_playlist_content(
+                playlist_name
+            )
+            if not success or not playlist_songs:
+                logger.error(
+                    f"Failed to load playlist '{playlist_name}' or playlist is empty"
+                )
+                return False
+
+            # Get queue manager
+            queue_manager = audio_service.get_queue_manager(guild_id)
+            if not queue_manager:
+                logger.error(f"No queue manager found for guild {guild_id}")
+                return False
+
+            # Add songs from playlist to queue
+            added_count = 0
+            for song_info in playlist_songs:
+                try:
+                    # Use the first available song to start playback immediately
+                    if added_count == 0:
+                        # For the first song, use immediate processing to start playback quickly
+                        success_first, _, _ = await self.play_request(
+                            song_info["original_input"],
+                            guild_id,
+                            "Playlist",
+                            auto_play=True,
+                        )
+                        if success_first:
+                            added_count += 1
+                    else:
+                        # For remaining songs, add them to async processing
+                        await self.play_request_async(
+                            song_info["original_input"], guild_id, "Playlist"
+                        )
+                        added_count += 1
+
+                except Exception as e:
+                    logger.error(f"Error adding song to playlist playback: {e}")
+                    continue
+
+            if added_count > 0:
+                logger.info(
+                    f"Started playlist playback: {added_count} songs from '{playlist_name}'"
+                )
+                return True
+            else:
+                logger.error(
+                    f"Failed to start any songs from playlist '{playlist_name}'"
+                )
+                return False
+
+        except Exception as e:
+            logger.error(f"Error in start_playlist_playback: {e}")
+            return False
 
 
 # Global playback service instance

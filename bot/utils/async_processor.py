@@ -476,8 +476,10 @@ class AsyncSongProcessor:
 async_processor: Optional[AsyncSongProcessor] = None
 
 
-async def initialize_async_processor(bot_instance=None):
-    """Initialize the global async processor"""
+async def initialize_async_processor(
+    bot_instance=None, worker_count=3, max_queue_size=100
+):
+    """Initialize the global async processor with configurable parameters"""
     global async_processor
 
     if async_processor is None:
@@ -489,11 +491,15 @@ async def initialize_async_processor(bot_instance=None):
             )
 
         async_processor = AsyncSongProcessor(
-            worker_count=3, max_queue_size=100, progress_callback=progress_callback
+            worker_count=worker_count,
+            max_queue_size=max_queue_size,
+            progress_callback=progress_callback,
         )
 
         await async_processor.start()
-        logger.info("🚀 Global AsyncSongProcessor initialized")
+        logger.info(
+            f"🚀 Global AsyncSongProcessor initialized with {worker_count} workers"
+        )
 
     return async_processor
 

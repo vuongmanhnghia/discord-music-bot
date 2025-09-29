@@ -7,8 +7,9 @@ import discord
 from discord import app_commands
 
 from . import BaseCommandHandler
-from ..pkg.logger import logger
 from ..utils.embed_factory import EmbedFactory
+
+from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
 
 
 class QueueCommandHandler(BaseCommandHandler):
@@ -24,36 +25,32 @@ class QueueCommandHandler(BaseCommandHandler):
             try:
                 if not interaction.guild:
                     await interaction.response.send_message(
-                        "⛔ Lệnh này chỉ có thể sử dụng trong server!", ephemeral=True
+                        ERROR_MESSAGES["guild_only"], ephemeral=True
                     )
                     return
 
                 queue_manager = self.get_queue_manager(interaction.guild.id)
                 if not queue_manager:
                     await interaction.response.send_message(
-                        "❌ Không có hàng đợi nào!", ephemeral=True
+                        ERROR_MESSAGES["no_queue"], ephemeral=True
                     )
                     return
 
                 # Get queue info
-                current_song = queue_manager.get_current_song()
-                queue_list = queue_manager.queue
-                
+                current_song = queue_manager.current_song
+                queue_list = queue_manager.get_all_songs()
+
                 if not current_song and not queue_list:
                     await interaction.response.send_message(
-                        "📋 Hàng đợi trống!", ephemeral=True
+                        ERROR_MESSAGES["no_queue"], ephemeral=True
                     )
                     return
 
                 # Create queue embed
                 embed = EmbedFactory.create_queue_embed(
-                    current_song=current_song, 
-                    queue_list=queue_list, 
-                    page=page
+                    current_song=current_song, queue_list=queue_list, page=page
                 )
                 await interaction.response.send_message(embed=embed)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "queue")
-
-

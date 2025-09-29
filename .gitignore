@@ -11,3 +11,5 @@ cache/
 TASK.md
 
 playlist/*
+
+**/__pycache__/*

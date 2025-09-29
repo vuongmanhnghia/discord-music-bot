@@ -45,7 +45,7 @@ class QueueManager:
 
     def next_song(self) -> Optional[Song]:
         """Move to next song"""
-        if self._repeat_mode == "song":
+        if self._repeat_mode == "track":
             return self.current_song
 
         # Validate current song before adding to history
@@ -119,3 +119,15 @@ class QueueManager:
             if song.original_input == original_input:
                 return song
         return None
+
+    def set_repeat_mode(self, mode: str) -> bool:
+        """Set repeat mode (off, track, queue)"""
+        valid_modes = ["off", "track", "queue"]
+        if mode.lower() in valid_modes:
+            self._repeat_mode = mode.lower()
+            return True
+        return False
+
+    def get_repeat_mode(self) -> str:
+        """Get current repeat mode"""
+        return self._repeat_mode

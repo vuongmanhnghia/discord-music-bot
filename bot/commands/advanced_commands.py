@@ -10,6 +10,8 @@ from . import BaseCommandHandler
 from ..config.config import config
 from ..pkg.logger import logger
 
+from ..config.constants import ERROR_MESSAGES
+
 
 class AdvancedCommandHandler(BaseCommandHandler):
     """Handler for advanced commands"""
@@ -31,8 +33,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
                 await self.handle_command_error(interaction, e, "help")
 
         @self.bot.tree.command(
-            name="aplay",
-            description="Phát toàn bộ playlist YouTube (Async Processing)"
+            name="aplay", description="Phát toàn bộ playlist YouTube (Async Processing)"
         )
         @app_commands.describe(url="URL playlist YouTube")
         async def async_play_playlist(interaction: discord.Interaction, url: str):
@@ -40,7 +41,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
             try:
                 if not interaction.guild:
                     await interaction.response.send_message(
-                        "⛔ Lệnh này chỉ có thể sử dụng trong server!", ephemeral=True
+                        ERROR_MESSAGES["guild_only"], ephemeral=True
                     )
                     return
 
@@ -52,7 +53,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
                 # Check if it's a valid playlist URL
                 if not YouTubePlaylistHandler.is_playlist_url(url):
                     await interaction.response.send_message(
-                        "❌ Đây không phải URL playlist YouTube hợp lệ!", ephemeral=True
+                        ERROR_MESSAGES["invalid_playlist_url"], ephemeral=True
                     )
                     return
 
@@ -64,7 +65,9 @@ class AdvancedCommandHandler(BaseCommandHandler):
                     )
 
                     if not success or not video_urls:
-                        return self.create_error_embed("❌ Playlist Error", message)
+                        return self.create_error_embed(
+                            ERROR_MESSAGES["playlist_extraction_error"], message
+                        )
 
                     return await self.bot._process_playlist_videos(
                         video_urls,
@@ -86,18 +89,16 @@ class AdvancedCommandHandler(BaseCommandHandler):
         """Create comprehensive help embed"""
         embed = self.create_info_embed(
             f"❓ {config.BOT_NAME} - Hướng dẫn sử dụng",
-            f"Bot phát nhạc Discord với AI processing và playlist management"
+            f"Bot phát nhạc Discord với AI processing và playlist management",
         )
 
         # Basic commands
         basic_cmds = [
             f"> **`/join`           - Tham gia voice channel**",
-            f"> **`/leave`          - Rời voice channel**", 
-            f"> **`/ping`           - Kiểm tra độ trễ**"
+            f"> **`/leave`          - Rời voice channel**",
+            f"> **`/ping`           - Kiểm tra độ trễ**",
         ]
-        embed.add_field(
-            name="Cơ bản", value="\n".join(basic_cmds), inline=False
-        )
+        embed.add_field(name="Cơ bản", value="\n".join(basic_cmds), inline=False)
 
         # Playback commands
         playback_cmds = [
@@ -110,42 +111,34 @@ class AdvancedCommandHandler(BaseCommandHandler):
             f"> **`/stop`           - Dừng và xóa queue**",
             f"> **`/volume <0-100>` - Đặt âm lượng**",
             f"> **`/nowplaying`     - Hiển thị bài đang phát**",
-            f"> **`/repeat <mode>`  - Đặt chế độ lặp**"
+            f"> **`/repeat <mode>`  - Đặt chế độ lặp**",
         ]
-        embed.add_field(
-            name="Phát nhạc", value="\n".join(playback_cmds), inline=False
-        )
+        embed.add_field(name="Phát nhạc", value="\n".join(playback_cmds), inline=False)
 
-        # Queue commands  
-        queue_cmds = [
-            f"> **`/queue`          - Hiển thị hàng đợi**"
-        ]
-        embed.add_field(
-            name="Hàng đợi", value="\n".join(queue_cmds), inline=False
-        )
+        # Queue commands
+        queue_cmds = [f"> **`/queue`          - Hiển thị hàng đợi**"]
+        embed.add_field(name="Hàng đợi", value="\n".join(queue_cmds), inline=False)
 
         # Playlist commands
         playlist_cmds = [
             f"> **`/create <name>`      - Tạo playlist mới**",
             f"> **`/use <playlist>`     - Chọn playlist làm active**",
             f"> **`/add <song>`         - Thêm vào playlist hiện tại**",
-            f"> **`/addto <pl> <song>`  - Thêm vào playlist chỉ định**", 
+            f"> **`/addto <pl> <song>`  - Thêm vào playlist chỉ định**",
             f"> **`/remove <pl> <idx>`  - Xóa bài khỏi playlist**",
             f"> **`/playlists`          - Liệt kê playlist**",
             f"> **`/playlist [name]`    - Xem nội dung playlist**",
-            f"> **`/delete <name>`      - Xóa playlist**"
+            f"> **`/delete <name>`      - Xóa playlist**",
         ]
-        embed.add_field(
-            name="Playlist", value="\n".join(playlist_cmds), inline=False
-        )
+        embed.add_field(name="Playlist", value="\n".join(playlist_cmds), inline=False)
 
         # Features
         features = [
             "🎵 **Multi-source**: YouTube, Spotify, SoundCloud",
-            "🚀 **Smart Processing**: AI-powered caching & optimization", 
+            "🚀 **Smart Processing**: AI-powered caching & optimization",
             "📋 **Playlist Management**: Persistent playlists",
             "⚡ **Async Processing**: Non-blocking operations",
-            "🔍 **Smart Search**: Intelligent song matching"
+            "🔍 **Smart Search**: Intelligent song matching",
         ]
         embed.add_field(
             name="Tính năng nổi bật", value="\n".join(features), inline=False
@@ -154,7 +147,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
         # URL handling info
         url_info = [
             "📺 **Single Video**: `youtube.com/watch?v=xyz&list=abc` → 1 bài",
-            "📋 **Full Playlist**: `youtube.com/playlist?list=abc` → toàn bộ playlist"
+            "📋 **Full Playlist**: `youtube.com/playlist?list=abc` → toàn bộ playlist",
         ]
         embed.add_field(
             name="Xử lý URL YouTube", value="\n".join(url_info), inline=False

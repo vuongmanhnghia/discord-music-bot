@@ -12,6 +12,7 @@ import json
 from ..utils.smart_cache import SmartCache
 from ..domain.valueobjects.source_type import SourceType
 from ..domain.entities.song import Song, SongMetadata
+from ..config.performance import performance_config
 from ..pkg.logger import logger
 
 
@@ -22,25 +23,19 @@ class CachedSongProcessor:
     """
 
     def __init__(self, cache_dir: str = "cache/songs"):
-        # Initialize SmartCache
+        # Load configuration
+        self.config = performance_config
+
+        # Initialize SmartCache with dynamic config
         self.smart_cache = SmartCache(
             cache_dir=cache_dir,
-            max_size=1000,  # Cache up to 1000 songs
-            ttl=7200,  # 2 hour TTL
+            max_size=self.config.cache_size,
+            ttl=self.config.cache_duration_minutes * 60,  # Convert to seconds
             persist=True,  # Survive restarts
         )
 
-        # YT-DLP configuration for processing
-        self.yt_dlp_opts = {
-            "format": "bestaudio/best",
-            "noplaylist": True,
-            "extractaudio": True,
-            "audioformat": "mp3",
-            "audioquality": "192K",
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": False,
-        }
+        # YT-DLP configuration from performance config
+        self.yt_dlp_opts = self.config.get_ytdl_opts()
 
         # Statistics tracking
         self._processing_stats = {

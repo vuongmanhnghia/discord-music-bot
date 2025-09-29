@@ -5,6 +5,7 @@ import discord
 from ..domain.entities.song import Song
 from ..domain.entities.queue import QueueManager
 from ..utils.resource_manager import ResourceManager
+from ..config.performance import performance_config
 
 from ..pkg.logger import logger
 from .audio_player import AudioPlayer
@@ -17,6 +18,9 @@ class AudioService:
     """
 
     def __init__(self):
+        # Load performance configuration
+        self.config = performance_config
+
         self._voice_clients: Dict[int, discord.VoiceClient] = {}
         self._audio_players: Dict[int, AudioPlayer] = {}
         self._queue_managers: Dict[int, QueueManager] = {}
@@ -26,10 +30,10 @@ class AudioService:
         self._player_lock = asyncio.Lock()
         self._queue_lock = asyncio.Lock()
 
-        # Initialize ResourceManager for memory leak prevention
+        # Initialize ResourceManager with dynamic config
         self.resource_manager = ResourceManager(
-            max_connections=10,  # Limit concurrent voice connections
-            cleanup_interval=300,  # Cleanup every 5 minutes
+            max_connections=min(10, self.config.max_concurrent_processing * 3),
+            cleanup_interval=self.config.cleanup_interval_seconds,
         )
 
     async def connect_to_channel(
@@ -88,6 +92,38 @@ class AudioService:
                     f"❌ Failed to connect to voice channel {channel.name}: {e}"
                 )
                 return False
+
+    async def initialize_guild(
+        self, guild_id: int, voice_client: discord.VoiceClient
+    ) -> bool:
+        """Initialize audio infrastructure for a guild with existing voice client"""
+        try:
+            async with self._voice_lock:
+                # Store voice client
+                self._voice_clients[guild_id] = voice_client
+
+                # Register connection with ResourceManager
+                self.resource_manager.register_connection(guild_id, voice_client)
+
+                # Create audio player
+                audio_player = AudioPlayer(voice_client, guild_id)
+                audio_player.on_song_finished = self._on_song_finished
+                audio_player.on_error = self._on_playback_error
+
+                # Set event loop for async callbacks
+                audio_player._set_event_loop(asyncio.get_running_loop())
+                self._audio_players[guild_id] = audio_player
+
+                # Create queue manager if not exists
+                if guild_id not in self._queue_managers:
+                    self._queue_managers[guild_id] = QueueManager(guild_id)
+
+                logger.info(f"✅ Audio infrastructure initialized for guild {guild_id}")
+                return True
+
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize guild {guild_id}: {e}")
+            return False
 
     async def disconnect_from_guild(self, guild_id: int) -> bool:
         """Disconnect from voice channel in guild"""
