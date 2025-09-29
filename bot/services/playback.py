@@ -6,6 +6,7 @@ from ..domain.entities.input import InputAnalyzer
 
 from ..pkg.logger import logger
 from .processing import SongProcessingService
+from .cached_processing import CachedSongProcessor
 from .audio_service import audio_service
 
 
@@ -22,6 +23,7 @@ class PlaybackService:
 
     def __init__(self):
         self.processing_service = SongProcessingService()
+        self.cached_processor = CachedSongProcessor()  # Smart caching processor
         self._processing_tasks: dict[int, set[asyncio.Task]] = {}
 
     async def play_request(
@@ -82,6 +84,63 @@ class PlaybackService:
         except Exception as e:
             logger.error(f"Error processing play request '{user_input}': {e}")
             return (False, f"Failed to process request: {str(e)}", None)
+
+    async def play_request_cached(
+        self, user_input: str, guild_id: int, requested_by: str, auto_play: bool = True
+    ) -> tuple[bool, str, Optional[Song]]:
+        """
+        Handle a play request using smart caching for faster responses
+
+        Returns:
+            (success, message, song) tuple
+        """
+        logger.info(
+            f"Processing cached play request: '{user_input}' from {requested_by} in guild {guild_id}"
+        )
+
+        try:
+            # Step 1: Process with smart caching (much faster for cached content)
+            song_data, was_cached = await self.cached_processor.process_song(user_input)
+
+            if not song_data:
+                return (False, "Không thể xử lý bài hát này", None)
+
+            # Step 2: Create Song object from cached/processed data
+            song = await self.cached_processor.create_song_from_data(
+                song_data, requested_by, guild_id
+            )
+
+            # Step 3: Add to queue
+            queue_manager = audio_service.get_queue_manager(guild_id)
+            if not queue_manager:
+                logger.error(f"No queue manager found for guild {guild_id}")
+                return (False, "Lỗi hệ thống: Không tìm thấy queue manager", None)
+
+            position = queue_manager.add_song(song)
+
+            # Performance indicator in message
+            cache_indicator = "⚡" if was_cached else "🔄"
+
+            logger.info(
+                f"Added {'cached' if was_cached else 'processed'} song to queue at position {position}: {song.display_name}"
+            )
+
+            # Step 4: Start playback if not already playing and auto_play is True
+            if auto_play and not audio_service.is_playing(guild_id):
+                await self._try_start_playback(guild_id)
+
+            return (
+                True,
+                f"{cache_indicator} **{song.display_name}** ・ *(Vị trí: {position})*",
+                song,
+            )
+
+        except Exception as e:
+            logger.error(f"Error processing cached play request '{user_input}': {e}")
+            # Fallback to original processing method
+            return await self.play_request(
+                user_input, guild_id, requested_by, auto_play
+            )
 
     async def _start_song_processing(self, song: Song):
         """Start asynchronous song processing"""
@@ -314,6 +373,34 @@ class PlaybackService:
         except Exception as e:
             logger.error(f"Error setting volume in guild {guild_id}: {e}")
             return (False, f"Volume error: {str(e)}")
+
+    # ===============================
+    # Smart Caching Methods
+    # ===============================
+
+    async def get_cache_performance(self) -> dict:
+        """Get cache performance statistics"""
+        return await self.cached_processor.get_cache_stats()
+
+    async def warm_cache_with_popular(self) -> int:
+        """Warm cache with popular songs"""
+        return await self.cached_processor.warm_popular_cache()
+
+    async def cleanup_cache(self) -> dict:
+        """Clean up expired cache entries"""
+        return await self.cached_processor.cleanup_cache()
+
+    async def clear_all_cache(self) -> int:
+        """Clear all cached songs"""
+        return await self.cached_processor.clear_all_cache()
+
+    async def batch_process_songs(self, urls: list, max_concurrent: int = 3) -> list:
+        """Process multiple songs with caching"""
+        return await self.cached_processor.batch_process(urls, max_concurrent)
+
+    async def shutdown_cache_system(self):
+        """Clean shutdown of caching system"""
+        await self.cached_processor.shutdown()
 
 
 # Global playback service instance

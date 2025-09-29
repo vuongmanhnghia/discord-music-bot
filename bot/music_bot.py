@@ -4,6 +4,7 @@ Implements the complete playback flow with proper separation of concerns
 """
 
 import asyncio
+import time
 from typing import Optional
 
 import discord
@@ -56,6 +57,14 @@ class MusicBot(commands.Bot):
             # Start ResourceManager for memory leak prevention
             await audio_service.start_resource_management()
             logger.info("✅ Resource management started")
+
+            # Initialize SmartCache system
+            try:
+                # Warm cache with popular songs (async, non-blocking)
+                asyncio.create_task(self._warm_cache_on_startup())
+                logger.info("🚄 SmartCache initialization started")
+            except Exception as e:
+                logger.warning(f"Cache warming failed: {e}")
 
             # Sync slash commands globally only
             try:
@@ -469,12 +478,14 @@ class MusicBot(commands.Bot):
                 return
 
             try:
-                # Process the play request
-                success, response_message, song = await playback_service.play_request(
-                    user_input=query,
-                    guild_id=interaction.guild.id,
-                    requested_by=str(interaction.user),
-                    auto_play=True,
+                # Process the play request using smart caching for faster response
+                success, response_message, song = (
+                    await playback_service.play_request_cached(
+                        user_input=query,
+                        guild_id=interaction.guild.id,
+                        requested_by=str(interaction.user),
+                        auto_play=True,
+                    )
                 )
 
                 if success and song:
@@ -1490,6 +1501,156 @@ class MusicBot(commands.Bot):
                     f"❌ Lỗi khi cleanup: {str(e)}", ephemeral=True
                 )
 
+        @self.tree.command(
+            name="cache", description="🚄 [Admin] Hiển thị thống kê cache thông minh"
+        )
+        async def show_cache_stats(interaction: discord.Interaction):
+            """🚄 Show smart cache performance statistics (Admin only)"""
+
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message(
+                    "❌ Chỉ admin mới có quyền xem thống kê cache!", ephemeral=True
+                )
+                return
+
+            try:
+                await interaction.response.defer(ephemeral=True)
+
+                cache_stats = await playback_service.get_cache_performance()
+
+                embed = discord.Embed(
+                    title="🚄 Smart Cache Performance",
+                    description="Thống kê hiệu suất cache thông minh",
+                    color=discord.Color.green(),
+                )
+
+                # Cache Performance
+                embed.add_field(
+                    name="📊 Cache Performance",
+                    value=f"**Hit Rate**: {cache_stats['hit_rate']:.1f}%\n"
+                    f"**Total Requests**: {cache_stats['total_requests']}\n"
+                    f"**Cache Hits**: {cache_stats['hits']}\n"
+                    f"**Cache Misses**: {cache_stats['misses']}\n"
+                    f"**Efficiency Ratio**: {cache_stats['efficiency_ratio']:.1f}%",
+                    inline=True,
+                )
+
+                # Cache Storage
+                embed.add_field(
+                    name="💾 Cache Storage",
+                    value=f"**Current Size**: {cache_stats['cache_size']}\n"
+                    f"**Max Size**: {cache_stats['max_size']}\n"
+                    f"**Popular Songs**: {cache_stats['popular_count']}\n"
+                    f"**Evictions**: {cache_stats.get('evictions', 0)}",
+                    inline=True,
+                )
+
+                # Performance Impact
+                time_saved = cache_stats.get("processing_time_saved", 0)
+                avg_processing_time = cache_stats.get("average_processing_time", 0)
+
+                embed.add_field(
+                    name="⚡ Performance Impact",
+                    value=f"**Time Saved**: {time_saved:.1f}s\n"
+                    f"**Avg Processing**: {avg_processing_time:.2f}s\n"
+                    f"**Total Processed**: {cache_stats.get('total_processed', 0)}\n"
+                    f"**Cache Status**: {'🟢 Optimal' if cache_stats['hit_rate'] > 50 else '🟡 Building'}",
+                    inline=True,
+                )
+
+                await interaction.followup.send(embed=embed, ephemeral=True)
+
+            except Exception as e:
+                logger.error(f"Error getting cache stats: {e}")
+                await interaction.followup.send(
+                    f"❌ Lỗi khi lấy thống kê cache: {str(e)}", ephemeral=True
+                )
+
+        @self.tree.command(
+            name="warmcache", description="🔥 [Admin] Warm cache với bài hát phổ biến"
+        )
+        async def warm_cache(interaction: discord.Interaction):
+            """🔥 Warm cache with popular songs (Admin only)"""
+
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message(
+                    "❌ Chỉ admin mới có quyền warm cache!", ephemeral=True
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True)
+
+            try:
+                warmed_count = await playback_service.warm_cache_with_popular()
+
+                embed = discord.Embed(
+                    title="🔥 Cache Warming Complete",
+                    description=f"Đã warm cache với {warmed_count} bài hát phổ biến",
+                    color=discord.Color.orange(),
+                )
+
+                if warmed_count > 0:
+                    embed.add_field(
+                        name="📈 Performance Boost",
+                        value=f"**Songs Pre-cached**: {warmed_count}\n"
+                        f"**Expected Speedup**: ~90% faster response\n"
+                        f"**Status**: Cache optimization complete",
+                        inline=False,
+                    )
+                else:
+                    embed.add_field(
+                        name="ℹ️ Status",
+                        value="Không có bài hát phổ biến mới để warm cache.\nCache đã được tối ưu hóa.",
+                        inline=False,
+                    )
+
+                await interaction.followup.send(embed=embed, ephemeral=True)
+
+            except Exception as e:
+                logger.error(f"Error warming cache: {e}")
+                await interaction.followup.send(
+                    f"❌ Lỗi khi warm cache: {str(e)}", ephemeral=True
+                )
+
+        @self.tree.command(
+            name="cleancache", description="🧹 [Admin] Dọn dẹp cache cũ và hết hạn"
+        )
+        async def clean_cache(interaction: discord.Interaction):
+            """🧹 Clean expired cache entries (Admin only)"""
+
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message(
+                    "❌ Chỉ admin mới có quyền clean cache!", ephemeral=True
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True)
+
+            try:
+                cleanup_stats = await playback_service.cleanup_cache()
+
+                embed = discord.Embed(
+                    title="🧹 Cache Cleanup Complete",
+                    description="Đã dọn dẹp cache entries cũ và hết hạn",
+                    color=discord.Color.blue(),
+                )
+
+                embed.add_field(
+                    name="📊 Cleanup Results",
+                    value=f"**Expired Entries Removed**: {cleanup_stats['expired_entries_removed']}\n"
+                    f"**Current Cache Size**: {cleanup_stats['current_cache_size']}\n"
+                    f"**Cleanup Time**: {time.strftime('%H:%M:%S')}",
+                    inline=False,
+                )
+
+                await interaction.followup.send(embed=embed, ephemeral=True)
+
+            except Exception as e:
+                logger.error(f"Error cleaning cache: {e}")
+                await interaction.followup.send(
+                    f"❌ Lỗi khi clean cache: {str(e)}", ephemeral=True
+                )
+
     async def _process_playlist_videos(
         self, video_urls: list, playlist_message: str, guild_id: int, requested_by: str
     ):
@@ -1500,7 +1661,7 @@ class MusicBot(commands.Bot):
         # Process videos in batches to avoid timeout
         for i, video_url in enumerate(video_urls[:50]):  # Limit to 50 videos
             try:
-                success_video, _, song = await playback_service.play_request(
+                success_video, _, song = await playback_service.play_request_cached(
                     user_input=video_url,
                     guild_id=guild_id,
                     requested_by=requested_by,
@@ -1550,12 +1711,14 @@ class MusicBot(commands.Bot):
         # Process videos in batches to avoid timeout
         for i, video_url in enumerate(video_urls[:50]):  # Limit to 50 videos
             try:
-                # Step 1: Process song like /play (but without auto_play)
-                success, response_message, song = await playback_service.play_request(
-                    user_input=video_url,
-                    guild_id=guild_id,
-                    requested_by=requested_by,
-                    auto_play=False,  # Don't auto-start playback
+                # Step 1: Process song like /play (but without auto_play) using smart caching
+                success, response_message, song = (
+                    await playback_service.play_request_cached(
+                        user_input=video_url,
+                        guild_id=guild_id,
+                        requested_by=requested_by,
+                        auto_play=False,  # Don't auto-start playback
+                    )
                 )
 
                 if success and song:
@@ -1624,11 +1787,34 @@ class MusicBot(commands.Bot):
 
         return embed
 
+    async def _warm_cache_on_startup(self):
+        """Warm cache with popular content on startup"""
+        try:
+            # Wait a bit for bot to fully initialize
+            await asyncio.sleep(10)
+
+            # Warm cache with popular songs
+            warmed_count = await playback_service.warm_cache_with_popular()
+
+            if warmed_count > 0:
+                logger.info(
+                    f"🔥 Startup cache warming completed: {warmed_count} songs cached"
+                )
+            else:
+                logger.info("ℹ️ No popular songs to warm cache with on startup")
+
+        except Exception as e:
+            logger.error(f"Error during startup cache warming: {e}")
+
     async def close(self):
         """Clean shutdown"""
         logger.info("🛑 Shutting down bot...")
 
         try:
+            # Shutdown SmartCache system
+            await playback_service.shutdown_cache_system()
+            logger.info("✅ SmartCache shutdown complete")
+
             # Cleanup audio connections
             await audio_service.cleanup_all()
             logger.info("✅ Bot shutdown complete")
