@@ -419,35 +419,49 @@ class AsyncSongProcessor:
         """Process song with detailed progress updates"""
         song = task.song
 
-        # Step 1: Validate URL (20%)
-        task.progress = 20
-        await self._send_progress_update(task)
-        await asyncio.sleep(0.5)  # Simulate processing time
+        try:
+            # Import playback_service here to avoid circular imports
+            from ..services.playback import playback_service
 
-        # Step 2: Extract metadata (40%)
-        task.progress = 40
-        await self._send_progress_update(task)
-        await asyncio.sleep(1.0)
+            # Step 1: Validate URL (20%)
+            task.progress = 20
+            await self._send_progress_update(task)
 
-        # Step 3: Download audio info (60%)
-        task.progress = 60
-        await self._send_progress_update(task)
-        await asyncio.sleep(1.5)
+            # Step 2: Extract metadata (40%)
+            task.progress = 40
+            await self._send_progress_update(task)
 
-        # Step 4: Process audio stream (80%)
-        task.progress = 80
-        await self._send_progress_update(task)
-        await asyncio.sleep(1.0)
+            # Step 3: Download audio info (60%)
+            task.progress = 60
+            await self._send_progress_update(task)
 
-        # Step 5: Finalize (90%)
-        task.progress = 90
-        await self._send_progress_update(task)
-        await asyncio.sleep(0.5)
+            # Step 4: Process audio stream (80%)
+            task.progress = 80
+            await self._send_progress_update(task)
 
-        # Update song status
-        song.status = SongStatus.READY
+            # Step 5: Use real processor to process the song
+            task.progress = 90
+            await self._send_progress_update(task)
 
-        logger.info(f"🎯 Song processing completed: {song.original_input}")
+            # Actually process the song using the real processor
+            success, _, processed_song = await playback_service.play_request(
+                song.original_input, song.requested_by, song.guild_id, auto_play=False
+            )
+
+            if success and processed_song and processed_song.is_ready:
+                # Copy processed data to our song object
+                song.metadata = processed_song.metadata
+                song.stream_url = processed_song.stream_url
+                song.status = SongStatus.READY
+                logger.info(f"✅ Song processing completed: {song.display_name}")
+            else:
+                song.status = SongStatus.ERROR
+                logger.warning(f"❌ Song processing failed: {song.original_input}")
+
+        except Exception as e:
+            song.status = SongStatus.ERROR
+            logger.error(f"💥 Error processing song {song.original_input}: {e}")
+            raise
 
     async def _send_progress_update(self, task: ProcessingTask):
         """Send progress update via callback"""

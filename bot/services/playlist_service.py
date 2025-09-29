@@ -7,6 +7,10 @@ from ..domain.entities.song import Song
 from ..domain.valueobjects.source_type import SourceType
 from ..domain.valueobjects.song_status import SongStatus
 from ..pkg.logger import logger
+from ..utils.lazy_playlist_loader import (
+    get_lazy_playlist_loader,
+    PlaylistLoadingStrategy,
+)
 
 
 class PlaylistService:
@@ -33,9 +37,12 @@ class PlaylistService:
             return False, f"Playlist '{playlist_name}' not found"
 
         if playlist.total_songs == 0:
+            logger.info(
+                f"Activated empty playlist '{playlist_name}' in guild {guild_id}"
+            )
             return (
                 True,
-                f"Playlist '{playlist_name}' is empty. Use `/add <song>` to add songs first.",
+                f"Đã kích hoạt playlist **{playlist_name}** (empty). Sử dụng `/add <song>` để thêm bài hát.",
             )
 
         # Check if playlist already loaded
@@ -124,6 +131,94 @@ class PlaylistService:
             True,
             f"Added {added_count} songs from playlist '{playlist_name}' to queue",
         )
+
+    async def load_playlist_to_queue_lazy(
+        self,
+        playlist_name: str,
+        queue_manager: QueueManager,
+        requested_by: str,
+        guild_id: int,
+        strategy: PlaylistLoadingStrategy = PlaylistLoadingStrategy.IMMEDIATE,
+        progress_callback: Optional[callable] = None,
+    ) -> tuple[bool, str, Optional[str]]:
+        """
+        Load playlist with lazy loading strategy
+
+        Returns:
+            (success, message, job_id)
+        """
+        playlist = self.library.get_playlist(playlist_name)
+        if not playlist:
+            return False, f"Playlist '{playlist_name}' not found", None
+
+        if playlist.total_songs == 0:
+            logger.info(
+                f"Activated empty playlist '{playlist_name}' with lazy loading in guild {guild_id}"
+            )
+            return (
+                True,
+                f"Đã kích hoạt playlist **{playlist_name}** (empty). Sử dụng `/add <song>` để thêm bài hát.",
+                None,
+            )
+
+        # Check if playlist already being loaded
+        lazy_loader = await get_lazy_playlist_loader()
+        current_job = await lazy_loader.get_guild_job_status(guild_id)
+
+        if current_job and not current_job["is_complete"]:
+            return (
+                False,
+                f"Already loading playlist '{current_job['playlist_name']}'. Please wait...",
+                current_job["job_id"],
+            )
+
+        # Start lazy loading
+        try:
+            success, message, job_id = await lazy_loader.load_playlist_lazy(
+                playlist=playlist,
+                queue_manager=queue_manager,
+                requested_by=requested_by,
+                guild_id=guild_id,
+                strategy=strategy,
+                progress_callback=progress_callback,
+            )
+
+            if success:
+                # Track playlist as loaded
+                if guild_id not in self._loaded_playlists:
+                    self._loaded_playlists[guild_id] = {}
+
+                if playlist_name not in self._loaded_playlists[guild_id]:
+                    self._loaded_playlists[guild_id][playlist_name] = 0
+
+                self._loaded_playlists[guild_id][playlist_name] += 1
+                logger.info(
+                    f"Started lazy loading for playlist '{playlist_name}' in guild {guild_id}"
+                )
+
+            return success, message, job_id
+
+        except Exception as e:
+            logger.error(f"Error in lazy playlist loading: {e}")
+            return False, f"Error loading playlist: {str(e)}", None
+
+    async def get_playlist_loading_status(self, guild_id: int) -> Optional[dict]:
+        """Get current playlist loading status for guild"""
+        try:
+            lazy_loader = await get_lazy_playlist_loader()
+            return await lazy_loader.get_guild_job_status(guild_id)
+        except Exception as e:
+            logger.error(f"Error getting playlist loading status: {e}")
+            return None
+
+    async def cancel_playlist_loading(self, guild_id: int) -> bool:
+        """Cancel current playlist loading for guild"""
+        try:
+            lazy_loader = await get_lazy_playlist_loader()
+            return await lazy_loader.cancel_guild_job(guild_id)
+        except Exception as e:
+            logger.error(f"Error cancelling playlist loading: {e}")
+            return False
 
     def clear_loaded_playlist_tracking(
         self, guild_id: int, playlist_name: str = None

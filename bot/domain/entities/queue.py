@@ -48,8 +48,8 @@ class QueueManager:
         if self._repeat_mode == "song":
             return self.current_song
 
-        # Add current to history
-        if self.current_song:
+        # Validate current song before adding to history
+        if self.current_song and self._current_index < len(self._songs):
             self._history.append(self.current_song)
             # Limit history size
             if len(self._history) > 50:
@@ -57,11 +57,14 @@ class QueueManager:
 
         self._current_index += 1
 
+        # Bounds checking
         if self._current_index >= len(self._songs):
-            if self._repeat_mode == "queue":
+            if self._repeat_mode == "queue" and len(self._songs) > 0:
                 self._current_index = 0
                 return self.current_song
             else:
+                # No more songs
+                self._current_index = max(0, len(self._songs) - 1) if self._songs else 0
                 return None
 
         return self.current_song

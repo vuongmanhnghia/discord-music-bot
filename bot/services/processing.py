@@ -74,19 +74,34 @@ class SpotifyService(SongProcessor):
     def _extract_track_id(self, spotify_url: str) -> Optional[str]:
         """Extract Spotify track ID from URL"""
         try:
+            # Input validation
+            if not spotify_url or not isinstance(spotify_url, str):
+                logger.warning("Invalid Spotify URL: not a string")
+                return None
+
+            # Length check to prevent DoS
+            if len(spotify_url) > 500:
+                logger.warning(f"Spotify URL too long: {len(spotify_url)} chars")
+                return None
+
             # Handle different Spotify URL formats
             patterns = [
-                r"spotify\.com/track/([a-zA-Z0-9]+)",
-                r"open\.spotify\.com/track/([a-zA-Z0-9]+)",
-                r"spotify:track:([a-zA-Z0-9]+)",
+                r"spotify\.com/track/([a-zA-Z0-9]{22})",  # Exact 22 chars
+                r"open\.spotify\.com/track/([a-zA-Z0-9]{22})",
+                r"spotify:track:([a-zA-Z0-9]{22})",
             ]
 
             for pattern in patterns:
                 match = re.search(pattern, spotify_url)
                 if match:
-                    return match.group(1)
+                    track_id = match.group(1)
+                    # Validate track ID format (Spotify IDs are 22 chars)
+                    if len(track_id) == 22 and track_id.isalnum():
+                        return track_id
 
-            logger.warning(f"Could not extract Spotify track ID from: {spotify_url}")
+            logger.warning(
+                f"Could not extract valid Spotify track ID from: {spotify_url[:100]}"
+            )
             return None
 
         except Exception as e:

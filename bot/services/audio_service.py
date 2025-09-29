@@ -21,6 +21,11 @@ class AudioService:
         self._audio_players: Dict[int, AudioPlayer] = {}
         self._queue_managers: Dict[int, QueueManager] = {}
 
+        # Thread-safe locks for concurrent access
+        self._voice_lock = asyncio.Lock()
+        self._player_lock = asyncio.Lock()
+        self._queue_lock = asyncio.Lock()
+
         # Initialize ResourceManager for memory leak prevention
         self.resource_manager = ResourceManager(
             max_connections=10,  # Limit concurrent voice connections
@@ -33,71 +38,96 @@ class AudioService:
         """Connect to a voice channel"""
         guild_id = channel.guild.id
 
-        try:
-            # Disconnect if already connected
-            if guild_id in self._voice_clients:
-                await self.disconnect_from_guild(guild_id)
+        async with self._voice_lock:
+            try:
+                # Disconnect if already connected
+                if guild_id in self._voice_clients:
+                    await self.disconnect_from_guild(guild_id)
 
-            logger.info(f"Attempting to connect to voice channel: {channel.name}")
+                logger.info(f"Attempting to connect to voice channel: {channel.name}")
 
-            # Connect to new channel
-            voice_client = await channel.connect()
+                # Connect to new channel with timeout
+                try:
+                    voice_client = await asyncio.wait_for(
+                        channel.connect(), timeout=30.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"❌ Connection timeout for {channel.name}")
+                    return False
 
-            self._voice_clients[guild_id] = voice_client
+                self._voice_clients[guild_id] = voice_client
 
-            # Register connection with ResourceManager
-            self.resource_manager.register_connection(guild_id, voice_client)
+                # Register connection with ResourceManager
+                self.resource_manager.register_connection(guild_id, voice_client)
 
-            # Create audio player
-            audio_player = AudioPlayer(voice_client, guild_id)
-            audio_player.on_song_finished = self._on_song_finished
-            audio_player.on_error = self._on_playback_error
+                # Create audio player
+                audio_player = AudioPlayer(voice_client, guild_id)
+                audio_player.on_song_finished = self._on_song_finished
+                audio_player.on_error = self._on_playback_error
 
-            # Set event loop for async callbacks
-            audio_player._set_event_loop(asyncio.get_running_loop())
-            self._audio_players[guild_id] = audio_player
+                # Set event loop for async callbacks
+                audio_player._set_event_loop(asyncio.get_running_loop())
+                self._audio_players[guild_id] = audio_player
 
-            # Create queue manager if not exists
-            if guild_id not in self._queue_managers:
-                self._queue_managers[guild_id] = QueueManager(guild_id)
+                # Create queue manager if not exists
+                if guild_id not in self._queue_managers:
+                    self._queue_managers[guild_id] = QueueManager(guild_id)
 
-            logger.info(
-                f"✅ Successfully connected to voice channel: {channel.name} in guild {guild_id}"
-            )
-            return True
+                logger.info(
+                    f"✅ Successfully connected to voice channel: {channel.name} in guild {guild_id}"
+                )
+                return True
 
-        except asyncio.TimeoutError:
-            logger.error(
-                f"❌ Timeout connecting to voice channel {channel.name} (>35s)"
-            )
-            return False
-        except Exception as e:
-            logger.error(f"❌ Failed to connect to voice channel {channel.name}: {e}")
-            return False
+            except asyncio.TimeoutError:
+                logger.error(
+                    f"❌ Timeout connecting to voice channel {channel.name} (>35s)"
+                )
+                return False
+            except Exception as e:
+                logger.error(
+                    f"❌ Failed to connect to voice channel {channel.name}: {e}"
+                )
+                return False
 
     async def disconnect_from_guild(self, guild_id: int) -> bool:
         """Disconnect from voice channel in guild"""
-        try:
-            # Stop playback
-            if guild_id in self._audio_players:
-                self._audio_players[guild_id].stop()
-                del self._audio_players[guild_id]
+        async with self._voice_lock:
+            try:
+                # Stop playback with error handling
+                if guild_id in self._audio_players:
+                    try:
+                        self._audio_players[guild_id].stop()
+                    except Exception as e:
+                        logger.warning(f"Error stopping audio player: {e}")
+                    finally:
+                        del self._audio_players[guild_id]
 
-            # Disconnect voice client
-            if guild_id in self._voice_clients:
-                voice_client = self._voice_clients[guild_id]
-                await voice_client.disconnect()
-                del self._voice_clients[guild_id]
+                # Disconnect voice client with timeout
+                if guild_id in self._voice_clients:
+                    voice_client = self._voice_clients[guild_id]
+                    try:
+                        await asyncio.wait_for(voice_client.disconnect(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Disconnect timeout for guild {guild_id}")
+                    except Exception as e:
+                        logger.warning(f"Error during disconnect: {e}")
+                    finally:
+                        del self._voice_clients[guild_id]
 
-            # Unregister from ResourceManager
-            self.resource_manager.unregister_connection(guild_id)
+                # Clean up queue manager
+                if guild_id in self._queue_managers:
+                    self._queue_managers[guild_id].clear()
+                    del self._queue_managers[guild_id]
 
-            logger.info(f"Disconnected from voice in guild {guild_id}")
-            return True
+                # Unregister from ResourceManager
+                self.resource_manager.unregister_connection(guild_id)
 
-        except Exception as e:
-            logger.error(f"Error disconnecting from guild {guild_id}: {e}")
-            return False
+                logger.info(f"Disconnected from voice in guild {guild_id}")
+                return True
+
+            except Exception as e:
+                logger.error(f"Error disconnecting from guild {guild_id}: {e}")
+                return False
 
     def get_audio_player(self, guild_id: int) -> Optional[AudioPlayer]:
         """Get audio player for guild"""

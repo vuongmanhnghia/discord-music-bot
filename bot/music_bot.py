@@ -356,6 +356,20 @@ class MusicBot(commands.Bot):
                 )
                 return
 
+            # Input validation for query
+            if query:
+                # Length check to prevent abuse
+                if len(query) > 500:
+                    await interaction.response.send_message(
+                        "❌ Query quá dài! Giới hạn 500 ký tự.", ephemeral=True
+                    )
+                    return
+
+                # Sanitize query
+                query = query.strip()
+                if not query:
+                    query = None
+
             # Ensure bot is connected to voice
             if not audio_service.is_connected(interaction.guild.id):
                 if (
@@ -903,17 +917,31 @@ class MusicBot(commands.Bot):
                 )
                 return
 
-            # Use InteractionManager for loading playlist operation
+            # Use InteractionManager for loading playlist operation with LAZY LOADING
             async def load_playlist_operation():
-                success, message = await self.playlist_service.load_playlist_to_queue(
-                    playlist_name,
-                    queue_manager,
-                    str(interaction.user),
-                    interaction.guild.id,
+                from .utils.lazy_playlist_loader import PlaylistLoadingStrategy
+
+                # Progress callback for user feedback
+                async def progress_callback(message: str):
+                    try:
+                        # Send progress update via followup
+                        await interaction.followup.send(f"📊 {message}", ephemeral=True)
+                    except:
+                        pass  # Ignore errors in progress updates
+
+                success, message, job_id = (
+                    await self.playlist_service.load_playlist_to_queue_lazy(
+                        playlist_name,
+                        queue_manager,
+                        str(interaction.user),
+                        interaction.guild.id,
+                        strategy=PlaylistLoadingStrategy.IMMEDIATE,  # Load first 3 songs immediately
+                        progress_callback=progress_callback,
+                    )
                 )
 
-                return self._create_use_playlist_result(
-                    success, message, playlist_name, interaction.guild.id
+                return self._create_lazy_use_playlist_result(
+                    success, message, playlist_name, interaction.guild.id, job_id
                 )
 
             result = await self.interaction_manager.handle_long_operation(
@@ -1259,18 +1287,18 @@ class MusicBot(commands.Bot):
 
             if not playlists:
                 embed = discord.Embed(
-                    title="📋 Danh sách playlist",
-                    description="Chưa có playlist nào. Sử dụng `/create` để tạo playlist mới.",
+                    title="Danh sách playlist",
+                    description="**Chưa có playlist nào. Sử dụng `/create` để tạo playlist mới.**",
                     color=discord.Color.blue(),
                 )
             else:
-                playlist_text = "\n".join([f"• {name}" for name in playlists])
+                playlist_text = "\n".join([f"**• {name}**" for name in playlists])
                 embed = discord.Embed(
-                    title="📋 Danh sách playlist",
+                    title="Danh sách playlist",
                     description=playlist_text,
                     color=discord.Color.blue(),
                 )
-                embed.set_footer(text=f"Tổng: {len(playlists)} playlist")
+                embed.set_footer(text=f"**Tổng: {len(playlists)} playlist**")
 
             await interaction.response.send_message(embed=embed)
 
@@ -1352,22 +1380,22 @@ class MusicBot(commands.Bot):
 
             # Connection commands
             connection_cmds = [
-                f"> `/join`  - Tham gia voice channel",
-                f"> `/leave` - Rời voice channel",
+                f"> **`/join`  - Tham gia voice channel**",
+                f"> **`/leave` - Rời voice channel**",
             ]
 
             embed.add_field(name="", value="\n".join(connection_cmds), inline=False)
 
             # Playlist commands
             playlist_cmds = [
-                f"> `/use <name>`      - Chọn playlist và nạp playlist vào `queue`",
-                f"> `/create <name>`       - Tạo playlist mới",
-                f"> `/add <song>`          - Thêm bài vào playlist hiện tại",
-                f"> `/addto <playlist> <song>` - Thêm bài vào playlist chỉ định",
-                f"> `/remove <name> <#>`   - Xóa bài khỏi playlist",
-                f"> `/playlists`           - Liệt kê tất cả playlist",
-                f"> `/playlist <name>`     - Hiển thị thông tin playlist",
-                f"> `/delete <name>`       - Xóa playlist",
+                f"> **`/use <name>`      - Chọn playlist và nạp playlist vào `queue`**",
+                f"> **`/create <name>`       - Tạo playlist mới**",
+                f"> **`/add <song>`          - Thêm bài vào playlist hiện tại**",
+                f"> **`/addto <playlist> <song>` - Thêm bài vào playlist chỉ định**",
+                f"> **`/remove <name> <#>`   - Xóa bài khỏi playlist**",
+                f"> **`/playlists`           - Liệt kê tất cả playlist**",
+                f"> **`/playlist <name>`     - Hiển thị thông tin playlist**",
+                f"> **`/delete <name>`       - Xóa playlist**",
             ]
 
             embed.add_field(
@@ -1376,13 +1404,13 @@ class MusicBot(commands.Bot):
 
             # Playback commands
             playback_cmds = [
-                f"> `/play`           - Phát từ playlist hiện tại",
-                f"> `/play <query>`   - Phát nhạc từ URL/tìm kiếm",
-                f"> `/aplay <url>`    - Phát toàn bộ playlist từ URL (Async)",
-                f"> `/pause`          - Tạm dừng phát",
-                f"> `/resume`         - Tiếp tục phát",
-                f"> `/skip`           - Bỏ qua bài hiện tại",
-                f"> `/stop`           - Dừng và xóa hàng đợi",
+                f"> **`/play`           - Phát từ playlist hiện tại**",
+                f"> **`/play <query>`   - Phát nhạc từ URL/tìm kiếm**",
+                f"> **`/aplay <url>`    - Phát toàn bộ playlist từ URL (Async)**",
+                f"> **`/pause`          - Tạm dừng phát**",
+                f"> **`/resume`         - Tiếp tục phát**",
+                f"> **`/skip`           - Bỏ qua bài hiện tại**",
+                f"> **`/stop`           - Dừng và xóa hàng đợi**",
             ]
 
             embed.add_field(
@@ -1391,12 +1419,14 @@ class MusicBot(commands.Bot):
 
             # Queue commands
             queue_cmds = [
-                f"> `/queue`          - Hiển thị hàng đợi hiện tại",
-                f"> `/queue_status`   - Hiển thị trạng thái hàng đợi",
-                f"> `/cancel_task`    - Hủy tác vụ xử lý đang chạy",
-                f"> `/nowplaying`     - Hiển thị bài đang phát",
-                f"> `/volume <0-100>` - Đặt âm lượng",
-                f"> `/repeat <mode>`  - Đặt chế độ lặp",
+                f"> **`/queue`           - Hiển thị hàng đợi hiện tại**",
+                f"> **`/queue_status`    - Hiển thị trạng thái hàng đợi**",
+                f"> **`/cancel_task`     - Hủy tác vụ xử lý đang chạy**",
+                f"> **`/playlist_status` - Hiển thị tiến trình loading playlist**",
+                f"> **`/cancel_playlist` - Hủy loading playlist hiện tại**",
+                f"> **`/nowplaying`      - Hiển thị bài đang phát**",
+                f"> **`/volume <0-100>`  - Đặt âm lượng**",
+                f"> **`/repeat <mode>`   - Đặt chế độ lặp**",
             ]
 
             embed.add_field(name="Queue", value="\n".join(queue_cmds), inline=False)
@@ -1862,6 +1892,110 @@ class MusicBot(commands.Bot):
                     f"❌ Lỗi khi hủy task: {str(e)}", ephemeral=True
                 )
 
+        @self.tree.command(
+            name="playlist_status", description="📊 Xem trạng thái loading playlist"
+        )
+        async def playlist_loading_status(interaction: discord.Interaction):
+            """📊 Show playlist loading status"""
+            await interaction.response.defer(ephemeral=True)
+
+            try:
+                guild_id = interaction.guild_id
+                status = await self.playlist_service.get_playlist_loading_status(
+                    guild_id
+                )
+
+                if not status:
+                    await interaction.followup.send(
+                        "ℹ️ Không có playlist nào đang được load", ephemeral=True
+                    )
+                    return
+
+                embed = discord.Embed(
+                    title="📊 Playlist Loading Status",
+                    description=f"Trạng thái loading playlist **{status['playlist_name']}**",
+                    color=discord.Color.blue(),
+                )
+
+                # Progress info
+                progress_percent = (
+                    (status["loaded_songs"] / status["total_songs"]) * 100
+                    if status["total_songs"] > 0
+                    else 0
+                )
+
+                embed.add_field(
+                    name="📈 Progress",
+                    value=f"**Loaded**: {status['loaded_songs']}/{status['total_songs']} ({progress_percent:.1f}%)\n"
+                    f"**Failed**: {status['failed_songs']}\n"
+                    f"**Remaining Tasks**: {status['remaining_tasks']}",
+                    inline=True,
+                )
+
+                # Job info
+                embed.add_field(
+                    name="🏷️ Job Info",
+                    value=f"**Job ID**: `{status['job_id']}`\n"
+                    f"**Strategy**: {status['strategy']}\n"
+                    f"**Started**: <t:{int(status['created_at'].timestamp())}:R>",
+                    inline=True,
+                )
+
+                # Status
+                if status["is_complete"]:
+                    embed.add_field(
+                        name="✅ Status",
+                        value="**Complete!** All songs loaded",
+                        inline=False,
+                    )
+                    embed.color = discord.Color.green()
+                else:
+                    embed.add_field(
+                        name="🔄 Status",
+                        value="**In Progress** - Background loading continues",
+                        inline=False,
+                    )
+
+                await interaction.followup.send(embed=embed, ephemeral=True)
+
+            except Exception as e:
+                logger.error(f"Error getting playlist status: {e}")
+                await interaction.followup.send(
+                    f"❌ Lỗi khi lấy trạng thái playlist: {str(e)}", ephemeral=True
+                )
+
+        @self.tree.command(
+            name="cancel_playlist", description="❌ Hủy loading playlist hiện tại"
+        )
+        async def cancel_playlist_loading(interaction: discord.Interaction):
+            """❌ Cancel current playlist loading"""
+            await interaction.response.defer(ephemeral=True)
+
+            try:
+                guild_id = interaction.guild_id
+                success = await self.playlist_service.cancel_playlist_loading(guild_id)
+
+                if success:
+                    embed = discord.Embed(
+                        title="❌ Playlist Loading Cancelled",
+                        description="✅ Đã hủy loading playlist hiện tại",
+                        color=discord.Color.orange(),
+                    )
+                else:
+                    embed = discord.Embed(
+                        title="ℹ️ No Loading Job",
+                        description="⚠️ Không có playlist nào đang được load",
+                        color=discord.Color.blue(),
+                    )
+
+                await interaction.followup.send(embed=embed, ephemeral=True)
+
+            except Exception as e:
+                logger.error(f"Error cancelling playlist loading: {e}")
+                await interaction.followup.send(
+                    f"❌ Lỗi khi hủy playlist loading: {str(e)}", ephemeral=True
+                )
+
     async def _process_playlist_videos(
         self, video_urls: list, playlist_message: str, guild_id: int, requested_by: str
     ):
@@ -1987,10 +2121,48 @@ class MusicBot(commands.Bot):
             else:
                 embed = discord.Embed(
                     title="✅ Đã load playlist",
-                    description=message
-                    + f"\n🎵 Playlist hiện tại: **{playlist_name}**",
+                    description=message,
                     color=discord.Color.green(),
                 )
+        else:
+            embed = discord.Embed(
+                title="❌ Lỗi", description=message, color=discord.Color.red()
+            )
+
+        return embed
+
+    def _create_lazy_use_playlist_result(
+        self,
+        success: bool,
+        message: str,
+        playlist_name: str,
+        guild_id: int,
+        job_id: Optional[str],
+    ):
+        """Helper method to create result embed for lazy /use command"""
+        if success:
+            # Always track the active playlist for this guild
+            self.active_playlists[guild_id] = playlist_name
+
+            embed = discord.Embed(
+                title=f"Kích hoạt playlist",
+                description=f"**{playlist_name} đã được load**\n\n" f"{message}\n\n",
+                color=discord.Color.blue(),
+            )
+
+            if job_id:
+                embed.add_field(
+                    name="📊 Lazy Loading Info",
+                    value=f"**Job ID**: `{job_id}`\n"
+                    f"**Strategy**: Load 3 songs immediately, rest in background\n"
+                    f"**Progress**: Use `/playlist_status` to check progress",
+                    inline=False,
+                )
+
+            embed.set_footer(
+                text="💡 First few songs load instantly, others process in background"
+            )
+
         else:
             embed = discord.Embed(
                 title="❌ Lỗi", description=message, color=discord.Color.red()

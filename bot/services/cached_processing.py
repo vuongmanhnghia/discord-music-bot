@@ -212,19 +212,25 @@ class CachedSongProcessor:
         # Create metadata
         metadata = SongMetadata(
             title=song_data["title"],
+            artist=song_data.get(
+                "uploader", "Unknown Artist"
+            ),  # Use uploader as artist fallback
             duration=song_data["duration"],
-            thumbnail=song_data["thumbnail"],
-            uploader=song_data.get("uploader", ""),
-            upload_date=song_data.get("upload_date", ""),
+            thumbnail_url=song_data.get(
+                "thumbnail"
+            ),  # Fixed: thumbnail -> thumbnail_url
+            release_date=song_data.get(
+                "upload_date"
+            ),  # Map upload_date to release_date
         )
 
         # Determine source type
-        source_type_str = song_data.get("source_type", "UNKNOWN")
-        source_type = (
-            SourceType(source_type_str)
-            if source_type_str in SourceType._value2member_map_
-            else SourceType.UNKNOWN
-        )
+        source_type_str = song_data.get("source_type", "youtube")
+        try:
+            source_type = SourceType(source_type_str)
+        except ValueError:
+            # Default to YOUTUBE if source_type is invalid
+            source_type = SourceType.YOUTUBE
 
         # Create song
         song = Song(

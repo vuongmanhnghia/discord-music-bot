@@ -83,6 +83,9 @@ class SmartCache:
         self._cache: Dict[str, CachedSong] = {}
         self._access_order: List[str] = []  # LRU tracking
 
+        # Thread-safe lock for cache operations
+        self._cache_lock = asyncio.Lock()
+
         # Performance tracking
         self._stats = {
             "hits": 0,
@@ -114,28 +117,29 @@ class SmartCache:
         """Get song from cache with LRU update"""
         key = self._url_to_key(url)
 
-        if key not in self._cache:
-            self._stats["misses"] += 1
-            logger.debug(f"Cache miss: {url}")
-            return None
+        async with self._cache_lock:
+            if key not in self._cache:
+                self._stats["misses"] += 1
+                logger.debug(f"Cache miss: {url}")
+                return None
 
-        cached_song = self._cache[key]
+            cached_song = self._cache[key]
 
-        # Check TTL expiration
-        if cached_song.is_expired(self.ttl):
-            logger.debug(f"Cache expired: {url}")
-            await self._remove_from_cache(key)
-            self._stats["misses"] += 1
-            return None
+            # Check TTL expiration
+            if cached_song.is_expired(self.ttl):
+                logger.debug(f"Cache expired: {url}")
+                await self._remove_from_cache(key)
+                self._stats["misses"] += 1
+                return None
 
-        # Update LRU and access tracking
-        self._update_lru(key)
-        cached_song.update_access()
+            # Update LRU and access tracking
+            self._update_lru(key)
+            cached_song.update_access()
 
-        self._stats["hits"] += 1
-        logger.debug(f"Cache hit: {cached_song.title}")
+            self._stats["hits"] += 1
+            logger.debug(f"Cache hit: {cached_song.title}")
 
-        return cached_song
+            return cached_song
 
     async def cache_song(self, url: str, song_data: dict) -> bool:
         """Cache a processed song"""
