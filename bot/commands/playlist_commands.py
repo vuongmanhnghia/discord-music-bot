@@ -128,13 +128,13 @@ class PlaylistCommandHandler(BaseCommandHandler):
                 await self.handle_command_error(interaction, e, "create")
 
         @self.bot.tree.command(
-            name="add", description="Thêm bài hát vào playlist hiện tại"
+            name="add", description="Thêm bài hát (vào playlist hiện tại nếu có) và phát ngay"
         )
         @app_commands.describe(song_input="URL hoặc tên bài hát")
-        async def add_to_active_playlist(
+        async def add_song(
             interaction: discord.Interaction, song_input: str
         ):
-            """➕ Add song to active playlist (with processing like /play)"""
+            """➕ Add song to queue + active playlist + play immediately"""
             try:
                 if not interaction.guild:
                     await interaction.response.send_message(
@@ -149,41 +149,91 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     await interaction.response.send_message(error_msg, ephemeral=True)
                     return
 
-                # Check if there's an active playlist
+                # Check voice requirements
+                if not await self.ensure_user_in_voice(interaction):
+                    return
+
                 guild_id = interaction.guild.id
                 active_playlist = self.active_playlists.get(guild_id)
 
-                if not active_playlist:
-                    await interaction.response.send_message(
-                        "❌ Chưa có playlist nào được chọn! Sử dụng `/use <playlist>` trước hoặc sử dụng `/addto <playlist> <song>`",
-                        ephemeral=True,
-                    )
+                # Defer response as processing may take time
+                await interaction.response.defer()
+
+                # Process song using playback service (same as /play)
+                success, message, song = await playback_service.play_request(
+                    user_input=song_input,
+                    guild_id=guild_id,
+                    requested_by=str(interaction.user),
+                    auto_play=True,  # Start playing if not already
+                )
+
+                if not success or not song:
+                    error_embed = self.create_error_embed("❌ Lỗi thêm bài hát", message)
+                    await interaction.followup.send(embed=error_embed)
                     return
 
-                await self._handle_add_to_playlist(
-                    interaction, song_input, active_playlist
+                # If active playlist exists, also add to playlist file
+                playlist_saved = False
+                if active_playlist:
+                    # Wait for metadata to be ready
+                    max_wait = 10
+                    for _ in range(max_wait):
+                        if song.metadata and song.metadata.title:
+                            break
+                        await asyncio.sleep(1)
+
+                    title = song.metadata.title if song.metadata else song.original_input
+                    playlist_success, playlist_message = (
+                        self.playlist_service.add_to_playlist(
+                            active_playlist,
+                            song.original_input,
+                            song.source_type,
+                            title,
+                        )
+                    )
+                    playlist_saved = playlist_success
+
+                # Create success embed
+                if active_playlist and playlist_saved:
+                    embed = self.create_success_embed(
+                        "✅ Đã thêm vào queue & playlist",
+                        f"📋 **Playlist:** {active_playlist}\n🎵 **Bài hát:** {song.display_name}",
+                    )
+                else:
+                    embed = self.create_success_embed(
+                        "✅ Đã thêm vào queue",
+                        f"🎵 **{song.display_name}**",
+                    )
+
+                # Add song details
+                embed.add_field(
+                    name="Nguồn", value=song.source_type.value.title(), inline=True
                 )
+                embed.add_field(
+                    name="Trạng thái", value=song.status.value.title(), inline=True
+                )
+
+                if song.metadata and hasattr(song.metadata, "duration_formatted"):
+                    embed.add_field(
+                        name="Thời lượng",
+                        value=song.metadata.duration_formatted,
+                        inline=True,
+                    )
+
+                # Show queue position
+                queue_manager = self.get_queue_manager(guild_id)
+                if queue_manager:
+                    current_pos, total_songs = queue_manager.position
+                    embed.add_field(
+                        name="Vị trí trong queue",
+                        value=f"#{total_songs}",
+                        inline=True,
+                    )
+
+                await interaction.followup.send(embed=embed)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "add")
-
-        @self.bot.tree.command(
-            name="addto", description="Thêm bài hát vào playlist chỉ định"
-        )
-        @app_commands.describe(
-            playlist_name="Tên playlist", song_input="URL hoặc tên bài hát"
-        )
-        async def add_to_specific_playlist(
-            interaction: discord.Interaction, playlist_name: str, song_input: str
-        ):
-            """➕ Add song to specific playlist"""
-            try:
-                await self._handle_add_to_playlist(
-                    interaction, song_input, playlist_name
-                )
-
-            except Exception as e:
-                await self.handle_command_error(interaction, e, "addto")
 
         @self.bot.tree.command(name="remove", description="Xóa bài hát khỏi playlist")
         @app_commands.describe(

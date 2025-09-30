@@ -346,8 +346,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
         playlist_cmds = [
             f"> **`/create <name>`      - Tạo playlist mới**",
             f"> **`/use <playlist>`     - Chọn playlist làm active**",
-            f"> **`/add <song>`         - Thêm vào playlist hiện tại**",
-            f"> **`/addto <pl> <song>`  - Thêm vào playlist chỉ định**",
+            f"> **`/add <song>`         - Thêm vào queue & playlist (nếu có) + phát**",
             f"> **`/remove <pl> <idx>`  - Xóa bài khỏi playlist**",
             f"> **`/playlists`          - Liệt kê playlist**",
             f"> **`/playlist [name]`    - Xem nội dung playlist**",
