@@ -291,15 +291,21 @@ class AudioService:
             logger.warning(f"No queue manager found for guild {guild_id}")
             return
 
+        # Get current position (tuple format: (current, total))
+        current_pos, total_songs = queue_manager.position
+
         # Check if there are more songs after current position
-        next_position = queue_manager.position + 1
-        if next_position < len(queue_manager._songs):
-            logger.info(f"Auto-playing next song at position {next_position}")
+        if current_pos < total_songs:
+            logger.info(
+                f"Auto-playing next song (position {current_pos}/{total_songs})"
+            )
             # Advance to next song and play
             await queue_manager.next_song()
             await self.play_next_song(guild_id)
         else:
-            logger.info(f"Reached end of queue in guild {guild_id} (played {len(queue_manager._songs)} songs)")
+            logger.info(
+                f"Reached end of queue in guild {guild_id} (played {total_songs} songs)"
+            )
 
     async def _on_playback_error(self, error, song: Song):
         """Called when playback error occurs"""

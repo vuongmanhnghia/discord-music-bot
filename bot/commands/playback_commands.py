@@ -83,7 +83,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 current_song = queue_manager.current_song
                 if not current_song:
                     await interaction.response.send_message(
-                        "❌ Không có bài nào đang phát!", ephemeral=True
+                        "Không có bài nào đang phát", ephemeral=True
                     )
                     return
 
@@ -93,12 +93,10 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 )
 
                 if success:
-                    embed = self.create_success_embed("⏭️ Đã bỏ qua bài hát", message)
+                    embed = self.create_success_embed("Đã bỏ qua bài hát", message)
                     await interaction.response.send_message(embed=embed)
                 else:
-                    await interaction.response.send_message(
-                        f"❌ {message}", ephemeral=True
-                    )
+                    await interaction.response.send_message(message, ephemeral=True)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "skip")
@@ -121,7 +119,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     return
 
                 voice_client.pause()
-                embed = self.create_info_embed("⏸️ Tạm dừng", "Đã tạm dừng phát nhạc")
+                embed = self.create_info_embed("Tạm dừng", "Đã tạm dừng phát nhạc")
                 await interaction.response.send_message(embed=embed)
 
             except Exception as e:
@@ -145,7 +143,9 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     return
 
                 voice_client.resume()
-                embed = self.create_success_embed("▶️ Tiếp tục", "Đã tiếp tục phát nhạc")
+                embed = self.create_success_embed(
+                    "Tiếp tục phát", "Đã tiếp tục phát nhạc"
+                )
                 await interaction.response.send_message(embed=embed)
 
             except Exception as e:
@@ -190,18 +190,18 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 )
 
                 if success:
-                    # Volume icon based on level
+                    # Volume level indicator (modern text-based)
                     if volume == 0:
-                        icon = "🔇"
+                        level = "Tắt tiếng"
                     elif volume <= 33:
-                        icon = "🔉"
+                        level = "Thấp"
                     elif volume <= 66:
-                        icon = "🔊"
+                        level = "Trung bình"
                     else:
-                        icon = "📢"
+                        level = "Cao"
 
                     embed = self.create_success_embed(
-                        f"{icon} Âm lượng đã đặt", f"**{volume}%**"
+                        "Âm lượng đã đặt", f"**{volume}%** ({level})"
                     )
                     await interaction.response.send_message(embed=embed)
                 else:
@@ -240,12 +240,15 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     current_song, interaction.guild.id
                 )
                 await interaction.response.send_message(embed=embed)
-                
+
                 # Track message for real-time updates
                 response_msg = await interaction.original_response()
                 if response_msg and current_song.id:
                     await message_update_manager.track_message(
-                        response_msg, current_song.id, interaction.guild.id, "now_playing"
+                        response_msg,
+                        current_song.id,
+                        interaction.guild.id,
+                        "now_playing",
                     )
 
             except Exception as e:
@@ -312,7 +315,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 )
 
                 if not success or not video_urls:
-                    return self.create_error_embed("❌ Playlist Error", message)
+                    return self.create_error_embed("Lỗi Playlist", message)
 
                 return await self.bot._process_playlist_videos(
                     video_urls,
@@ -324,7 +327,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
             result = await self.bot.interaction_manager.handle_long_operation(
                 interaction,
                 process_youtube_playlist,
-                "🎵 Processing YouTube Playlist...",
+                "Đang xử lý YouTube Playlist...",
             )
             return
         else:
@@ -333,7 +336,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
             # Send initial thinking message
             await interaction.followup.send(
-                f"🔍 **Đang xử lý:** {query[:50]}{'...' if len(query) > 50 else ''}**"
+                f"**Đang xử lý:** {query[:50]}{'...' if len(query) > 50 else ''}"
             )
 
         try:
@@ -345,7 +348,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     interaction.guild.id
                 )
                 error_embed = self.create_error_embed(
-                    "⚠️ Đang chuyển playlist",
+                    "Đang chuyển playlist",
                     f"Đang chuyển sang playlist **{switching_to}**, vui lòng chờ...",
                 )
                 await interaction.followup.send(embed=error_embed)
@@ -363,7 +366,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 # Create detailed embed with song info
                 embed = self._create_play_success_embed(song, message)
                 response_msg = await interaction.followup.send(embed=embed)
-                
+
                 # Track message for real-time title updates
                 if response_msg and song.id:
                     await message_update_manager.track_message(
@@ -371,7 +374,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     )
             else:
                 # Show error
-                error_embed = self.create_error_embed("❌ Lỗi phát nhạc", message)
+                error_embed = self.create_error_embed("Lỗi phát nhạc", message)
                 await interaction.followup.send(embed=error_embed)
 
         except Exception as e:

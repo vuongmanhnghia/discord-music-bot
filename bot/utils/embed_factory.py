@@ -17,7 +17,7 @@ class EmbedFactory:
     ) -> discord.Embed:
         """Create a success embed with green color"""
         embed = discord.Embed(
-            title=f"{EMOJIS['success']} {title}",
+            title=title,
             description=description,
             color=COLORS["success"],
         )
@@ -29,7 +29,7 @@ class EmbedFactory:
     ) -> discord.Embed:
         """Create an error embed with red color"""
         embed = discord.Embed(
-            title=f"{EMOJIS['error']} {title}",
+            title=title,
             description=description,
             color=COLORS["error"],
         )
@@ -41,7 +41,7 @@ class EmbedFactory:
     ) -> discord.Embed:
         """Create a warning embed with orange color"""
         embed = discord.Embed(
-            title=f"{EMOJIS['warning']} {title}",
+            title=title,
             description=description,
             color=COLORS["warning"],
         )
@@ -51,11 +51,7 @@ class EmbedFactory:
     def create_info_embed(title: str, description: str = "", **kwargs) -> discord.Embed:
         """Create an info embed with blue color"""
         embed = discord.Embed(
-            title=(
-                f"{EMOJIS['info']} {title}"
-                if not title.startswith(tuple(EMOJIS.values()))
-                else title
-            ),
+            title=title,
             description=description,
             color=COLORS["info"],
         )
@@ -67,7 +63,7 @@ class EmbedFactory:
     ) -> discord.Embed:
         """Create a music-related embed with song information"""
         embed = discord.Embed(
-            title=f"{EMOJIS['nowplaying']} {title}",
+            title=title,
             description=description,
             color=COLORS["primary"],
         )

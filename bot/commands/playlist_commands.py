@@ -51,7 +51,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                 # Check if playlist exists first
                 success, message = self.playlist_service.load_playlist(playlist_name)
                 if not success:
-                    error_embed = self.create_error_embed("❌ Lỗi playlist", message)
+                    error_embed = self.create_error_embed("Lỗi playlist", message)
                     await interaction.response.send_message(
                         embed=error_embed, ephemeral=True
                     )
@@ -59,8 +59,8 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
                 # Respond immediately to avoid timeout
                 embed = self.create_info_embed(
-                    "🔄 Đang chuyển playlist",
-                    f"📋 **{playlist_name}**\nĐang dừng phát hiện tại và tải playlist mới...",
+                    "Đang chuyển playlist",
+                    f"**{playlist_name}**\nĐang dừng phát hiện tại và tải playlist mới...",
                 )
                 await interaction.response.send_message(embed=embed)
 
@@ -79,12 +79,12 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
                     # Update with success message
                     success_embed = self.create_success_embed(
-                        "✅ Đã chuyển playlist thành công", switch_message
+                        "Đã chuyển playlist thành công", switch_message
                     )
                 else:
                     # Update with error message
                     success_embed = self.create_error_embed(
-                        "❌ Lỗi khi chuyển playlist", switch_message
+                        "Lỗi khi chuyển playlist", switch_message
                     )
 
                 await interaction.edit_original_response(embed=success_embed)
@@ -113,13 +113,11 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
                 if success:
                     embed = self.create_success_embed(
-                        "✅ Tạo playlist thành công", message
+                        "Tạo playlist thành công", message
                     )
                     await interaction.response.send_message(embed=embed)
                 else:
-                    error_embed = self.create_error_embed(
-                        "❌ Lỗi tạo playlist", message
-                    )
+                    error_embed = self.create_error_embed("Lỗi tạo playlist", message)
                     await interaction.response.send_message(
                         embed=error_embed, ephemeral=True
                     )
@@ -128,12 +126,11 @@ class PlaylistCommandHandler(BaseCommandHandler):
                 await self.handle_command_error(interaction, e, "create")
 
         @self.bot.tree.command(
-            name="add", description="Thêm bài hát (vào playlist hiện tại nếu có) và phát ngay"
+            name="add",
+            description="Thêm bài hát (vào playlist hiện tại nếu có) và phát ngay",
         )
         @app_commands.describe(song_input="URL hoặc tên bài hát")
-        async def add_song(
-            interaction: discord.Interaction, song_input: str
-        ):
+        async def add_song(interaction: discord.Interaction, song_input: str):
             """➕ Add song to queue + active playlist + play immediately"""
             try:
                 if not interaction.guild:
@@ -176,7 +173,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                 )
 
                 if not success or not song:
-                    error_embed = self.create_error_embed("❌ Lỗi thêm bài hát", message)
+                    error_embed = self.create_error_embed("Lỗi thêm bài hát", message)
                     await interaction.followup.send(embed=error_embed)
                     return
 
@@ -190,7 +187,9 @@ class PlaylistCommandHandler(BaseCommandHandler):
                             break
                         await asyncio.sleep(1)
 
-                    title = song.metadata.title if song.metadata else song.original_input
+                    title = (
+                        song.metadata.title if song.metadata else song.original_input
+                    )
                     playlist_success, playlist_message = (
                         self.playlist_service.add_to_playlist(
                             active_playlist,
@@ -204,13 +203,13 @@ class PlaylistCommandHandler(BaseCommandHandler):
                 # Create success embed
                 if active_playlist and playlist_saved:
                     embed = self.create_success_embed(
-                        "✅ Đã thêm vào queue & playlist",
-                        f"📋 **Playlist:** {active_playlist}\n🎵 **Bài hát:** {song.display_name}",
+                        "Đã thêm vào queue & playlist",
+                        f"**Playlist:** {active_playlist}\n**Bài hát:** {song.display_name}",
                     )
                 else:
                     embed = self.create_success_embed(
-                        "✅ Đã thêm vào queue",
-                        f"🎵 **{song.display_name}**",
+                        "Đã thêm vào queue",
+                        f"**{song.display_name}**",
                     )
 
                 # Add song details
@@ -263,10 +262,10 @@ class PlaylistCommandHandler(BaseCommandHandler):
                 )
 
                 if success:
-                    embed = self.create_success_embed("✅ Đã xóa bài hát", message)
+                    embed = self.create_success_embed("Đã xóa bài hát", message)
                     await interaction.response.send_message(embed=embed)
                 else:
-                    error_embed = self.create_error_embed("❌ Lỗi xóa bài hát", message)
+                    error_embed = self.create_error_embed("Lỗi xóa bài hát", message)
                     await interaction.response.send_message(
                         embed=error_embed, ephemeral=True
                     )
@@ -295,11 +294,11 @@ class PlaylistCommandHandler(BaseCommandHandler):
                 # Get active playlist for this guild
                 active_playlist = self.active_playlists.get(interaction.guild.id)
 
-                embed = self.create_info_embed("📚 Danh sách Playlist", "")
+                embed = self.create_info_embed("Danh sách Playlist", "")
 
                 playlist_text = ""
                 for i, playlist_name in enumerate(playlists, 1):
-                    indicator = "📋" if playlist_name == active_playlist else "📝"
+                    indicator = "▸" if playlist_name == active_playlist else "•"
                     playlist_text += f"{indicator} `{i}.` **{playlist_name}**\n"
 
                 embed.add_field(
@@ -310,7 +309,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
                 if active_playlist:
                     embed.add_field(
-                        name="📋 Đang sử dụng",
+                        name="Đang sử dụng",
                         value=f"**{active_playlist}**",
                         inline=False,
                     )
@@ -340,7 +339,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
                 if not playlist_name:
                     await interaction.response.send_message(
-                        "❌ Không có playlist nào được chọn! Chỉ định tên playlist hoặc sử dụng `/use <playlist>`",
+                        "Không có playlist nào được chọn! Chỉ định tên playlist hoặc sử dụng /use <playlist>",
                         ephemeral=True,
                     )
                     return
@@ -351,7 +350,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
                 if not success:
                     error_embed = self.create_error_embed(
-                        "❌ Lỗi playlist", songs
+                        "Lỗi playlist", songs
                     )  # songs contains error message
                     await interaction.response.send_message(
                         embed=error_embed, ephemeral=True
@@ -367,7 +366,9 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
                 # Create paginated pages
                 items_per_page = 10
-                total_pages = max(1, (len(songs) + items_per_page - 1) // items_per_page)
+                total_pages = max(
+                    1, (len(songs) + items_per_page - 1) // items_per_page
+                )
                 pages = []
 
                 for page_num in range(1, total_pages + 1):
@@ -461,7 +462,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     if song.metadata and song.metadata.title:
                         break
                     await asyncio.sleep(1)
-                
+
                 # Use processed metadata for better title
                 title = song.metadata.title if song.metadata else song_input
                 playlist_success, playlist_message = (
@@ -563,33 +564,37 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     # Create and process song to get metadata
                     from ..domain.entities.song import Song
                     from ..services.playback import playback_service
-                    
+
                     # Create song object
                     song = Song(
                         original_input=video_url,
                         source_type=SourceType.YOUTUBE,
                         requested_by=str(interaction.user),
-                        guild_id=interaction.guild.id
+                        guild_id=interaction.guild.id,
                     )
-                    
+
                     # Try to get metadata (with timeout)
                     try:
                         # Process song to extract metadata
-                        process_success = await playback_service.processing_service.process_song(song)
-                        
+                        process_success = (
+                            await playback_service.processing_service.process_song(song)
+                        )
+
                         # Wait briefly for metadata (max 5 seconds per song)
                         if process_success:
                             for _ in range(5):
                                 if song.metadata and song.metadata.title:
                                     break
                                 await asyncio.sleep(1)
-                        
+
                         # Use real title if available, otherwise use generic
                         title = song.metadata.title if song.metadata else f"Video {i+1}"
                     except Exception as e:
-                        logger.warning(f"Could not extract metadata for {video_url}: {e}")
+                        logger.warning(
+                            f"Could not extract metadata for {video_url}: {e}"
+                        )
                         title = f"Video {i+1}"
-                    
+
                     # Add to playlist with proper title
                     success, message_single = self.playlist_service.add_to_playlist(
                         playlist_name,
@@ -641,7 +646,10 @@ class PlaylistCommandHandler(BaseCommandHandler):
             return
 
     async def _handle_add_youtube_playlist(
-        self, interaction: discord.Interaction, playlist_url: str, active_playlist: Optional[str]
+        self,
+        interaction: discord.Interaction,
+        playlist_url: str,
+        active_playlist: Optional[str],
     ):
         """Handle adding YouTube playlist via /add command"""
         await interaction.response.defer()
@@ -652,14 +660,14 @@ class PlaylistCommandHandler(BaseCommandHandler):
         )
 
         if not success_extract or not video_urls:
-            error_embed = self.create_error_embed("❌ YouTube Playlist Error", message)
+            error_embed = self.create_error_embed("Lỗi YouTube Playlist", message)
             await interaction.followup.send(embed=error_embed)
             return
 
         # Send initial status
         embed = self.create_info_embed(
-            "🎵 Processing YouTube Playlist",
-            f"{message}\n⏳ Adding to queue{' & playlist' if active_playlist else ''}...",
+            "Đang xử lý YouTube Playlist",
+            f"{message}\nĐang thêm vào queue{' & playlist' if active_playlist else ''}...",
         )
         await interaction.followup.send(embed=embed)
 
@@ -704,12 +712,13 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
                 # Update progress every 10 songs
                 if (i + 1) % 10 == 0:
-                    progress_text = f"✅ Queue: {added_to_queue}\n❌ Failed: {failed_count}\n⏳ Progress: {i+1}/{len(video_urls)}"
                     if active_playlist:
-                        progress_text = f"✅ Queue: {added_to_queue} | Playlist: {added_to_playlist}\n❌ Failed: {failed_count}\n⏳ Progress: {i+1}/{len(video_urls)}"
+                        progress_text = f"Queue: {added_to_queue} | Playlist: {added_to_playlist}\nFailed: {failed_count}\nProgress: {i+1}/{len(video_urls)}"
+                    else:
+                        progress_text = f"Queue: {added_to_queue}\nFailed: {failed_count}\nProgress: {i+1}/{len(video_urls)}"
 
                     progress_embed = self.create_info_embed(
-                        "🎵 Processing YouTube Playlist",
+                        "Đang xử lý YouTube Playlist",
                         progress_text,
                     )
                     await interaction.edit_original_response(embed=progress_embed)
@@ -721,21 +730,20 @@ class PlaylistCommandHandler(BaseCommandHandler):
         # Final result
         if active_playlist:
             final_embed = self.create_success_embed(
-                f"✅ Đã thêm YouTube Playlist",
-                f"📋 **Playlist:** {active_playlist}\n"
-                f"✅ Đã thêm vào queue: {added_to_queue} bài\n"
-                f"✅ Đã lưu vào playlist: {added_to_playlist} bài\n"
-                f"❌ Lỗi: {failed_count} bài",
+                "Đã thêm YouTube Playlist",
+                f"**Playlist:** {active_playlist}\n"
+                f"Đã thêm vào queue: {added_to_queue} bài\n"
+                f"Đã lưu vào playlist: {added_to_playlist} bài\n"
+                f"Lỗi: {failed_count} bài",
             )
         else:
             final_embed = self.create_success_embed(
-                f"✅ Đã thêm YouTube Playlist vào queue",
-                f"✅ Đã thêm: {added_to_queue} bài\n"
-                f"❌ Lỗi: {failed_count} bài\n"
-                f"💡 Tip: Dùng `/use <playlist>` để lưu các bài tiếp theo vào playlist",
+                "Đã thêm YouTube Playlist vào queue",
+                f"Đã thêm: {added_to_queue} bài\n"
+                f"Lỗi: {failed_count} bài\n"
+                f"Tip: Dùng /use <playlist> để lưu các bài tiếp theo vào playlist",
             )
 
         await interaction.edit_original_response(embed=final_embed)
 
     # Helper methods removed - now using PaginationHelper
-

@@ -28,9 +28,17 @@ class MusicEmbedBuilder:
             embed.add_field(name="Trạng thái", value=status, inline=True)
 
             volume = int(audio_player.volume * 100)
-            volume_emoji = EmbedFactory.get_volume_emoji(volume)
+            # Modern text-based volume level
+            if volume == 0:
+                volume_level = "Tắt tiếng"
+            elif volume <= 33:
+                volume_level = "Thấp"
+            elif volume <= 66:
+                volume_level = "Trung bình"
+            else:
+                volume_level = "Cao"
             embed.add_field(
-                name="Âm lượng", value=f"{volume_emoji} {volume}%", inline=True
+                name="Âm lượng", value=f"{volume}% ({volume_level})", inline=True
             )
 
         return embed
@@ -67,13 +75,13 @@ class MusicEmbedBuilder:
         progress_bar = FormatUtils.create_progress_bar(current_index, total_count)
 
         embed = EmbedFactory.create_info_embed(
-            "Processing YouTube Playlist", f"📋 **{playlist_name}**\n{progress_bar}"
+            "Đang xử lý YouTube Playlist", f"**{playlist_name}**\n{progress_bar}"
         )
 
-        embed.add_field(name="✅ Đã thêm", value=str(added_count), inline=True)
-        embed.add_field(name="❌ Lỗi", value=str(failed_count), inline=True)
+        embed.add_field(name="Đã thêm", value=str(added_count), inline=True)
+        embed.add_field(name="Lỗi", value=str(failed_count), inline=True)
         embed.add_field(
-            name="⏳ Tiến độ", value=f"{current_index}/{total_count}", inline=True
+            name="Tiến độ", value=f"{current_index}/{total_count}", inline=True
         )
 
         return embed
@@ -91,7 +99,7 @@ class SystemEmbedBuilder:
 
         # Connection Stats
         embed.add_field(
-            name="🎵 Audio Connections",
+            name="Audio Connections",
             value=f"**Active Voice Clients**: {stats.get('total_voice_clients', 0)}\n"
             f"**Audio Players**: {stats.get('total_audio_players', 0)}\n"
             f"**Queue Managers**: {stats.get('total_queue_managers', 0)}",
@@ -101,7 +109,7 @@ class SystemEmbedBuilder:
         # Cache Stats
         cache_hit_rate = stats.get("cache_hit_rate", 0)
         embed.add_field(
-            name="💾 Cache Performance",
+            name="Cache Performance",
             value=f"**Cache Size**: {stats.get('cache_size', 0)}\n"
             f"**Hit Rate**: {cache_hit_rate:.1f}%\n"
             f"**Cache Hits**: {stats.get('cache_hits', 0)}",
@@ -110,12 +118,11 @@ class SystemEmbedBuilder:
 
         # Status indicator
         active_connections = stats.get("active_connections", 0)
-        status_emoji = "🟢" if active_connections < 8 else "🟡"
         status_text = "Healthy" if active_connections < 8 else "High Usage"
 
         embed.add_field(
-            name="📊 Status",
-            value=f"{status_emoji} {status_text}\n**Active**: {active_connections}",
+            name="Status",
+            value=f"{status_text}\n**Active**: {active_connections}",
             inline=True,
         )
 
@@ -129,19 +136,18 @@ class SystemEmbedBuilder:
         )
 
         hit_rate = cache_stats.get("hit_rate", 0)
-        status_emoji = "🟢" if hit_rate > 50 else "🟡"
         status_text = "Optimal" if hit_rate > 50 else "Building"
 
         embed.add_field(
-            name="📊 Performance",
+            name="Performance",
             value=f"**Hit Rate**: {hit_rate:.1f}%\n"
             f"**Total Requests**: {cache_stats.get('total_requests', 0)}\n"
-            f"**Status**: {status_emoji} {status_text}",
+            f"**Status**: {status_text}",
             inline=True,
         )
 
         embed.add_field(
-            name="💾 Storage",
+            name="Storage",
             value=f"**Current Size**: {cache_stats.get('cache_size', 0)}\n"
             f"**Popular Songs**: {cache_stats.get('popular_count', 0)}",
             inline=True,
@@ -149,7 +155,7 @@ class SystemEmbedBuilder:
 
         time_saved = cache_stats.get("processing_time_saved", 0)
         embed.add_field(
-            name="⚡ Impact",
+            name="Impact",
             value=f"**Time Saved**: {time_saved:.1f}s\n"
             f"**Processed**: {cache_stats.get('total_processed', 0)}",
             inline=True,
@@ -175,7 +181,7 @@ class HelpEmbedBuilder:
             "> **`/leave`** - Rời voice channel",
             "> **`/ping`** - Kiểm tra độ trễ",
         ]
-        embed.add_field(name="🔧 Cơ bản", value="\n".join(basic_cmds), inline=False)
+        embed.add_field(name="Cơ bản", value="\n".join(basic_cmds), inline=False)
 
         # Playback commands
         playback_cmds = [
@@ -187,9 +193,7 @@ class HelpEmbedBuilder:
             "> **`/stop`** - Dừng và xóa queue",
             "> **`/volume <0-100>`** - Đặt âm lượng",
         ]
-        embed.add_field(
-            name="▶️ Phát nhạc", value="\n".join(playback_cmds), inline=False
-        )
+        embed.add_field(name="Phát nhạc", value="\n".join(playback_cmds), inline=False)
 
         # Playlist commands
         playlist_cmds = [
@@ -198,18 +202,16 @@ class HelpEmbedBuilder:
             "> **`/add <song>`** - Thêm vào playlist hiện tại",
             "> **`/playlists`** - Liệt kê playlist",
         ]
-        embed.add_field(
-            name="📋 Playlist", value="\n".join(playlist_cmds), inline=False
-        )
+        embed.add_field(name="Playlist", value="\n".join(playlist_cmds), inline=False)
 
         # Features
         features = [
-            "🎵 **Multi-source**: YouTube, Spotify, SoundCloud",
-            "🚀 **Smart Processing**: AI-powered caching & optimization",
-            "📋 **Playlist Management**: Persistent playlists",
-            "⚡ **Async Processing**: Non-blocking operations",
+            "▸ **Multi-source**: YouTube, Spotify, SoundCloud",
+            "▸ **Smart Processing**: AI-powered caching & optimization",
+            "▸ **Playlist Management**: Persistent playlists",
+            "▸ **Async Processing**: Non-blocking operations",
         ]
-        embed.add_field(name="✨ Tính năng", value="\n".join(features), inline=False)
+        embed.add_field(name="Tính năng", value="\n".join(features), inline=False)
 
         return embed
 
@@ -221,20 +223,20 @@ class HelpEmbedBuilder:
         )
 
         embed.add_field(
-            name="🎵 Single Video",
+            name="Single Video",
             value="`youtube.com/watch?v=xyz&list=abc`\n→ Chỉ phát **1 bài hát**",
             inline=False,
         )
 
         embed.add_field(
-            name="📋 Full Playlist",
+            name="Full Playlist",
             value="`youtube.com/playlist?list=abc`\n→ Phát **toàn bộ playlist**",
             inline=False,
         )
 
         embed.add_field(
-            name="💡 Tip",
-            value="Sử dụng `/aplay` để xử lý playlist lớn nhanh hơn với async processing!",
+            name="Tip",
+            value="Sử dụng /aplay để xử lý playlist lớn nhanh hơn với async processing!",
             inline=False,
         )
 

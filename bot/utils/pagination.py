@@ -43,16 +43,14 @@ class PaginationView(View):
         """Only allow the command author to use buttons"""
         if interaction.user.id != self.author_id:
             await interaction.response.send_message(
-                "❌ Chỉ người dùng lệnh mới có thể điều khiển!",
+                "Chỉ người dùng lệnh mới có thể điều khiển!",
                 ephemeral=True,
             )
             return False
         return True
 
     @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.primary)
-    async def first_page(
-        self, interaction: discord.Interaction, button: Button
-    ):
+    async def first_page(self, interaction: discord.Interaction, button: Button):
         """Go to first page"""
         self.current_page = 0
         self._update_buttons()
@@ -61,9 +59,7 @@ class PaginationView(View):
         )
 
     @discord.ui.button(emoji="◀️", style=discord.ButtonStyle.primary)
-    async def previous_page(
-        self, interaction: discord.Interaction, button: Button
-    ):
+    async def previous_page(self, interaction: discord.Interaction, button: Button):
         """Go to previous page"""
         self.current_page = max(0, self.current_page - 1)
         self._update_buttons()
@@ -72,9 +68,7 @@ class PaginationView(View):
         )
 
     @discord.ui.button(emoji="🗑️", style=discord.ButtonStyle.danger)
-    async def delete_message(
-        self, interaction: discord.Interaction, button: Button
-    ):
+    async def delete_message(self, interaction: discord.Interaction, button: Button):
         """Delete the pagination message"""
         await interaction.response.defer()
         if self.message:
@@ -84,9 +78,7 @@ class PaginationView(View):
                 pass
 
     @discord.ui.button(emoji="▶️", style=discord.ButtonStyle.primary)
-    async def next_page(
-        self, interaction: discord.Interaction, button: Button
-    ):
+    async def next_page(self, interaction: discord.Interaction, button: Button):
         """Go to next page"""
         self.current_page = min(len(self.pages) - 1, self.current_page + 1)
         self._update_buttons()
@@ -95,9 +87,7 @@ class PaginationView(View):
         )
 
     @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.primary)
-    async def last_page(
-        self, interaction: discord.Interaction, button: Button
-    ):
+    async def last_page(self, interaction: discord.Interaction, button: Button):
         """Go to last page"""
         self.current_page = len(self.pages) - 1
         self._update_buttons()
@@ -170,7 +160,7 @@ class PaginationHelper:
     ) -> discord.Embed:
         """Create embed for queue page"""
         embed = discord.Embed(
-            title=f"🎵 Hàng Đợi Phát Nhạc",
+            title="Hàng đợi phát nhạc",
             color=discord.Color.blue(),
         )
 
@@ -178,7 +168,7 @@ class PaginationHelper:
         if current_song:
             current_title = current_song.get("title", "Unknown")
             embed.add_field(
-                name="▶️ Đang phát",
+                name="Đang phát",
                 value=f"**{current_title}**\n`Vị trí: {queue_position[0]}/{queue_position[1]}`",
                 inline=False,
             )
@@ -196,22 +186,24 @@ class PaginationHelper:
                     title = title[:47] + "..."
 
                 status = song.get("status", "unknown")
-                status_emoji = {
-                    "ready": "✅",
-                    "processing": "⏳",
-                    "failed": "❌",
-                    "pending": "⏸️",
-                }.get(status, "❓")
+                status_indicators = {
+                    "ready": "▸",
+                    "processing": "○",
+                    "failed": "×",
+                    "pending": "·",
+                }.get(status, "?")
 
-                songs_text += f"`{actual_pos}.` {status_emoji} **{title}**\n"
+                songs_text += f"`{actual_pos}.` {status_indicators} **{title}**\n"
 
             embed.add_field(
-                name=f"📋 Danh sách ({len(songs)} bài)",
+                name=f"Danh sách ({len(songs)} bài)",
                 value=songs_text or "Trống",
                 inline=False,
             )
 
-        embed.set_footer(text=f"Trang {page_num}/{total_pages} • Tổng cộng {queue_position[1]} bài")
+        embed.set_footer(
+            text=f"Trang {page_num}/{total_pages} • Tổng cộng {queue_position[1]} bài"
+        )
         return embed
 
     @staticmethod
@@ -224,7 +216,7 @@ class PaginationHelper:
     ) -> discord.Embed:
         """Create embed for playlist page"""
         embed = discord.Embed(
-            title=f"📋 Playlist: {playlist_name}",
+            title=f"Playlist: {playlist_name}",
             color=discord.Color.green(),
         )
 
@@ -244,12 +236,14 @@ class PaginationHelper:
                 songs_text += f"`{actual_pos}.` **{title}** `({source})`\n"
 
             embed.add_field(
-                name=f"🎵 Nội dung",
+                name="Nội dung",
                 value=songs_text or "Trống",
                 inline=False,
             )
 
-        embed.set_footer(text=f"Trang {page_num}/{total_pages} • Tổng cộng {total_songs} bài")
+        embed.set_footer(
+            text=f"Trang {page_num}/{total_pages} • Tổng cộng {total_songs} bài"
+        )
         return embed
 
 
@@ -271,7 +265,7 @@ async def send_paginated_embed(
     """
     if not pages:
         await interaction.response.send_message(
-            "❌ Không có dữ liệu để hiển thị", ephemeral=True
+            "Không có dữ liệu để hiển thị", ephemeral=True
         )
         return None
 
