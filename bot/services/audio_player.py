@@ -232,9 +232,14 @@ class AudioPlayer:
                 # Estimate memory from container limits or assume moderate
                 memory_mb = 1024  # Default assumption
 
-            # Base configuration
+            # Base configuration with improved reconnection and error handling
             base_before_options = (
-                "-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2"
+                "-nostdin "
+                "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
+                "-reconnect_at_eof 1 "  # Reconnect at end of file
+                "-multiple_requests 1 "  # Enable multiple HTTP requests
+                "-http_persistent 1 "  # Use persistent HTTP connections
+                "-loglevel warning"  # Reduce FFmpeg noise in logs
             )
             base_options = "-vn -avoid_negative_ts make_zero"
 
