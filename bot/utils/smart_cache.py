@@ -99,6 +99,11 @@ class SmartCache:
         # Popular content tracking
         self._popular_urls: Dict[str, int] = {}  # url -> access count
         self._warming_queue: List[str] = []
+        self._max_popular_urls = 500  # Limit popular URLs tracking
+
+        # Background cleanup task
+        self._cleanup_task: Optional[asyncio.Task] = None
+        self._cleanup_interval = 600  # Cleanup every 10 minutes
 
         # Ensure cache directory exists (create parents if needed)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -106,6 +111,9 @@ class SmartCache:
         # Load persistent cache if enabled
         if self.persist:
             self._load_persistent_cache()
+
+        # Start background cleanup task
+        self._start_cleanup_task()
 
         logger.info(f"🚄 SmartCache initialized: {len(self._cache)} cached items")
 
@@ -163,6 +171,9 @@ class SmartCache:
             # Track popularity
             self._popular_urls[url] = self._popular_urls.get(url, 0) + 1
 
+            # Enforce popular URLs limit
+            self._enforce_popular_urls_limit()
+
             # Enforce size limit
             await self._enforce_size_limit()
 
@@ -182,6 +193,19 @@ class SmartCache:
         if key in self._access_order:
             self._access_order.remove(key)
         self._access_order.append(key)
+
+    def _enforce_popular_urls_limit(self):
+        """Enforce popular URLs tracking limit to prevent unbounded growth"""
+        if len(self._popular_urls) > self._max_popular_urls:
+            # Keep only top 80% by access count
+            sorted_urls = sorted(
+                self._popular_urls.items(), key=lambda x: x[1], reverse=True
+            )
+            cutoff = int(self._max_popular_urls * 0.8)
+            self._popular_urls = dict(sorted_urls[:cutoff])
+            logger.debug(
+                f"Pruned popular URLs tracking from {len(sorted_urls)} to {len(self._popular_urls)}"
+            )
 
     async def _enforce_size_limit(self):
         """Enforce cache size limit using LRU eviction"""
@@ -212,6 +236,39 @@ class SmartCache:
 
         if key in self._access_order:
             self._access_order.remove(key)
+
+    def _start_cleanup_task(self):
+        """Start background task for periodic cleanup"""
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._cleanup_task = asyncio.create_task(self._background_cleanup())
+            logger.info(
+                f"🧹 Started background cleanup task (interval: {self._cleanup_interval}s)"
+            )
+
+    async def _background_cleanup(self):
+        """Background task to periodically cleanup expired entries"""
+        while True:
+            try:
+                await asyncio.sleep(self._cleanup_interval)
+                logger.debug("Running periodic cache cleanup...")
+
+                # Cleanup expired entries
+                expired_count = await self.cleanup_expired()
+
+                # Log statistics
+                stats = self.get_stats()
+                logger.info(
+                    f"🧹 Cache cleanup: removed {expired_count} expired entries, "
+                    f"current size: {stats['cache_size']}/{stats['max_size']}, "
+                    f"hit rate: {stats['hit_rate']:.1f}%"
+                )
+
+            except asyncio.CancelledError:
+                logger.info("Background cleanup task cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in background cleanup task: {e}")
+                # Continue running despite errors
 
     async def get_or_process(self, url: str, process_func) -> Tuple[dict, bool]:
         """
@@ -276,16 +333,20 @@ class SmartCache:
     async def cleanup_expired(self) -> int:
         """Remove expired cache entries"""
         expired_keys = []
-        current_time = time.time()
 
-        for key, cached_song in self._cache.items():
-            if cached_song.is_expired(self.ttl):
-                expired_keys.append(key)
+        async with self._cache_lock:
+            for key, cached_song in self._cache.items():
+                if cached_song.is_expired(self.ttl):
+                    expired_keys.append(key)
 
+        # Remove expired entries
         for key in expired_keys:
-            await self._remove_from_cache(key)
+            async with self._cache_lock:
+                await self._remove_from_cache(key)
 
-        logger.info(f"Cleaned up {len(expired_keys)} expired cache entries")
+        if expired_keys:
+            logger.info(f"Cleaned up {len(expired_keys)} expired cache entries")
+
         return len(expired_keys)
 
     def get_stats(self) -> dict:
@@ -405,6 +466,15 @@ class SmartCache:
     async def shutdown(self):
         """Clean shutdown of cache system"""
         logger.info("🛑 SmartCache shutting down...")
+
+        # Cancel background cleanup task
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("✅ Background cleanup task stopped")
 
         # Save current state
         if self.persist:
