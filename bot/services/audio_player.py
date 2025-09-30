@@ -236,9 +236,8 @@ class AudioPlayer:
             base_before_options = (
                 "-nostdin "
                 "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
-                "-reconnect_at_eof 1 "  # Reconnect at end of file
                 "-multiple_requests 1 "  # Enable multiple HTTP requests
-                "-loglevel warning"  # Reduce FFmpeg noise in logs
+                "-loglevel error"  # Only show errors, hide TLS warnings
             )
             base_options = "-vn -avoid_negative_ts make_zero"
 
@@ -269,8 +268,13 @@ class AudioPlayer:
                 f"Creating FFmpeg source with enhanced options: before_options='{before_options}', options='{options}'"
             )
 
+            # Create audio source with stderr suppression for cleaner logs
+            # TLS errors at EOF are normal and expected, no need to spam logs
             audio_source = FFmpegPCMAudio(
-                stream_url, before_options=before_options, options=options
+                stream_url, 
+                before_options=before_options, 
+                options=options,
+                stderr=subprocess.DEVNULL  # Suppress FFmpeg stderr (TLS warnings, etc.)
             )
 
             # Apply volume transformation
