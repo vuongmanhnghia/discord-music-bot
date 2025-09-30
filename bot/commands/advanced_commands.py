@@ -169,74 +169,148 @@ class AdvancedCommandHandler(BaseCommandHandler):
             """🔄 Check stream refresh status"""
             try:
                 from ..services.stream_refresh import stream_refresh_service
-                
+
                 stats = stream_refresh_service.get_refresh_stats()
-                
+
                 embed = self.create_info_embed(
-                    "🔄 Stream URL Refresh Status", 
-                    "Hệ thống tự động refresh stream URL cho bot 24/7"
+                    "🔄 Stream URL Refresh Status",
+                    "Hệ thống tự động refresh stream URL cho bot 24/7",
                 )
-                
+
                 # Status
                 status = "🟢 Enabled" if stats["enabled"] else "🔴 Disabled"
                 embed.add_field(name="Trạng thái", value=status, inline=True)
-                
+
                 # Refresh count
                 embed.add_field(
-                    name="Số lần refresh", 
-                    value=f"{stats['refresh_count']} lần", 
-                    inline=True
+                    name="Số lần refresh",
+                    value=f"{stats['refresh_count']} lần",
+                    inline=True,
                 )
-                
+
                 # Cached URLs
                 embed.add_field(
-                    name="URLs đã cache", 
-                    value=f"{stats['cached_urls']} URLs", 
-                    inline=True
+                    name="URLs đã cache",
+                    value=f"{stats['cached_urls']} URLs",
+                    inline=True,
                 )
-                
+
                 # Last refresh
                 if stats["last_refresh_time"] > 0:
                     import datetime
-                    last_refresh = datetime.datetime.fromtimestamp(stats["last_refresh_time"])
+
+                    last_refresh = datetime.datetime.fromtimestamp(
+                        stats["last_refresh_time"]
+                    )
                     embed.add_field(
-                        name="Refresh cuối", 
-                        value=f"{last_refresh.strftime('%H:%M:%S %d/%m')}", 
-                        inline=True
+                        name="Refresh cuối",
+                        value=f"{last_refresh.strftime('%H:%M:%S %d/%m')}",
+                        inline=True,
                     )
                 else:
                     embed.add_field(name="Refresh cuối", value="Chưa có", inline=True)
-                
+
                 # Time since last refresh
                 if stats["time_since_last_refresh"] > 0:
                     hours = stats["time_since_last_refresh"] / 3600
                     embed.add_field(
-                        name="Thời gian từ lần cuối", 
-                        value=f"{hours:.1f} giờ", 
-                        inline=True
+                        name="Thời gian từ lần cuối",
+                        value=f"{hours:.1f} giờ",
+                        inline=True,
                     )
-                
+
                 # Features info
                 features_info = [
                     "• Tự động refresh URL hết hạn (5 giờ)",
                     "• Proactive refresh mỗi 6 giờ",
-                    "• Retry khi URL fail", 
+                    "• Retry khi URL fail",
                     "• Cache URL để tối ưu performance",
                     "• Hỗ trợ bot hoạt động 24/7",
                 ]
-                
+
                 embed.add_field(
-                    name="Tính năng", 
-                    value="\n".join(features_info), 
-                    inline=False
+                    name="Tính năng", value="\n".join(features_info), inline=False
                 )
-                
+
                 embed.set_footer(text="Stream refresh đảm bảo bot hoạt động liên tục")
-                
+
                 await interaction.response.send_message(embed=embed)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "stream")
+
+        @self.bot.tree.command(
+            name="switch", description="Kiểm tra trạng thái playlist switch system"
+        )
+        @app_commands.describe(action="Action: status, clear, settings")
+        async def switch_status(
+            interaction: discord.Interaction, action: str = "status"
+        ):
+            """🔄 Kiểm tra trạng thái playlist switch system"""
+            try:
+                if not interaction.guild:
+                    await interaction.response.send_message(
+                        ERROR_MESSAGES["guild_only"], ephemeral=True
+                    )
+                    return
+
+                await interaction.response.defer()
+
+                if action == "status":
+                    # Show current switch status
+                    embed = discord.Embed(
+                        title="🔄 Playlist Switch Status", color=discord.Color.blue()
+                    )
+
+                    from ..services.playlist_switch import PlaylistSwitchManager
+
+                    switch_manager = PlaylistSwitchManager()
+                    status = await switch_manager.get_switch_status(
+                        interaction.guild.id
+                    )
+
+                    # Add status fields
+                    embed.add_field(
+                        name="Switch Lock",
+                        value="🔒 Active" if status.get("locked") else "🔓 Free",
+                        inline=True,
+                    )
+                    embed.add_field(
+                        name="Active Operations",
+                        value=str(status.get("active_operations", 0)),
+                        inline=True,
+                    )
+                    embed.add_field(
+                        name="Last Switch",
+                        value=status.get("last_switch", "Never"),
+                        inline=True,
+                    )
+
+                    if status.get("current_playlist"):
+                        embed.add_field(
+                            name="Current Playlist",
+                            value=status["current_playlist"],
+                            inline=False,
+                        )
+
+                    await interaction.followup.send(embed=embed)
+
+                elif action == "clear":
+                    # Clear switch locks
+                    from ..services.playlist_switch import PlaylistSwitchManager
+
+                    switch_manager = PlaylistSwitchManager()
+                    await switch_manager.clear_locks(interaction.guild.id)
+
+                    await interaction.followup.send("🧹 Playlist switch locks cleared!")
+
+                else:
+                    await interaction.followup.send(
+                        "❌ Invalid action. Use: status, clear"
+                    )
+
+            except Exception as e:
+                await self.handle_command_error(interaction, e, "switch")
 
     def _create_help_embed(self) -> discord.Embed:
         """Create comprehensive help embed"""

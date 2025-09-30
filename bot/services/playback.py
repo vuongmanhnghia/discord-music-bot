@@ -302,7 +302,7 @@ class PlaybackService:
 
             return (
                 True,
-                f"🔄 **{song.title}** đã được thêm vào hàng đợi ・ *(Vị trí: {position})* ・ *(Đang xử lý...)*",
+                f"🔄 **{song.display_name}** đã được thêm vào hàng đợi ・ *(Vị trí: {position})* ・ *(Đang xử lý...)*",
                 song,
                 task_id,
             )
@@ -628,30 +628,69 @@ class PlaybackService:
                 logger.error(f"No queue manager found for guild {guild_id}")
                 return False
 
-            # Add songs from playlist to queue
+            # Clear existing queue only if not empty (safe approach)
+            existing_songs = queue_manager.get_all_songs()
+            if existing_songs:
+                logger.info(f"Clearing {len(existing_songs)} existing songs from queue")
+                queue_manager.clear()
+
+            # Add songs from playlist to queue with smart processing
             added_count = 0
-            for song_info in playlist_songs:
+            immediate_process_count = min(
+                3, len(playlist_songs)
+            )  # Process first 3 songs immediately
+
+            logger.info(
+                f"Processing {immediate_process_count} songs immediately, {len(playlist_songs) - immediate_process_count} async"
+            )
+
+            for idx, song_info in enumerate(playlist_songs):
                 try:
-                    # Use the first available song to start playback immediately
-                    if added_count == 0:
-                        # For the first song, use immediate processing to start playback quickly
-                        success_first, _, _ = await self.play_request(
+                    if idx < immediate_process_count:
+                        # Process first few songs immediately for instant playback
+                        logger.info(
+                            f"🔄 Processing song {idx+1}/{len(playlist_songs)} immediately: {song_info['original_input'][:50]}..."
+                        )
+                        success, _, song = await self.play_request(
                             song_info["original_input"],
                             guild_id,
                             "Playlist",
-                            auto_play=True,
+                            auto_play=(idx == 0),  # Only auto-play the first song
                         )
-                        if success_first:
+                        if success:
                             added_count += 1
+                            logger.info(
+                                f"✅ Song {idx+1} ready for playback: {song.display_name if song else 'Unknown'}"
+                            )
+                        else:
+                            logger.warning(
+                                f"⚠️ Failed to process song {idx+1} immediately"
+                            )
                     else:
-                        # For remaining songs, add them to async processing
-                        await self.play_request_async(
-                            song_info["original_input"], guild_id, "Playlist"
+                        # Process remaining songs asynchronously in background
+                        logger.info(
+                            f"📋 Queuing song {idx+1}/{len(playlist_songs)} for async processing: {song_info['original_input'][:50]}..."
                         )
-                        added_count += 1
+                        success_async, _, song_async, task_id = (
+                            await self.play_request_async(
+                                song_info["original_input"],
+                                guild_id,
+                                "Playlist",
+                                auto_play=False,  # Don't auto-play async songs
+                            )
+                        )
+                        if success_async:
+                            added_count += 1
+                            logger.info(
+                                f"📝 Song {idx+1} queued with task ID: {task_id}"
+                            )
+                        else:
+                            logger.warning(
+                                f"⚠️ Failed to queue song {idx+1} for async processing"
+                            )
 
                 except Exception as e:
-                    logger.error(f"Error adding song to playlist playback: {e}")
+                    logger.error(f"Error adding song {idx+1} to playlist playback: {e}")
                     continue
 
             if added_count > 0:

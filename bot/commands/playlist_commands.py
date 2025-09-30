@@ -29,11 +29,11 @@ class PlaylistCommandHandler(BaseCommandHandler):
         """Setup playlist commands"""
 
         @self.bot.tree.command(
-            name="use", description="Chọn playlist để sử dụng làm queue mặc định"
+            name="use", description="Chọn playlist và chuyển sang phát ngay lập tức"
         )
         @app_commands.describe(playlist_name="Tên playlist muốn sử dụng")
         async def use_playlist(interaction: discord.Interaction, playlist_name: str):
-            """📋 Set active playlist"""
+            """📋 Safe playlist switch"""
             try:
                 if not self.playlist_service:
                     await interaction.response.send_message(
@@ -41,23 +41,50 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     )
                     return
 
-                # Check if playlist exists
+                # Check if user is in voice channel
+                if not await self.ensure_user_in_voice(interaction):
+                    return
+
+                # Check if playlist exists first
                 success, message = self.playlist_service.load_playlist(playlist_name)
-
-                if success:
-                    # Set as active playlist
-                    self.active_playlists[interaction.guild.id] = playlist_name
-
-                    embed = self.create_success_embed(
-                        SUCCESS_MESSAGES["playlist_selected"],
-                        f"📋 **{playlist_name}**\n{message}",
-                    )
-                    await interaction.response.send_message(embed=embed)
-                else:
+                if not success:
                     error_embed = self.create_error_embed("❌ Lỗi playlist", message)
                     await interaction.response.send_message(
                         embed=error_embed, ephemeral=True
                     )
+                    return
+
+                # Respond immediately to avoid timeout
+                embed = self.create_info_embed(
+                    "🔄 Đang chuyển playlist",
+                    f"📋 **{playlist_name}**\nĐang dừng phát hiện tại và tải playlist mới...",
+                )
+                await interaction.response.send_message(embed=embed)
+
+                # Perform safe playlist switch
+                from ..services.playlist_switch import playlist_switch_manager
+
+                switch_success, switch_message = (
+                    await playlist_switch_manager.safe_playlist_switch(
+                        interaction.guild.id, playlist_name, str(interaction.user)
+                    )
+                )
+
+                if switch_success:
+                    # Set as active playlist
+                    self.active_playlists[interaction.guild.id] = playlist_name
+
+                    # Update with success message
+                    success_embed = self.create_success_embed(
+                        "✅ Đã chuyển playlist thành công", switch_message
+                    )
+                else:
+                    # Update with error message
+                    success_embed = self.create_error_embed(
+                        "❌ Lỗi khi chuyển playlist", switch_message
+                    )
+
+                await interaction.edit_original_response(embed=success_embed)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "use")

@@ -25,7 +25,9 @@ class Song:
     # Timestamps
     created_at: datetime = field(default_factory=datetime.now)
     processed_at: Optional[datetime] = None
-    stream_url_timestamp: Optional[float] = None  # When stream URL was obtained (for refresh)
+    stream_url_timestamp: Optional[float] = (
+        None  # When stream URL was obtained (for refresh)
+    )
 
     # Requester info
     requested_by: Optional[str] = None

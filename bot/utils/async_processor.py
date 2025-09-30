@@ -455,11 +455,11 @@ class AsyncSongProcessor:
                 song.status = SongStatus.READY
                 logger.info(f"✅ Song processing completed: {song.display_name}")
             else:
-                song.status = SongStatus.ERROR
+                song.status = SongStatus.FAILED
                 logger.warning(f"❌ Song processing failed: {song.original_input}")
 
         except Exception as e:
-            song.status = SongStatus.ERROR
+            song.status = SongStatus.FAILED
             logger.error(f"💥 Error processing song {song.original_input}: {e}")
             raise
 

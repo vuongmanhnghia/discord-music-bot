@@ -135,7 +135,7 @@ STREAM_URL_MAX_AGE = 18000  # 5 hours in seconds (YouTube URLs expire ~6h)
 STREAM_URL_REFRESH_INTERVAL = 3600  # Check every hour
 STREAM_URL_REFRESH_THRESHOLD = 900  # Refresh if expires in 15 minutes
 
-# Auto-recovery settings  
+# Auto-recovery settings
 AUTO_RECOVERY_COOLDOWN = 300  # 5 minutes between recoveries
 SCHEDULED_MAINTENANCE_INTERVAL = 21600  # 6 hours
 MAX_CACHE_AGE_DAYS = 7  # Delete cache older than 7 days

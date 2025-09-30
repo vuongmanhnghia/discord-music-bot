@@ -38,10 +38,38 @@ class AudioPlayer:
         self._loop = loop
 
     async def play_song(self, song: Song, retry_count: int = 0) -> bool:
-        """Play a song with retry mechanism"""
+        """Play a song with retry mechanism and processing wait"""
+        # If song is not ready, try to wait for processing completion
         if not song.is_ready:
-            logger.error(f"Cannot play song that is not ready: {song.display_name}")
-            return False
+            if song.status.value == "processing":
+                logger.info(
+                    f"⏳ Song is processing, waiting for completion: {song.display_name}"
+                )
+
+                # Wait up to 30 seconds for processing to complete
+                for wait_time in range(30):
+                    if song.is_ready:
+                        logger.info(
+                            f"✅ Song processing completed after {wait_time}s: {song.display_name}"
+                        )
+                        break
+                    elif song.status.value == "failed":
+                        logger.error(f"❌ Song processing failed: {song.display_name}")
+                        return False
+
+                    await asyncio.sleep(1)
+
+                # If still not ready after waiting, fail
+                if not song.is_ready:
+                    logger.error(
+                        f"⏰ Timeout waiting for song processing: {song.display_name}"
+                    )
+                    return False
+            else:
+                logger.error(
+                    f"Cannot play song that is not ready: {song.display_name} (status: {song.status.value})"
+                )
+                return False
 
         logger.info(
             f"Starting playback: {song.display_name} in guild {self.guild_id} (attempt {retry_count + 1})"
@@ -50,18 +78,22 @@ class AudioPlayer:
         try:
             # Check if stream URL needs refresh (for 24/7 operation)
             from ..services.stream_refresh import stream_refresh_service
-            
+
             if await stream_refresh_service.should_refresh_url(song):
-                logger.info(f"🔄 Stream URL expired, refreshing for: {song.display_name}")
+                logger.info(
+                    f"🔄 Stream URL expired, refreshing for: {song.display_name}"
+                )
                 refresh_success = await stream_refresh_service.refresh_stream_url(song)
-                
+
                 if not refresh_success:
-                    logger.error(f"❌ Failed to refresh stream URL for: {song.display_name}")
+                    logger.error(
+                        f"❌ Failed to refresh stream URL for: {song.display_name}"
+                    )
                     if retry_count < 2:
                         await asyncio.sleep(5)  # Wait before retry
                         return await self.play_song(song, retry_count + 1)
                     return False
-            
+
             # Validate stream URL
             if not song.stream_url or not song.stream_url.startswith(
                 ("http://", "https://")

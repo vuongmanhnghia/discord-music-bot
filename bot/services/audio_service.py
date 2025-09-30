@@ -187,31 +187,58 @@ class AudioService:
 
     async def play_next_song(self, guild_id: int) -> bool:
         """Play next song in queue"""
+        logger.debug(f"🎵 play_next_song called for guild {guild_id}")
+
         audio_player = self._audio_players.get(guild_id)
         queue_manager = self._queue_managers.get(guild_id)
 
-        if not audio_player or not queue_manager:
-            logger.warning(f"No audio player or queue manager for guild {guild_id}")
+        if not audio_player:
+            logger.error(f"No audio player found for guild {guild_id}")
             return False
+
+        if not queue_manager:
+            logger.error(f"No queue manager found for guild {guild_id}")
+            return False
+
+        logger.debug(
+            f"Audio player state: playing={audio_player.is_playing}, paused={audio_player.is_paused}"
+        )
+        logger.debug(f"Voice client connected: {audio_player.voice_client is not None}")
 
         current_song = queue_manager.current_song
         if not current_song:
-            logger.info(f"No more songs in queue for guild {guild_id}")
+            logger.info(f"No current song in queue for guild {guild_id}")
             return False
 
-        if not current_song.is_ready:
-            logger.warning(
-                f"Current song not ready for playback: {current_song.display_name}"
-            )
-            return False
+        logger.info(f"Current queue position: {queue_manager.position}")
+        logger.info(f"Attempting to play: {current_song.display_name}")
+        logger.info(
+            f"Song ready: {current_song.is_ready}, status: {current_song.status.value}"
+        )
 
-        return await audio_player.play_song(current_song)
+        # Always try to play song - audio player has wait mechanism for non-ready songs
+        try:
+            result = await audio_player.play_song(current_song)
+            logger.info(f"Audio player play_song result: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"Exception in audio_player.play_song: {e}")
+            return False
 
     async def skip_to_next(self, guild_id: int) -> bool:
         """Skip to next song"""
+        logger.info(f"🔄 Skip requested for guild {guild_id}")
+
         queue_manager = self._queue_managers.get(guild_id)
         if not queue_manager:
+            logger.error(f"No queue manager found for guild {guild_id}")
             return False
+
+        logger.info(f"Queue position before skip: {queue_manager.position}")
+        current_before = queue_manager.current_song
+        logger.info(
+            f"Current song before skip: {current_before.display_name if current_before else 'None'}"
+        )
 
         # Move to next song
         next_song = queue_manager.next_song()
@@ -219,12 +246,36 @@ class AudioService:
             logger.info(f"No next song in queue for guild {guild_id}")
             return False
 
-        # Stop current playback (will trigger next song via callback)
+        logger.info(f"Queue position after advancing: {queue_manager.position}")
+        logger.info(
+            f"Next song to play: {next_song.display_name} (ready: {next_song.is_ready}, status: {next_song.status.value})"
+        )
+
+        # Stop current playback first
         audio_player = self._audio_players.get(guild_id)
         if audio_player:
+            logger.info(
+                f"Stopping current playback (was playing: {audio_player.is_playing})"
+            )
             audio_player.stop()
+            await asyncio.sleep(0.1)  # Small delay to ensure stop is processed
+        else:
+            logger.warning(f"No audio player found for guild {guild_id}")
 
-        return True
+        # Force play next song (even if not ready yet - will use wait mechanism)
+        logger.info(f"Attempting to play next song: {next_song.display_name}")
+        success = await self.play_next_song(guild_id)
+
+        if success:
+            logger.info(
+                f"✅ Successfully started playback of: {next_song.display_name}"
+            )
+        else:
+            logger.error(
+                f"❌ Failed to play next song after skip: {next_song.display_name}"
+            )
+
+        return success
 
     async def _on_song_finished(self, song: Song):
         """Called when a song finishes playing"""
@@ -240,13 +291,20 @@ class AudioService:
             logger.warning(f"No queue manager found for guild {guild_id}")
             return
 
-        # Get next song
-        next_song = queue_manager.next_song()
+        # Get next song (without advancing - just peek)
+        current_pos = queue_manager.position
+        if current_pos < len(queue_manager._songs):
+            next_song = queue_manager._songs[current_pos]
 
-        if next_song and next_song.is_ready:
-            await self.play_next_song(guild_id)
+            if next_song:
+                logger.info(f"Auto-playing next song: {next_song.display_name}")
+                # Move queue position and play (will handle wait for processing)
+                queue_manager.next_song()  # Now advance the position
+                await self.play_next_song(guild_id)
+            else:
+                logger.info(f"No more songs to play in guild {guild_id}")
         else:
-            logger.info(f"No more songs to play in guild {guild_id}")
+            logger.info(f"Reached end of queue in guild {guild_id}")
 
     async def _on_playback_error(self, error, song: Song):
         """Called when playback error occurs"""

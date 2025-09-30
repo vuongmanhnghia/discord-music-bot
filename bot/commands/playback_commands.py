@@ -319,6 +319,20 @@ class PlaybackCommandHandler(BaseCommandHandler):
             )
 
         try:
+            # Check if safe to add (not during playlist switch)
+            from ..services.playlist_switch import playlist_switch_manager
+
+            if playlist_switch_manager.is_switching(interaction.guild.id):
+                switching_to = playlist_switch_manager.get_switching_playlist(
+                    interaction.guild.id
+                )
+                error_embed = self.create_error_embed(
+                    "⚠️ Đang chuyển playlist",
+                    f"Đang chuyển sang playlist **{switching_to}**, vui lòng chờ...",
+                )
+                await interaction.followup.send(embed=error_embed)
+                return
+
             # Process the song request
             success, message, song = await playback_service.play_request(
                 user_input=query,
