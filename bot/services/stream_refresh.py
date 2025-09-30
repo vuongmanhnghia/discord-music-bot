@@ -30,7 +30,7 @@ class StreamRefreshService:
             return False
 
         # Check if URL is older than max age (default 5 hours to be safe)
-        if hasattr(song, "stream_url_timestamp"):
+        if hasattr(song, "stream_url_timestamp") and song.stream_url_timestamp is not None:
             age = time.time() - song.stream_url_timestamp
             if age > STREAM_URL_MAX_AGE:
                 logger.info(
