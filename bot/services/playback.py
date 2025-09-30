@@ -616,11 +616,16 @@ class PlaybackService:
             success, playlist_songs = playlist_service.get_playlist_content(
                 playlist_name
             )
-            if not success or not playlist_songs:
-                logger.error(
-                    f"Failed to load playlist '{playlist_name}' or playlist is empty"
-                )
+            if not success:
+                logger.error(f"Failed to load playlist '{playlist_name}'")
                 return False
+            
+            # Empty playlist is OK - just set as active without loading songs
+            if not playlist_songs:
+                logger.info(
+                    f"Playlist '{playlist_name}' is empty - will be populated with /add commands"
+                )
+                return True  # Success even if empty
 
             # Get queue manager
             queue_manager = audio_service.get_queue_manager(guild_id)

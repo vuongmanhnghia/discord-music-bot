@@ -66,3 +66,7 @@ tests/
 # Nix
 flake.lock
 flake.nix
+
+scripts/
+tests/
+playlist/

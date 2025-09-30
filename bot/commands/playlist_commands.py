@@ -156,6 +156,14 @@ class PlaylistCommandHandler(BaseCommandHandler):
                 guild_id = interaction.guild.id
                 active_playlist = self.active_playlists.get(guild_id)
 
+                # Check if it's a YouTube playlist
+                if YouTubePlaylistHandler.is_playlist_url(song_input):
+                    # Handle YouTube playlist
+                    await self._handle_add_youtube_playlist(
+                        interaction, song_input, active_playlist
+                    )
+                    return
+
                 # Defer response as processing may take time
                 await interaction.response.defer()
 
@@ -631,6 +639,103 @@ class PlaylistCommandHandler(BaseCommandHandler):
             error_embed = self.create_error_embed("❌ YouTube Playlist Error", message)
             await interaction.followup.send(embed=error_embed)
             return
+
+    async def _handle_add_youtube_playlist(
+        self, interaction: discord.Interaction, playlist_url: str, active_playlist: Optional[str]
+    ):
+        """Handle adding YouTube playlist via /add command"""
+        await interaction.response.defer()
+
+        # Extract playlist videos
+        success_extract, video_urls, message = (
+            await YouTubePlaylistHandler.extract_playlist_videos(playlist_url)
+        )
+
+        if not success_extract or not video_urls:
+            error_embed = self.create_error_embed("❌ YouTube Playlist Error", message)
+            await interaction.followup.send(embed=error_embed)
+            return
+
+        # Send initial status
+        embed = self.create_info_embed(
+            "🎵 Processing YouTube Playlist",
+            f"{message}\n⏳ Adding to queue{' & playlist' if active_playlist else ''}...",
+        )
+        await interaction.followup.send(embed=embed)
+
+        # Process each video
+        added_to_queue = 0
+        added_to_playlist = 0
+        failed_count = 0
+        guild_id = interaction.guild.id
+
+        for i, video_url in enumerate(video_urls[:50]):  # Limit to 50
+            try:
+                # Add to queue via playback service
+                success, msg, song = await playback_service.play_request(
+                    user_input=video_url,
+                    guild_id=guild_id,
+                    requested_by=str(interaction.user),
+                    auto_play=(i == 0),  # Auto-play first song
+                )
+
+                if success and song:
+                    added_to_queue += 1
+
+                    # If active playlist exists, also save to playlist file
+                    if active_playlist:
+                        # Wait briefly for metadata
+                        for _ in range(5):
+                            if song.metadata and song.metadata.title:
+                                break
+                            await asyncio.sleep(1)
+
+                        title = song.metadata.title if song.metadata else f"Video {i+1}"
+                        playlist_success, _ = self.playlist_service.add_to_playlist(
+                            active_playlist,
+                            video_url,
+                            song.source_type,
+                            title,
+                        )
+                        if playlist_success:
+                            added_to_playlist += 1
+                else:
+                    failed_count += 1
+
+                # Update progress every 10 songs
+                if (i + 1) % 10 == 0:
+                    progress_text = f"✅ Queue: {added_to_queue}\n❌ Failed: {failed_count}\n⏳ Progress: {i+1}/{len(video_urls)}"
+                    if active_playlist:
+                        progress_text = f"✅ Queue: {added_to_queue} | Playlist: {added_to_playlist}\n❌ Failed: {failed_count}\n⏳ Progress: {i+1}/{len(video_urls)}"
+
+                    progress_embed = self.create_info_embed(
+                        "🎵 Processing YouTube Playlist",
+                        progress_text,
+                    )
+                    await interaction.edit_original_response(embed=progress_embed)
+
+            except Exception as e:
+                logger.error(f"Error adding YouTube playlist video: {e}")
+                failed_count += 1
+
+        # Final result
+        if active_playlist:
+            final_embed = self.create_success_embed(
+                f"✅ Đã thêm YouTube Playlist",
+                f"📋 **Playlist:** {active_playlist}\n"
+                f"✅ Đã thêm vào queue: {added_to_queue} bài\n"
+                f"✅ Đã lưu vào playlist: {added_to_playlist} bài\n"
+                f"❌ Lỗi: {failed_count} bài",
+            )
+        else:
+            final_embed = self.create_success_embed(
+                f"✅ Đã thêm YouTube Playlist vào queue",
+                f"✅ Đã thêm: {added_to_queue} bài\n"
+                f"❌ Lỗi: {failed_count} bài\n"
+                f"💡 Tip: Dùng `/use <playlist>` để lưu các bài tiếp theo vào playlist",
+            )
+
+        await interaction.edit_original_response(embed=final_embed)
 
     # Helper methods removed - now using PaginationHelper
 

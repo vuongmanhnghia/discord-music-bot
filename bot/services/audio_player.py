@@ -268,13 +268,13 @@ class AudioPlayer:
                 f"Creating FFmpeg source with enhanced options: before_options='{before_options}', options='{options}'"
             )
 
-            # Create audio source with stderr suppression for cleaner logs
-            # TLS errors at EOF are normal and expected, no need to spam logs
+            # Create audio source with stderr redirected to suppress TLS warnings at EOF
+            # These warnings are normal when stream ends and don't indicate errors
             audio_source = FFmpegPCMAudio(
                 stream_url, 
                 before_options=before_options, 
                 options=options,
-                stderr=subprocess.DEVNULL  # Suppress FFmpeg stderr (TLS warnings, etc.)
+                stderr=open(os.devnull, 'w')  # Redirect stderr to /dev/null
             )
 
             # Apply volume transformation

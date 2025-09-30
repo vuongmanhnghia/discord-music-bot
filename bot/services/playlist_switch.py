@@ -155,11 +155,15 @@ class PlaylistSwitchManager:
                 queue_manager = audio_service.get_queue_manager(guild_id)
                 if queue_manager:
                     song_count = len(queue_manager.get_all_songs())
-                    return True, f"Đã tải {song_count} bài hát từ playlist"
+                    if song_count > 0:
+                        return True, f"Đã tải {song_count} bài hát từ playlist"
+                    else:
+                        # Empty playlist is fine - ready for /add commands
+                        return True, f"Playlist '{playlist_name}' đã sẵn sàng (trống, sử dụng /add để thêm bài)"
                 else:
-                    return True, "Playlist đã được tải"
+                    return True, f"Playlist '{playlist_name}' đã được chọn"
             else:
-                return False, "Không thể tải playlist hoặc playlist rỗng"
+                return False, "Không thể tải playlist"
 
         except Exception as e:
             logger.error(f"Error loading playlist '{playlist_name}': {e}")
