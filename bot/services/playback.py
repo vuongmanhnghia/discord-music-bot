@@ -79,7 +79,7 @@ class PlaybackService:
                 logger.error(f"No queue manager found for guild {guild_id}")
                 return (False, "Lỗi hệ thống: Không tìm thấy queue manager", None)
 
-            position = queue_manager.add_song(song)
+            position = await queue_manager.add_song(song)
 
             logger.info(
                 f"Added processed song to queue at position {position}: {song.display_name}"
@@ -130,7 +130,7 @@ class PlaybackService:
                 logger.error(f"No queue manager found for guild {guild_id}")
                 return (False, "Lỗi hệ thống: Không tìm thấy queue manager", None)
 
-            position = queue_manager.add_song(song)
+            position = await queue_manager.add_song(song)
 
             # Performance indicator in message
             cache_indicator = "⚡" if was_cached else "🔄"
@@ -281,7 +281,7 @@ class PlaybackService:
                 logger.error(f"No queue manager found for guild {guild_id}")
                 return (False, "Lỗi hệ thống: Không tìm thấy queue manager", None, None)
 
-            position = queue_manager.add_song(song)
+            position = await queue_manager.add_song(song)
 
             # Step 4: Submit for async processing with enhanced callback
             callback = None
@@ -491,7 +491,7 @@ class PlaybackService:
             # Clear queue
             queue_manager = audio_service.get_queue_manager(guild_id)
             if queue_manager:
-                queue_manager.clear()
+                await queue_manager.clear()
 
             # Cancel processing tasks
             if guild_id in self._processing_tasks:
@@ -632,7 +632,7 @@ class PlaybackService:
             existing_songs = queue_manager.get_all_songs()
             if existing_songs:
                 logger.info(f"Clearing {len(existing_songs)} existing songs from queue")
-                queue_manager.clear()
+                await queue_manager.clear()
 
             # Add songs from playlist to queue with smart processing
             added_count = 0
