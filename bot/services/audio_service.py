@@ -360,14 +360,6 @@ class AudioService:
         )
         return stats
 
-    async def cleanup_all(self):
-        """Cleanup all voice connections"""
-        guild_ids = list(self._voice_clients.keys())
-        for guild_id in guild_ids:
-            await self.disconnect_from_guild(guild_id)
-
-        logger.info("Cleaned up all voice connections")
-
 
 # Global audio service instance
 audio_service = AudioService()
