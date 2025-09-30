@@ -1,6 +1,6 @@
 """
 Playlist commands for the music bot
-Handles playlist creation, management, and operations
+Handles playlist creation, management, and operations with pagination
 """
 
 from typing import Optional
@@ -13,6 +13,7 @@ from ..services.playback import playback_service
 from ..domain.valueobjects.source_type import SourceType
 from ..utils.youtube_playlist_handler import YouTubePlaylistHandler
 from ..utils.validation import ValidationUtils
+from ..utils.pagination import PaginationHelper, send_paginated_embed
 
 from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
 
@@ -267,7 +268,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
         async def show_playlist(
             interaction: discord.Interaction, name: Optional[str] = None
         ):
-            """📋 Show playlist contents"""
+            """📋 Show playlist contents with interactive pagination"""
             try:
                 if not self.playlist_service:
                     await interaction.response.send_message(
@@ -298,8 +299,34 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     )
                     return
 
-                embed = self._create_playlist_display_embed(playlist_name, songs)
-                await interaction.response.send_message(embed=embed)
+                if not songs:
+                    await interaction.response.send_message(
+                        f"📋 Playlist **{playlist_name}** trống!",
+                        ephemeral=True,
+                    )
+                    return
+
+                # Create paginated pages
+                items_per_page = 10
+                total_pages = max(1, (len(songs) + items_per_page - 1) // items_per_page)
+                pages = []
+
+                for page_num in range(1, total_pages + 1):
+                    start_idx = (page_num - 1) * items_per_page
+                    end_idx = min(start_idx + items_per_page, len(songs))
+                    page_songs = songs[start_idx:end_idx]
+
+                    embed = PaginationHelper.create_playlist_embed(
+                        songs=page_songs,
+                        page_num=page_num,
+                        total_pages=total_pages,
+                        playlist_name=playlist_name,
+                        total_songs=len(songs),
+                    )
+                    pages.append(embed)
+
+                # Send paginated embed
+                await send_paginated_embed(interaction, pages)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "playlist")
@@ -520,31 +547,5 @@ class PlaylistCommandHandler(BaseCommandHandler):
             await interaction.followup.send(embed=error_embed)
             return
 
-    def _create_playlist_display_embed(
-        self, playlist_name: str, songs: list
-    ) -> discord.Embed:
-        """Create embed for playlist display"""
-        embed = self.create_info_embed(f"📋 Playlist: {playlist_name}", "")
+    # Helper methods removed - now using PaginationHelper
 
-        if not songs:
-            embed.add_field(name="📄 Nội dung", value="Playlist trống", inline=False)
-            return embed
-
-        # Show first 20 songs
-        display_songs = songs[:20]
-        songs_text = ""
-
-        for i, song in enumerate(display_songs, 1):
-            # Extract title from song data
-            title = song.get("title", song.get("input", "Unknown"))
-            source = song.get("source_type", "Unknown")
-            songs_text += f"`{i}.` **{title}** `({source})`\n"
-
-        embed.add_field(
-            name=f"📄 Nội dung ({len(songs)} bài)", value=songs_text, inline=False
-        )
-
-        if len(songs) > 20:
-            embed.set_footer(text=f"Hiển thị 20/{len(songs)} bài đầu tiên")
-
-        return embed

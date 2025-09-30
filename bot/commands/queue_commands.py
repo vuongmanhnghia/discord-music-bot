@@ -1,6 +1,6 @@
 """
 Queue commands for the music bot
-Handles queue display and management
+Handles queue display and management with pagination
 """
 
 import discord
@@ -9,6 +9,7 @@ from discord import app_commands
 from . import BaseCommandHandler
 from ..utils.embed_factory import EmbedFactory
 from ..utils.validation import ValidationUtils
+from ..utils.pagination import PaginationHelper, send_paginated_embed
 
 from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
 
@@ -20,9 +21,8 @@ class QueueCommandHandler(BaseCommandHandler):
         """Setup queue commands"""
 
         @self.bot.tree.command(name="queue", description="Hiển thị hàng đợi hiện tại")
-        @app_commands.describe(page="Trang hiển thị (mỗi trang 10 bài)")
-        async def show_queue(interaction: discord.Interaction, page: int = 1):
-            """📋 Display current queue"""
+        async def show_queue(interaction: discord.Interaction):
+            """📋 Display current queue with interactive pagination"""
             try:
                 if not interaction.guild:
                     await interaction.response.send_message(
@@ -47,26 +47,47 @@ class QueueCommandHandler(BaseCommandHandler):
                     )
                     return
 
-                # Validate page number
-                songs_per_page = 10
-                total_pages = max(1, (len(all_songs) + songs_per_page - 1) // songs_per_page)
-                is_valid, error_msg = ValidationUtils.validate_page_number(page, total_pages)
-                if not is_valid:
-                    await interaction.response.send_message(error_msg, ephemeral=True)
-                    return
-                queue_list = queue_manager.get_all_songs()
+                # Convert songs to dict format for pagination
+                song_dicts = []
+                for song in all_songs:
+                    song_dicts.append({
+                        "title": song.display_name,
+                        "status": song.status.value,
+                    })
 
-                if not current_song and not queue_list:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["no_queue"], ephemeral=True
+                # Get queue position
+                queue_position = (queue_manager.position, len(all_songs))
+
+                # Current song dict
+                current_song_dict = None
+                if current_song:
+                    current_song_dict = {
+                        "title": current_song.display_name,
+                        "status": current_song.status.value,
+                    }
+
+                # Create paginated pages
+                items_per_page = 10
+                total_pages = max(1, (len(song_dicts) + items_per_page - 1) // items_per_page)
+                pages = []
+
+                for page_num in range(1, total_pages + 1):
+                    start_idx = (page_num - 1) * items_per_page
+                    end_idx = min(start_idx + items_per_page, len(song_dicts))
+                    page_songs = song_dicts[start_idx:end_idx]
+
+                    embed = PaginationHelper.create_queue_embed(
+                        songs=page_songs,
+                        page_num=page_num,
+                        total_pages=total_pages,
+                        current_song=current_song_dict,
+                        queue_position=queue_position,
                     )
-                    return
+                    pages.append(embed)
 
-                # Create queue embed
-                embed = EmbedFactory.create_queue_embed(
-                    current_song=current_song, queue_list=queue_list, page=page
-                )
-                await interaction.response.send_message(embed=embed)
+                # Send paginated embed
+                await send_paginated_embed(interaction, pages)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "queue")
+
