@@ -262,47 +262,43 @@ class AdvancedCommandHandler(BaseCommandHandler):
                         title="🔄 Playlist Switch Status", color=discord.Color.blue()
                     )
 
-                    from ..services.playlist_switch import PlaylistSwitchManager
+                    from ..services.playlist_switch import playlist_switch_manager
 
-                    switch_manager = PlaylistSwitchManager()
-                    status = await switch_manager.get_switch_status(
-                        interaction.guild.id
-                    )
+                    guild_id = interaction.guild.id
+                    is_switching = playlist_switch_manager.is_switching(guild_id)
+                    switching_to = playlist_switch_manager.get_switching_playlist(guild_id)
 
                     # Add status fields
                     embed.add_field(
-                        name="Switch Lock",
-                        value="🔒 Active" if status.get("locked") else "🔓 Free",
+                        name="Switch Status",
+                        value="� Switching..." if is_switching else "✅ Ready",
                         inline=True,
                     )
-                    embed.add_field(
-                        name="Active Operations",
-                        value=str(status.get("active_operations", 0)),
-                        inline=True,
-                    )
-                    embed.add_field(
-                        name="Last Switch",
-                        value=status.get("last_switch", "Never"),
-                        inline=True,
-                    )
-
-                    if status.get("current_playlist"):
+                    
+                    if switching_to:
                         embed.add_field(
-                            name="Current Playlist",
-                            value=status["current_playlist"],
+                            name="Switching To",
+                            value=f"**{switching_to}**",
+                            inline=True,
+                        )
+                    
+                    # Show current active playlist
+                    active_playlist = getattr(self.bot, "active_playlists", {}).get(guild_id)
+                    if active_playlist:
+                        embed.add_field(
+                            name="Active Playlist",
+                            value=f"**{active_playlist}**",
                             inline=False,
                         )
 
                     await interaction.followup.send(embed=embed)
 
                 elif action == "clear":
-                    # Clear switch locks
-                    from ..services.playlist_switch import PlaylistSwitchManager
-
-                    switch_manager = PlaylistSwitchManager()
-                    await switch_manager.clear_locks(interaction.guild.id)
-
-                    await interaction.followup.send("🧹 Playlist switch locks cleared!")
+                    # Note: Switch locks auto-clear after switch completes
+                    # This action is kept for compatibility but does nothing
+                    await interaction.followup.send(
+                        "ℹ️ Switch locks auto-clear automatically. No manual action needed."
+                    )
 
                 else:
                     await interaction.followup.send(
