@@ -3,6 +3,7 @@ Playlist commands for the music bot
 Handles playlist creation, management, and operations with pagination
 """
 
+import asyncio
 from typing import Optional
 import discord
 from discord import app_commands
@@ -395,7 +396,14 @@ class PlaylistCommandHandler(BaseCommandHandler):
             )
 
             if success and song:
-                # Step 2: Add processed song to playlist
+                # Step 2: Wait for metadata to be ready before adding to playlist
+                # This ensures we save the real title, not "Video X"
+                max_wait = 30  # Wait up to 30 seconds for metadata
+                for _ in range(max_wait):
+                    if song.metadata and song.metadata.title:
+                        break
+                    await asyncio.sleep(1)
+                
                 # Use processed metadata for better title
                 title = song.metadata.title if song.metadata else song_input
                 playlist_success, playlist_message = (
@@ -494,15 +502,42 @@ class PlaylistCommandHandler(BaseCommandHandler):
             # Process videos
             for i, video_url in enumerate(video_urls[:50]):  # Limit to 50 videos
                 try:
-                    # Detect source type from input
-                    source_type = SourceType.YOUTUBE  # Default for playlist videos
-
-                    # Use video URL as title initially, will be updated when processed
+                    # Create and process song to get metadata
+                    from ..domain.entities.song import Song
+                    from ..services.playback import playback_service
+                    
+                    # Create song object
+                    song = Song(
+                        original_input=video_url,
+                        source_type=SourceType.YOUTUBE,
+                        requested_by=str(interaction.user),
+                        guild_id=interaction.guild.id
+                    )
+                    
+                    # Try to get metadata (with timeout)
+                    try:
+                        # Process song to extract metadata
+                        process_success = await playback_service.processing_service.process_song(song)
+                        
+                        # Wait briefly for metadata (max 5 seconds per song)
+                        if process_success:
+                            for _ in range(5):
+                                if song.metadata and song.metadata.title:
+                                    break
+                                await asyncio.sleep(1)
+                        
+                        # Use real title if available, otherwise use generic
+                        title = song.metadata.title if song.metadata else f"Video {i+1}"
+                    except Exception as e:
+                        logger.warning(f"Could not extract metadata for {video_url}: {e}")
+                        title = f"Video {i+1}"
+                    
+                    # Add to playlist with proper title
                     success, message_single = self.playlist_service.add_to_playlist(
                         playlist_name,
                         video_url,
-                        source_type,
-                        f"Video {i+1}",
+                        SourceType.YOUTUBE,
+                        title,
                     )
 
                     if success:
