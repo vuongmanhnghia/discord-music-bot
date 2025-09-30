@@ -29,9 +29,20 @@ class Config:
         """Validate required configuration"""
         if not self.BOT_TOKEN:
             raise ValueError("BOT_TOKEN or BOT_TOKEN environment variable is required")
+        
+        # Validate token format
+        if len(self.BOT_TOKEN) < 50:
+            raise ValueError("Invalid BOT_TOKEN format (too short)")
+        
+        # Create masked version for safe logging
+        self._masked_token = f"{self.BOT_TOKEN[:10]}...{self.BOT_TOKEN[-4:]}"
 
         # Ensure directories exist
         Path(self.PLAYLIST_DIR).mkdir(parents=True, exist_ok=True)
+    
+    def get_safe_token(self) -> str:
+        """Return masked token for safe logging"""
+        return self._masked_token
 
     @property
     def playlist_path(self) -> Path:

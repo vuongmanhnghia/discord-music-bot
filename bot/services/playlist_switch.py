@@ -131,7 +131,7 @@ class PlaylistSwitchManager:
             queue_manager = audio_service.get_queue_manager(guild_id)
             if queue_manager:
                 old_count = len(queue_manager.get_all_songs())
-                queue_manager.clear()
+                await queue_manager.clear()
                 logger.info(
                     f"🧹 Cleared {old_count} songs from queue in guild {guild_id}"
                 )

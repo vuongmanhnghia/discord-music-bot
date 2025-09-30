@@ -241,7 +241,7 @@ class AudioService:
         )
 
         # Move to next song
-        next_song = queue_manager.next_song()
+        next_song = await queue_manager.next_song()
         if not next_song:
             logger.info(f"No next song in queue for guild {guild_id}")
             return False
@@ -299,7 +299,7 @@ class AudioService:
             if next_song:
                 logger.info(f"Auto-playing next song: {next_song.display_name}")
                 # Move queue position and play (will handle wait for processing)
-                queue_manager.next_song()  # Now advance the position
+                await queue_manager.next_song()  # Now advance the position
                 await self.play_next_song(guild_id)
             else:
                 logger.info(f"No more songs to play in guild {guild_id}")
@@ -359,14 +359,6 @@ class AudioService:
             }
         )
         return stats
-
-    async def cleanup_all(self):
-        """Cleanup all voice connections"""
-        guild_ids = list(self._voice_clients.keys())
-        for guild_id in guild_ids:
-            await self.disconnect_from_guild(guild_id)
-
-        logger.info("Cleaned up all voice connections")
 
 
 # Global audio service instance

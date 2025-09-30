@@ -8,6 +8,7 @@ from discord import app_commands
 
 from . import BaseCommandHandler
 from ..utils.embed_factory import EmbedFactory
+from ..utils.validation import ValidationUtils
 
 from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
 
@@ -38,6 +39,21 @@ class QueueCommandHandler(BaseCommandHandler):
 
                 # Get queue info
                 current_song = queue_manager.current_song
+                all_songs = queue_manager.get_all_songs()
+
+                if not current_song and not all_songs:
+                    await interaction.response.send_message(
+                        ERROR_MESSAGES["no_songs_in_queue"], ephemeral=True
+                    )
+                    return
+
+                # Validate page number
+                songs_per_page = 10
+                total_pages = max(1, (len(all_songs) + songs_per_page - 1) // songs_per_page)
+                is_valid, error_msg = ValidationUtils.validate_page_number(page, total_pages)
+                if not is_valid:
+                    await interaction.response.send_message(error_msg, ephemeral=True)
+                    return
                 queue_list = queue_manager.get_all_songs()
 
                 if not current_song and not queue_list:
