@@ -88,7 +88,7 @@ class Song:
                 pass
         except Exception as e:
             # Don't fail if event system has issues
-            from ..pkg.logger import logger
+            from ...pkg.logger import logger
             logger.debug(f"Could not publish song update event: {e}")
 
     def mark_failed(self, error: str):
