@@ -112,8 +112,8 @@ class SmartCache:
         if self.persist:
             self._load_persistent_cache()
 
-        # Start background cleanup task
-        self._start_cleanup_task()
+        # Note: Background cleanup task will be started lazily on first use
+        # (cannot create task here as event loop may not be running yet)
 
         logger.info(f"🚄 SmartCache initialized: {len(self._cache)} cached items")
 
@@ -123,6 +123,9 @@ class SmartCache:
 
     async def get_cached_song(self, url: str) -> Optional[CachedSong]:
         """Get song from cache with LRU update"""
+        # Ensure cleanup task is running (lazy start)
+        self._ensure_cleanup_task()
+        
         key = self._url_to_key(url)
 
         async with self._cache_lock:
@@ -151,6 +154,9 @@ class SmartCache:
 
     async def cache_song(self, url: str, song_data: dict) -> bool:
         """Cache a processed song"""
+        # Ensure cleanup task is running (lazy start)
+        self._ensure_cleanup_task()
+        
         try:
             key = self._url_to_key(url)
 
@@ -237,13 +243,19 @@ class SmartCache:
         if key in self._access_order:
             self._access_order.remove(key)
 
-    def _start_cleanup_task(self):
-        """Start background task for periodic cleanup"""
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = asyncio.create_task(self._background_cleanup())
-            logger.info(
-                f"🧹 Started background cleanup task (interval: {self._cleanup_interval}s)"
-            )
+    def _ensure_cleanup_task(self):
+        """Ensure background cleanup task is running (lazy start)"""
+        try:
+            # Only start if we have a running event loop and task isn't already running
+            if self._cleanup_task is None or self._cleanup_task.done():
+                loop = asyncio.get_running_loop()
+                self._cleanup_task = loop.create_task(self._background_cleanup())
+                logger.info(
+                    f"🧹 Started background cleanup task (interval: {self._cleanup_interval}s)"
+                )
+        except RuntimeError:
+            # No event loop running yet, will try again later
+            pass
 
     async def _background_cleanup(self):
         """Background task to periodically cleanup expired entries"""
