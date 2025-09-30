@@ -48,6 +48,20 @@ class AudioPlayer:
         )
 
         try:
+            # Check if stream URL needs refresh (for 24/7 operation)
+            from ..services.stream_refresh import stream_refresh_service
+            
+            if await stream_refresh_service.should_refresh_url(song):
+                logger.info(f"🔄 Stream URL expired, refreshing for: {song.display_name}")
+                refresh_success = await stream_refresh_service.refresh_stream_url(song)
+                
+                if not refresh_success:
+                    logger.error(f"❌ Failed to refresh stream URL for: {song.display_name}")
+                    if retry_count < 2:
+                        await asyncio.sleep(5)  # Wait before retry
+                        return await self.play_song(song, retry_count + 1)
+                    return False
+            
             # Validate stream URL
             if not song.stream_url or not song.stream_url.startswith(
                 ("http://", "https://")

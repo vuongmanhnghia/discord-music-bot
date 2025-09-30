@@ -20,6 +20,7 @@ from .services.audio_service import audio_service
 from .services.playback import playback_service
 from .services.playlist_service import PlaylistService
 from .services.auto_recovery import auto_recovery_service
+from .services.stream_refresh import stream_refresh_service
 from .domain.entities.library import LibraryManager
 from .domain.valueobjects.source_type import SourceType
 from .utils.youtube_playlist_handler import YouTubePlaylistHandler
@@ -496,6 +497,9 @@ class MusicBot(commands.Bot):
                 logger.info("🔧 Running scheduled maintenance...")
                 await auto_recovery_service.scheduled_maintenance()
 
+                # Proactive stream URL refresh for 24/7 operation
+                await self._refresh_queue_urls()
+
                 # Also run bot-specific maintenance
                 try:
                     # Get cache performance stats
@@ -519,6 +523,48 @@ class MusicBot(commands.Bot):
             except Exception as e:
                 logger.error(f"❌ Scheduled maintenance error: {e}")
                 # Continue the loop even if maintenance fails
+
+    async def _refresh_queue_urls(self):
+        """Proactively refresh stream URLs in all guild queues"""
+        try:
+            from .services.stream_refresh import stream_refresh_service
+            
+            logger.info("🔄 Checking queues for URLs that need refresh...")
+            
+            total_refreshed = 0
+            
+            # Check all active guilds
+            for guild in self.guilds:
+                try:
+                    queue_manager = audio_service.get_queue_manager(guild.id)
+                    if not queue_manager:
+                        continue
+                        
+                    # Get all songs in queue
+                    queue_songs = queue_manager.get_all_songs()
+                    if not queue_songs:
+                        continue
+                        
+                    logger.debug(f"Checking {len(queue_songs)} songs in guild {guild.name}")
+                    
+                    # Refresh URLs that will expire soon
+                    refreshed = await stream_refresh_service.preemptive_refresh_queue(queue_songs)
+                    total_refreshed += refreshed
+                    
+                    if refreshed > 0:
+                        logger.info(f"   🔄 Refreshed {refreshed} URLs in {guild.name}")
+                        
+                except Exception as guild_error:
+                    logger.warning(f"Error refreshing URLs for guild {guild.id}: {guild_error}")
+                    continue
+                    
+            if total_refreshed > 0:
+                logger.info(f"✅ Total URLs refreshed: {total_refreshed}")
+            else:
+                logger.debug("No URLs needed refresh")
+                
+        except Exception as e:
+            logger.error(f"❌ Error in queue URL refresh: {e}")
 
     async def close(self):
         """Clean shutdown"""

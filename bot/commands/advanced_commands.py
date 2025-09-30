@@ -162,6 +162,82 @@ class AdvancedCommandHandler(BaseCommandHandler):
             except Exception as e:
                 await self.handle_command_error(interaction, e, "recovery")
 
+        @self.bot.tree.command(
+            name="stream", description="Kiểm tra trạng thái stream URL refresh system"
+        )
+        async def stream_status(interaction: discord.Interaction):
+            """🔄 Check stream refresh status"""
+            try:
+                from ..services.stream_refresh import stream_refresh_service
+                
+                stats = stream_refresh_service.get_refresh_stats()
+                
+                embed = self.create_info_embed(
+                    "🔄 Stream URL Refresh Status", 
+                    "Hệ thống tự động refresh stream URL cho bot 24/7"
+                )
+                
+                # Status
+                status = "🟢 Enabled" if stats["enabled"] else "🔴 Disabled"
+                embed.add_field(name="Trạng thái", value=status, inline=True)
+                
+                # Refresh count
+                embed.add_field(
+                    name="Số lần refresh", 
+                    value=f"{stats['refresh_count']} lần", 
+                    inline=True
+                )
+                
+                # Cached URLs
+                embed.add_field(
+                    name="URLs đã cache", 
+                    value=f"{stats['cached_urls']} URLs", 
+                    inline=True
+                )
+                
+                # Last refresh
+                if stats["last_refresh_time"] > 0:
+                    import datetime
+                    last_refresh = datetime.datetime.fromtimestamp(stats["last_refresh_time"])
+                    embed.add_field(
+                        name="Refresh cuối", 
+                        value=f"{last_refresh.strftime('%H:%M:%S %d/%m')}", 
+                        inline=True
+                    )
+                else:
+                    embed.add_field(name="Refresh cuối", value="Chưa có", inline=True)
+                
+                # Time since last refresh
+                if stats["time_since_last_refresh"] > 0:
+                    hours = stats["time_since_last_refresh"] / 3600
+                    embed.add_field(
+                        name="Thời gian từ lần cuối", 
+                        value=f"{hours:.1f} giờ", 
+                        inline=True
+                    )
+                
+                # Features info
+                features_info = [
+                    "• Tự động refresh URL hết hạn (5 giờ)",
+                    "• Proactive refresh mỗi 6 giờ",
+                    "• Retry khi URL fail", 
+                    "• Cache URL để tối ưu performance",
+                    "• Hỗ trợ bot hoạt động 24/7",
+                ]
+                
+                embed.add_field(
+                    name="Tính năng", 
+                    value="\n".join(features_info), 
+                    inline=False
+                )
+                
+                embed.set_footer(text="Stream refresh đảm bảo bot hoạt động liên tục")
+                
+                await interaction.response.send_message(embed=embed)
+
+            except Exception as e:
+                await self.handle_command_error(interaction, e, "stream")
+
     def _create_help_embed(self) -> discord.Embed:
         """Create comprehensive help embed"""
         embed = self.create_info_embed(

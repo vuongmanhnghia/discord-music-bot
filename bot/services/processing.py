@@ -210,6 +210,10 @@ class YouTubeService(SongProcessor):
                 logger.debug(f"Using cached YouTube data: {song.original_input}")
                 metadata, stream_url = self._cache[cache_key]
                 song.mark_ready(metadata, stream_url)
+                
+                # Set stream URL timestamp for cached items too
+                import time
+                song.stream_url_timestamp = time.time()
                 return True
 
             # Extract metadata and stream URL
@@ -219,6 +223,10 @@ class YouTubeService(SongProcessor):
                 metadata, stream_url = result
                 self._cache[cache_key] = result
                 song.mark_ready(metadata, stream_url)
+                
+                # Set stream URL timestamp for refresh tracking
+                import time
+                song.stream_url_timestamp = time.time()
                 return True
 
             # Fallback: Basic info extraction
@@ -262,6 +270,10 @@ class YouTubeService(SongProcessor):
             # Update song with stream URL (keep original Spotify metadata)
             song.stream_url = stream_url
             song.status = song.status  # Keep current status
+            
+            # Set stream URL timestamp
+            import time
+            song.stream_url_timestamp = time.time()
 
             logger.info(
                 f"Found YouTube stream for Spotify track: {song.metadata.display_name}"
