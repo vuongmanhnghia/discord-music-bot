@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Dict, Any
+import uuid
 
 from ..valueobjects.source_type import SourceType
 from ..valueobjects.song_status import SongStatus
@@ -15,6 +16,7 @@ class Song:
     # Identity
     original_input: str  # What user originally entered
     source_type: SourceType
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))  # Unique identifier
 
     # State
     status: SongStatus = SongStatus.PENDING
@@ -74,7 +76,7 @@ class Song:
     def _publish_update_event(self):
         """Publish song metadata update event"""
         try:
-            from ..utils.song_events import song_event_bus, SongUpdateEvent
+            from ...utils.song_events import song_event_bus, SongUpdateEvent
             import asyncio
             
             event = SongUpdateEvent(song_id=self.id, guild_id=self.guild_id)
@@ -100,6 +102,7 @@ class Song:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
         return {
+            "id": self.id,
             "original_input": self.original_input,
             "source_type": self.source_type.value,
             "status": self.status.value,
