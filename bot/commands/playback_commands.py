@@ -12,6 +12,7 @@ from ..pkg.logger import logger
 from ..services.playback import playback_service
 from ..utils.youtube_playlist_handler import YouTubePlaylistHandler
 from ..utils.validation import ValidationUtils
+from ..utils.message_updater import message_update_manager
 
 from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
 
@@ -239,6 +240,13 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     current_song, interaction.guild.id
                 )
                 await interaction.response.send_message(embed=embed)
+                
+                # Track message for real-time updates
+                response_msg = await interaction.original_response()
+                if response_msg and current_song.id:
+                    await message_update_manager.track_message(
+                        response_msg, current_song.id, interaction.guild.id, "now_playing"
+                    )
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "nowplaying")
@@ -354,7 +362,13 @@ class PlaybackCommandHandler(BaseCommandHandler):
             if success and song:
                 # Create detailed embed with song info
                 embed = self._create_play_success_embed(song, message)
-                await interaction.followup.send(embed=embed)
+                response_msg = await interaction.followup.send(embed=embed)
+                
+                # Track message for real-time title updates
+                if response_msg and song.id:
+                    await message_update_manager.track_message(
+                        response_msg, song.id, interaction.guild.id, "queue_add"
+                    )
             else:
                 # Show error
                 error_embed = self.create_error_embed("❌ Lỗi phát nhạc", message)

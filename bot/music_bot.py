@@ -25,6 +25,7 @@ from .domain.entities.library import LibraryManager
 from .domain.valueobjects.source_type import SourceType
 from .utils.youtube_playlist_handler import YouTubePlaylistHandler
 from .utils.interaction_manager import InteractionManager
+from .utils.message_updater import message_update_manager
 
 # Import command handlers
 from .commands import CommandRegistry
@@ -98,6 +99,13 @@ class MusicBot(commands.Bot):
                 )
             except Exception as e:
                 logger.warning(f"Auto-recovery service failed to start: {e}")
+
+            # Initialize MessageUpdateManager for real-time updates
+            try:
+                await message_update_manager.initialize()
+                logger.info("✅ Message update manager initialized")
+            except Exception as e:
+                logger.warning(f"Message update manager failed to initialize: {e}")
 
             # Sync slash commands globally only
             try:

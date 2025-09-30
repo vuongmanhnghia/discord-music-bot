@@ -20,6 +20,7 @@ import discord
 
 from ..pkg.logger import setup_logger
 from ..utils.async_processor import ProcessingTask, ProcessingStatus
+from ..utils.message_updater import message_update_manager
 
 logger = setup_logger(__name__)
 
@@ -40,7 +41,7 @@ class DiscordProgressUpdater:
         self.update_lock = asyncio.Lock()
 
     async def create_initial_progress(
-        self, interaction: discord.Interaction, task: ProcessingTask
+        self, interaction: discord.Interaction, task: ProcessingTask, guild_id: int = None
     ) -> Optional[discord.Message]:
         """Create initial progress message for a task"""
         try:
@@ -54,6 +55,13 @@ class DiscordProgressUpdater:
                 message = await interaction.original_response()
 
             self.active_messages[task.id] = message
+            
+            # Track message for real-time updates when processing completes
+            if message and task.song and task.song.id and guild_id:
+                await message_update_manager.track_message(
+                    message, task.song.id, guild_id, "processing"
+                )
+            
             return message
 
         except Exception as e:
