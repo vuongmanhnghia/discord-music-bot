@@ -62,8 +62,9 @@ class QueueCommandHandler(BaseCommandHandler):
                         "status": song.status.value,
                     })
 
-                # Get queue position
-                queue_position = (queue_manager.position, len(all_songs))
+                # Get queue position (position property returns tuple (current, total))
+                current_pos, total_songs = queue_manager.position
+                queue_position = (current_pos, len(all_songs))
 
                 # Current song dict
                 current_song_dict = None

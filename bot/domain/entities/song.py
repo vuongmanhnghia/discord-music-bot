@@ -67,6 +67,29 @@ class Song:
         self.metadata = metadata
         self.stream_url = stream_url
         self.error_message = None
+        
+        # Publish song update event for real-time title updates
+        self._publish_update_event()
+
+    def _publish_update_event(self):
+        """Publish song metadata update event"""
+        try:
+            from ..utils.song_events import song_event_bus, SongUpdateEvent
+            import asyncio
+            
+            event = SongUpdateEvent(song_id=self.id, guild_id=self.guild_id)
+            
+            # Try to publish in event loop if available
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(song_event_bus.publish("song_metadata_updated", event))
+            except RuntimeError:
+                # No event loop running, skip event
+                pass
+        except Exception as e:
+            # Don't fail if event system has issues
+            from ..pkg.logger import logger
+            logger.debug(f"Could not publish song update event: {e}")
 
     def mark_failed(self, error: str):
         """Mark song as failed with error message"""
