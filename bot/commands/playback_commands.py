@@ -11,6 +11,7 @@ from . import BaseCommandHandler
 from ..pkg.logger import logger
 from ..services.playback import playback_service
 from ..utils.youtube_playlist_handler import YouTubePlaylistHandler
+from ..utils.validation import ValidationUtils
 
 from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
 
@@ -48,6 +49,15 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
                 # Handle two modes: with query or from active playlist
                 if query:
+                    # Validate and sanitize query
+                    query = ValidationUtils.sanitize_query(query)
+                    is_valid, error_msg = ValidationUtils.validate_query_length(query)
+                    if not is_valid:
+                        await interaction.response.send_message(
+                            error_msg, ephemeral=True
+                        )
+                        return
+
                     await self._handle_play_with_query(interaction, query)
                 else:
                     await self._handle_play_from_playlist(interaction)
@@ -168,10 +178,10 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 if not await self.ensure_same_voice_channel(interaction):
                     return
 
-                if not 0 <= volume <= 100:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["invalid_volume"], ephemeral=True
-                    )
+                # Validate volume using ValidationUtils
+                is_valid, error_msg = ValidationUtils.validate_volume(volume)
+                if not is_valid:
+                    await interaction.response.send_message(error_msg, ephemeral=True)
                     return
 
                 success = await playback_service.set_volume(

@@ -12,6 +12,7 @@ from ..pkg.logger import logger
 from ..services.playback import playback_service
 from ..domain.valueobjects.source_type import SourceType
 from ..utils.youtube_playlist_handler import YouTubePlaylistHandler
+from ..utils.validation import ValidationUtils
 
 from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
 
@@ -100,6 +101,12 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     )
                     return
 
+                # Validate playlist name
+                is_valid, error_msg = ValidationUtils.validate_playlist_name(name)
+                if not is_valid:
+                    await interaction.response.send_message(error_msg, ephemeral=True)
+                    return
+
                 success, message = self.playlist_service.create_playlist(name)
 
                 if success:
@@ -131,6 +138,13 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     await interaction.response.send_message(
                         ERROR_MESSAGES["guild_only"], ephemeral=True
                     )
+                    return
+
+                # Validate and sanitize song input
+                song_input = ValidationUtils.sanitize_query(song_input)
+                is_valid, error_msg = ValidationUtils.validate_query_length(song_input)
+                if not is_valid:
+                    await interaction.response.send_message(error_msg, ephemeral=True)
                     return
 
                 # Check if there's an active playlist
