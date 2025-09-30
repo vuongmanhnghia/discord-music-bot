@@ -11,6 +11,8 @@ from typing import Optional, Dict, Any
 from ..domain.valueobjects.source_type import SourceType
 from ..domain.entities.song import Song, SongMetadata
 from ..domain.valueobjects.song_processor import SongProcessor
+from ..utils.youtube_error_handler import youtube_error_handler
+from .auto_recovery import auto_recovery_service
 from ..pkg.logger import logger
 
 
@@ -353,9 +355,9 @@ class YouTubeService(SongProcessor):
                 return None
 
     async def _get_stream_url(self, query: str) -> Optional[str]:
-        """Extract stream URL with better format selection"""
+        """Extract stream URL with better format selection and 403 handling"""
         try:
-            # Better format selection for audio streaming
+            # Enhanced format selection to avoid 403 errors
             stream_cmd = [
                 "yt-dlp",
                 "--get-url",
@@ -363,31 +365,111 @@ class YouTubeService(SongProcessor):
                 "--quiet",
                 "--no-warnings",
                 "--format",
-                "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",  # Better format fallback
+                "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
                 "--no-check-certificate",
                 "--socket-timeout",
-                "20",
+                "30",  # Increased timeout
                 "--retries",
-                "3",
+                "5",  # More retries
+                "--fragment-retries",
+                "5",
+                # Anti-detection measures
+                "--user-agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "--extractor-args",
+                "youtube:skip=hls,dash;player_client=android,web",
                 query,
             ]
 
-            process = await asyncio.create_subprocess_exec(
-                *stream_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+            # Try with retries for 403 errors
+            for attempt in range(3):
+                try:
+                    process = await asyncio.create_subprocess_exec(
+                        *stream_cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
 
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+                    stdout, stderr = await asyncio.wait_for(
+                        process.communicate(), timeout=45
+                    )
 
-            if process.returncode != 0:
-                logger.error(f"Failed to get stream URL: {stderr.decode()}")
-                return None
+                    if process.returncode == 0 and stdout.strip():
+                        url = stdout.decode().strip()
+                        logger.info(
+                            f"Successfully extracted stream URL (attempt {attempt + 1})"
+                        )
+                        return url
 
-            url = stdout.decode().strip()
-            if url:
-                logger.info("Successfully extracted stream URL")
-                return url
+                    # Check for 403 error
+                    error_msg = stderr.decode()
+                    if youtube_error_handler.is_403_error(error_msg):
+                        logger.warning(
+                            f"403 error on attempt {attempt + 1}: {error_msg}"
+                        )
+
+                        # Try auto-recovery on first 403 error
+                        if attempt == 0:
+                            logger.info("🚨 Attempting auto-recovery for 403 error...")
+                            recovery_success = (
+                                await auto_recovery_service.check_and_recover_if_needed(
+                                    error_msg
+                                )
+                            )
+
+                            if recovery_success:
+                                logger.info("✅ Auto-recovery completed, retrying...")
+                                await asyncio.sleep(5)  # Wait a bit after recovery
+                                continue
+
+                        if attempt < 2 and youtube_error_handler.should_retry_403(
+                            query, attempt
+                        ):
+                            # Wait before retry
+                            delay = await youtube_error_handler.get_retry_delay(attempt)
+                            logger.info(
+                                f"Retrying in {delay} seconds with different format..."
+                            )
+                            await asyncio.sleep(delay)
+
+                            # Update command with alternative format
+                            alt_format = youtube_error_handler.get_alternative_format(
+                                attempt + 1
+                            )
+                            stream_cmd[
+                                stream_cmd.index(
+                                    "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best"
+                                )
+                                - 1
+                            ] = alt_format
+                            continue
+
+                    logger.error(
+                        f"Failed to get stream URL (attempt {attempt + 1}): {error_msg}"
+                    )
+
+                    # Try auto-recovery on last attempt if not tried yet
+                    if attempt == 2 and not youtube_error_handler.is_403_error(
+                        error_msg
+                    ):
+                        recovery_success = (
+                            await auto_recovery_service.check_and_recover_if_needed(
+                                error_msg
+                            )
+                        )
+                        if recovery_success:
+                            logger.info("✅ Auto-recovery completed on final attempt")
+
+                    if attempt == 2:  # Last attempt
+                        return None
+
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"Timeout on stream URL extraction attempt {attempt + 1}"
+                    )
+                    if attempt == 2:
+                        return None
+                    await asyncio.sleep(2)
 
             return None
 

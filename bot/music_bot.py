@@ -1,5 +1,8 @@
 """
-Modern Discord Music Bot with clean architecture
+Modern Discfrom .services.audio_service import audio_service
+from .services.playback import playback_service
+from .services.playlist_service import PlaylistService
+from .services.auto_recovery import auto_recovery_service Music Bot with clean architecture
 Implements the complete playback flow with proper separation of concerns
 """
 
@@ -16,6 +19,7 @@ from .pkg.logger import logger
 from .services.audio_service import audio_service
 from .services.playback import playback_service
 from .services.playlist_service import PlaylistService
+from .services.auto_recovery import auto_recovery_service
 from .domain.entities.library import LibraryManager
 from .domain.valueobjects.source_type import SourceType
 from .utils.youtube_playlist_handler import YouTubePlaylistHandler
@@ -80,6 +84,19 @@ class MusicBot(commands.Bot):
                 logger.info("🚄 SmartCache initialization started")
             except Exception as e:
                 logger.warning(f"Cache warming failed: {e}")
+
+            # Start auto-recovery service with scheduled maintenance
+            try:
+                # Enable auto-recovery
+                auto_recovery_service.enable_auto_recovery()
+
+                # Schedule maintenance every 6 hours
+                asyncio.create_task(self._run_scheduled_maintenance())
+                logger.info(
+                    "🔧 Auto-recovery service started with scheduled maintenance"
+                )
+            except Exception as e:
+                logger.warning(f"Auto-recovery service failed to start: {e}")
 
             # Sync slash commands globally only
             try:
@@ -466,6 +483,42 @@ class MusicBot(commands.Bot):
 
         except Exception as e:
             logger.error(f"Error during startup cache warming: {e}")
+
+    async def _run_scheduled_maintenance(self):
+        """Run scheduled maintenance tasks"""
+        logger.info("🔧 Starting scheduled maintenance loop...")
+
+        while True:
+            try:
+                # Wait 6 hours between maintenance runs
+                await asyncio.sleep(6 * 3600)  # 6 hours = 21600 seconds
+
+                logger.info("🔧 Running scheduled maintenance...")
+                await auto_recovery_service.scheduled_maintenance()
+
+                # Also run bot-specific maintenance
+                try:
+                    # Get cache performance stats
+                    cache_stats = await playback_service.get_cache_performance()
+                    logger.info(f"📊 Cache stats: {cache_stats}")
+
+                    # Clean up old cache if hit rate is low
+                    if cache_stats.get("hit_rate", 1.0) < 0.3:
+                        logger.info("🧹 Low cache hit rate, performing cleanup...")
+                        cleanup_stats = await playback_service.cleanup_cache()
+                        logger.info(f"   Cleaned: {cleanup_stats}")
+
+                except Exception as cache_e:
+                    logger.warning(f"Cache maintenance error: {cache_e}")
+
+                logger.info("✅ Scheduled maintenance completed")
+
+            except asyncio.CancelledError:
+                logger.info("🔧 Scheduled maintenance cancelled")
+                break
+            except Exception as e:
+                logger.error(f"❌ Scheduled maintenance error: {e}")
+                # Continue the loop even if maintenance fails
 
     async def close(self):
         """Clean shutdown"""

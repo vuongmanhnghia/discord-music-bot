@@ -85,6 +85,83 @@ class AdvancedCommandHandler(BaseCommandHandler):
             except Exception as e:
                 await self.handle_command_error(interaction, e, "aplay")
 
+        @self.bot.tree.command(
+            name="recovery", description="Kiểm tra trạng thái auto-recovery system"
+        )
+        async def recovery_status(interaction: discord.Interaction):
+            """🛠️ Check auto-recovery status"""
+            try:
+                from ..services.auto_recovery import auto_recovery_service
+
+                stats = auto_recovery_service.get_recovery_stats()
+
+                embed = self.create_info_embed(
+                    "🛠️ Auto-Recovery System Status",
+                    "Hệ thống tự động xử lý lỗi và bảo trì",
+                )
+
+                # Status
+                status = (
+                    "🟢 Enabled"
+                    if stats.get("auto_recovery_enabled", True)
+                    else "🔴 Disabled"
+                )
+                embed.add_field(name="Trạng thái", value=status, inline=True)
+
+                # Recovery count
+                embed.add_field(
+                    name="Số lần recovery",
+                    value=f"{stats.get('recovery_count', 0)} lần",
+                    inline=True,
+                )
+
+                # Last recovery
+                last_recovery_time = stats.get("last_recovery_time", 0)
+                if last_recovery_time > 0:
+                    import datetime
+
+                    last_recovery = datetime.datetime.fromtimestamp(last_recovery_time)
+                    embed.add_field(
+                        name="Recovery cuối",
+                        value=f"{last_recovery.strftime('%H:%M:%S %d/%m')}",
+                        inline=True,
+                    )
+                else:
+                    embed.add_field(name="Recovery cuối", value="Chưa có", inline=True)
+
+                # Cooldown
+                cooldown_remaining = stats.get("cooldown_remaining", 0)
+                if cooldown_remaining > 0:
+                    embed.add_field(
+                        name="Cooldown còn lại",
+                        value=f"{cooldown_remaining:.0f}s",
+                        inline=True,
+                    )
+                else:
+                    embed.add_field(name="Cooldown", value="Sẵn sàng", inline=True)
+
+                # Features info
+                features_info = [
+                    "• Tự động clear cache khi gặp lỗi 403",
+                    "• Cập nhật yt-dlp tự động",
+                    "• Bảo trì định kỳ mỗi 6 giờ",
+                    "• Retry với format khác nhau",
+                    "• Cooldown 5 phút giữa các lần recovery",
+                ]
+
+                embed.add_field(
+                    name="Tính năng", value="\n".join(features_info), inline=False
+                )
+
+                embed.set_footer(
+                    text="Auto-recovery giúp bot tự động xử lý lỗi YouTube"
+                )
+
+                await interaction.response.send_message(embed=embed)
+
+            except Exception as e:
+                await self.handle_command_error(interaction, e, "recovery")
+
     def _create_help_embed(self) -> discord.Embed:
         """Create comprehensive help embed"""
         embed = self.create_info_embed(
@@ -139,6 +216,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
             "📋 **Playlist Management**: Persistent playlists",
             "⚡ **Async Processing**: Non-blocking operations",
             "🔍 **Smart Search**: Intelligent song matching",
+            "🛠️ **Auto-Recovery**: Tự động xử lý lỗi 403 & cập nhật",
         ]
         embed.add_field(
             name="Tính năng nổi bật", value="\n".join(features), inline=False

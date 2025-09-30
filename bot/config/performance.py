@@ -86,7 +86,7 @@ class PerformanceConfig:
     def get_ytdl_opts(self) -> Dict[str, Any]:
         """Generate yt-dlp options based on current config"""
         return {
-            "format": "bestaudio/best",
+            "format": "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
             "extractaudio": True,
             "audioformat": "mp3",
             "outtmpl": "%(extractor)s-%(id)s-%(title)s.%(ext)s",
@@ -99,18 +99,28 @@ class PerformanceConfig:
             "no_warnings": True,
             "default_search": "auto",
             "source_address": "0.0.0.0",
-            # Dynamic network options
+            # Enhanced network options to handle 403 errors
             "socket_timeout": self.connection_timeout,
             "retries": self.max_retries,
             "fragment_retries": self.fragment_retries,
             "retry_sleep_functions": {
                 "http": lambda n: min(2**n, self.reconnect_delay_max)
             },
+            # Anti-detection measures for YouTube
+            "extractor_args": {
+                "youtube": {
+                    "skip": ["hls", "dash"],  # Skip problematic formats
+                    "player_client": ["android", "web"],  # Use multiple clients
+                }
+            },
             # Concurrent downloads based on hardware
             "concurrent_fragment_downloads": (
                 1 if self.async_workers <= 1 else min(self.async_workers, 3)
             ),
             "http_chunk_size": 1024 * 256 if self.async_workers <= 1 else 1024 * 1024,
+            # Additional YouTube workarounds
+            "youtube_include_dash_manifest": False,
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         }
 
     def get_ffmpeg_opts(self) -> Dict[str, str]:
