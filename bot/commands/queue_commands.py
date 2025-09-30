@@ -50,8 +50,15 @@ class QueueCommandHandler(BaseCommandHandler):
                 # Convert songs to dict format for pagination
                 song_dicts = []
                 for song in all_songs:
+                    # Get best available title
+                    title = song.display_name
+                    
+                    # If metadata exists and has title, use it (more detailed)
+                    if song.metadata and song.metadata.title:
+                        title = song.metadata.display_name
+                    
                     song_dicts.append({
-                        "title": song.display_name,
+                        "title": title,
                         "status": song.status.value,
                     })
 
@@ -61,8 +68,13 @@ class QueueCommandHandler(BaseCommandHandler):
                 # Current song dict
                 current_song_dict = None
                 if current_song:
+                    # Get best available title
+                    title = current_song.display_name
+                    if current_song.metadata and current_song.metadata.title:
+                        title = current_song.metadata.display_name
+                    
                     current_song_dict = {
-                        "title": current_song.display_name,
+                        "title": title,
                         "status": current_song.status.value,
                     }
 
