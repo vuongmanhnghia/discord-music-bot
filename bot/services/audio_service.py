@@ -152,7 +152,7 @@ class AudioService:
 
                 # Clean up queue manager
                 if guild_id in self._queue_managers:
-                    self._queue_managers[guild_id].clear()
+                    await self._queue_managers[guild_id].clear()
                     del self._queue_managers[guild_id]
 
                 # Unregister from ResourceManager

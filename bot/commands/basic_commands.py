@@ -122,11 +122,8 @@ class BasicCommandHandler(BaseCommandHandler):
                     voice_client.channel.name if voice_client.channel else "Unknown"
                 )
 
-                # Cleanup audio service for this guild
-                await audio_service.cleanup_guild(interaction.guild.id)
-
-                # Disconnect from voice
-                await voice_client.disconnect()
+                # Cleanup audio service and disconnect from voice
+                await audio_service.disconnect_from_guild(interaction.guild.id)
 
                 embed = create_leave_success_embed()
                 await interaction.response.send_message(embed=embed)
