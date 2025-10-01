@@ -533,17 +533,28 @@ class PlaybackService:
             return None
 
     async def set_volume(self, guild_id: int, volume: float) -> tuple[bool, str]:
-        """Set playback volume"""
+        """
+        Set playback volume
+        
+        Args:
+            guild_id: Guild ID
+            volume: Volume level as float (0.0 to 1.0)
+            
+        Returns:
+            (success, message) tuple
+        """
         try:
             audio_player = audio_service.get_audio_player(guild_id)
             if not audio_player:
                 return (False, "No audio player found")
 
+            # Ensure volume is within valid range
             volume = max(0.0, min(1.0, volume))
             success = audio_player.set_volume(volume)
 
             if success:
-                return (True, f"Volume set to {volume:.0%}")
+                volume_percent = int(volume * 100)
+                return (True, f"Volume set to {volume_percent}%")
             else:
                 return (False, "Failed to set volume")
 

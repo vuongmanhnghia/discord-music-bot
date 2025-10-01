@@ -191,8 +191,11 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     await interaction.response.send_message(error_msg, ephemeral=True)
                     return
 
-                success = await playback_service.set_volume(
-                    interaction.guild.id, volume
+                # Convert volume from 0-100 to 0.0-1.0 for audio player
+                volume_float = volume / 100.0
+                
+                success, message = await playback_service.set_volume(
+                    interaction.guild.id, volume_float
                 )
 
                 if success:
@@ -200,7 +203,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     await interaction.response.send_message(embed=embed)
                 else:
                     await interaction.response.send_message(
-                        ERROR_MESSAGES["cannot_set_volume"], ephemeral=True
+                        f"{ERROR_MESSAGES['cannot_set_volume']}\n{message}", ephemeral=True
                     )
 
             except Exception as e:
