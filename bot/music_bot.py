@@ -267,6 +267,7 @@ class MusicBot(commands.Bot):
                 # 🎵 24/7 Mode: Bot stays connected for continuous music
                 # No auto-disconnect - bot remains in channel for 24/7 music service
                 # Users can manually use /leave if needed
+                return  # ← FIX: Prevent execution of disconnect logic below
             else:
                 logger.info(
                     f"Bot is alone in voice channel, will disconnect from {member.guild.name}"

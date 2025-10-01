@@ -13,6 +13,16 @@ from ..services.playback import playback_service
 from ..utils.youtube_playlist_handler import YouTubePlaylistHandler
 from ..utils.validation import ValidationUtils
 from ..utils.message_updater import message_update_manager
+from ..utils.modern_embeds import (
+    create_pause_embed,
+    create_resume_embed,
+    create_stop_embed,
+    create_skip_embed,
+    create_volume_embed,
+    create_repeat_mode_embed,
+    create_already_paused_embed,
+    create_already_playing_embed,
+)
 
 from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
 
@@ -113,13 +123,12 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     return
 
                 if voice_client.is_paused():
-                    await interaction.response.send_message(
-                        "Nhạc đã được tạm dừng rồi", ephemeral=True
-                    )
+                    embed = create_already_paused_embed()
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
                     return
 
                 voice_client.pause()
-                embed = self.create_info_embed("Tạm dừng", "Đã tạm dừng phát nhạc")
+                embed = create_pause_embed()
                 await interaction.response.send_message(embed=embed)
 
             except Exception as e:
@@ -137,15 +146,12 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     return
 
                 if not voice_client.is_paused():
-                    await interaction.response.send_message(
-                        "Nhạc đang phát rồi", ephemeral=True
-                    )
+                    embed = create_already_playing_embed()
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
                     return
 
                 voice_client.resume()
-                embed = self.create_success_embed(
-                    "Tiếp tục phát", "Đã tiếp tục phát nhạc"
-                )
+                embed = create_resume_embed()
                 await interaction.response.send_message(embed=embed)
 
             except Exception as e:
@@ -161,9 +167,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 success = await playback_service.stop_playback(interaction.guild.id)
 
                 if success:
-                    embed = self.create_info_embed(
-                        "Đã dừng phát nhạc", "Hàng đợi đã được xóa"
-                    )
+                    embed = create_stop_embed()
                     await interaction.response.send_message(embed=embed)
                 else:
                     await interaction.response.send_message(
@@ -192,19 +196,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 )
 
                 if success:
-                    # Volume level indicator (modern text-based)
-                    if volume == 0:
-                        level = "Tắt tiếng"
-                    elif volume <= 33:
-                        level = "Thấp"
-                    elif volume <= 66:
-                        level = "Trung bình"
-                    else:
-                        level = "Cao"
-
-                    embed = self.create_success_embed(
-                        "Âm lượng đã đặt", f"**{volume}%** ({level})"
-                    )
+                    embed = create_volume_embed(volume)
                     await interaction.response.send_message(embed=embed)
                 else:
                     await interaction.response.send_message(
@@ -281,19 +273,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 )
 
                 if success:
-                    mode_icons = {"off": "📴", "track": "🔂", "queue": "🔁"}
-                    mode_names = {
-                        "off": "Tắt lặp",
-                        "track": "Lặp bài hiện tại",
-                        "queue": "Lặp hàng đợi",
-                    }
-
-                    icon = mode_icons.get(mode, "🔁")
-                    name = mode_names.get(mode, mode)
-
-                    embed = self.create_success_embed(
-                        f"{icon} Chế độ lặp", f"**{name}**"
-                    )
+                    embed = create_repeat_mode_embed(mode)
                     await interaction.response.send_message(embed=embed)
                 else:
                     await interaction.response.send_message(
@@ -350,7 +330,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     interaction.guild.id
                 )
                 error_embed = self.create_error_embed(
-                    "Đang chuyển playlist",
+                    "Đang kích hoạt playlist",
                     f"Đang chuyển sang playlist **{switching_to}**, vui lòng chờ...",
                 )
                 await interaction.followup.send(embed=error_embed)

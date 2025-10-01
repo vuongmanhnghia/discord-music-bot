@@ -173,6 +173,16 @@ class ResourceManager:
         """Get active connection for guild"""
         return self._active_connections.get(guild_id)
 
+    def update_activity(self, guild_id: int) -> None:
+        """Update last activity timestamp for guild
+
+        Call this when there's activity (playback, commands, etc.)
+        to prevent idle disconnect
+        """
+        if guild_id in self._connection_timestamps:
+            self._connection_timestamps[guild_id] = time.time()
+            logger.debug(f"📡 Updated activity timestamp for guild {guild_id}")
+
     def _cleanup_oldest_connection(self):
         """Remove the oldest connection to stay under limit"""
         if not self._connection_timestamps:
@@ -216,6 +226,9 @@ class ResourceManager:
 
     async def perform_cleanup(self) -> Dict[str, int]:
         """Perform comprehensive resource cleanup"""
+        # Import config to check 24/7 mode
+        from ..config.config import config
+
         cleanup_stats = {
             "expired_cache_items": 0,
             "idle_connections": 0,
@@ -226,20 +239,27 @@ class ResourceManager:
         cleanup_stats["expired_cache_items"] = self._resource_cache.clear_expired()
 
         # Clean idle connections (older than 1 hour)
-        current_time = time.time()
-        idle_threshold = 3600  # 1 hour
-        idle_guilds = []
+        # ✅ Skip idle connection cleanup if 24/7 mode is enabled
+        if not config.STAY_CONNECTED_24_7:
+            current_time = time.time()
+            idle_threshold = 3600  # 1 hour
+            idle_guilds = []
 
-        for guild_id, timestamp in self._connection_timestamps.items():
-            if current_time - timestamp > idle_threshold:
-                idle_guilds.append(guild_id)
+            for guild_id, timestamp in self._connection_timestamps.items():
+                if current_time - timestamp > idle_threshold:
+                    idle_guilds.append(guild_id)
 
-        # Disconnect idle connections
-        for guild_id in idle_guilds:
-            connection = self._active_connections.get(guild_id)
-            if connection:
-                await self._disconnect_safely(guild_id, connection)
-                cleanup_stats["idle_connections"] += 1
+            # Disconnect idle connections
+            for guild_id in idle_guilds:
+                connection = self._active_connections.get(guild_id)
+                if connection:
+                    await self._disconnect_safely(guild_id, connection)
+                    cleanup_stats["idle_connections"] += 1
+        else:
+            # 24/7 mode enabled - skip idle connection cleanup
+            logger.debug(
+                "24/7 mode enabled - skipping idle connection cleanup to maintain continuous service"
+            )
 
         self._stats["memory_cleanups"] += 1
 

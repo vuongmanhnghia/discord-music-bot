@@ -4,14 +4,13 @@ Handles queue display and management with pagination
 """
 
 import discord
-from discord import app_commands
 
 from . import BaseCommandHandler
-from ..utils.embed_factory import EmbedFactory
-from ..utils.validation import ValidationUtils
 from ..utils.pagination import PaginationHelper, send_paginated_embed
+from ..utils.modern_embeds import create_empty_queue_embed
 
-from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
+from ..config.constants import ERROR_MESSAGES
+from ..pkg.logger import logger
 
 
 class QueueCommandHandler(BaseCommandHandler):
@@ -25,6 +24,7 @@ class QueueCommandHandler(BaseCommandHandler):
             """📋 Display current queue with interactive pagination"""
             try:
                 if not interaction.guild:
+                    logger.error("Queue command invoked outside of a guild")
                     await interaction.response.send_message(
                         ERROR_MESSAGES["guild_only"], ephemeral=True
                     )
@@ -32,6 +32,9 @@ class QueueCommandHandler(BaseCommandHandler):
 
                 queue_manager = self.get_queue_manager(interaction.guild.id)
                 if not queue_manager:
+                    logger.error(
+                        f"No queue manager found for guild {interaction.guild.id}"
+                    )
                     await interaction.response.send_message(
                         ERROR_MESSAGES["no_queue"], ephemeral=True
                     )
@@ -42,8 +45,12 @@ class QueueCommandHandler(BaseCommandHandler):
                 all_songs = queue_manager.get_all_songs()
 
                 if not current_song and not all_songs:
+                    logger.info(f"Queue is empty in guild {interaction.guild.id}")
+
+                    # Use modern empty queue embed
+                    empty_embed = create_empty_queue_embed()
                     await interaction.response.send_message(
-                        ERROR_MESSAGES["no_songs_in_queue"], ephemeral=True
+                        embed=empty_embed, ephemeral=True
                     )
                     return
 
@@ -52,15 +59,17 @@ class QueueCommandHandler(BaseCommandHandler):
                 for song in all_songs:
                     # Get best available title
                     title = song.display_name
-                    
+
                     # If metadata exists and has title, use it (more detailed)
                     if song.metadata and song.metadata.title:
                         title = song.metadata.display_name
-                    
-                    song_dicts.append({
-                        "title": title,
-                        "status": song.status.value,
-                    })
+
+                    song_dicts.append(
+                        {
+                            "title": title,
+                            "status": song.status.value,
+                        }
+                    )
 
                 # Get queue position (position property returns tuple (current, total))
                 current_pos, total_songs = queue_manager.position
@@ -73,7 +82,7 @@ class QueueCommandHandler(BaseCommandHandler):
                     title = current_song.display_name
                     if current_song.metadata and current_song.metadata.title:
                         title = current_song.metadata.display_name
-                    
+
                     current_song_dict = {
                         "title": title,
                         "status": current_song.status.value,
@@ -81,7 +90,9 @@ class QueueCommandHandler(BaseCommandHandler):
 
                 # Create paginated pages
                 items_per_page = 10
-                total_pages = max(1, (len(song_dicts) + items_per_page - 1) // items_per_page)
+                total_pages = max(
+                    1, (len(song_dicts) + items_per_page - 1) // items_per_page
+                )
                 pages = []
 
                 for page_num in range(1, total_pages + 1):
@@ -103,4 +114,3 @@ class QueueCommandHandler(BaseCommandHandler):
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "queue")
-

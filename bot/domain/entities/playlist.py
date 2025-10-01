@@ -2,8 +2,8 @@ from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-from .song import Song
 from ..valueobjects.source_type import SourceType
+from ...pkg.logger import logger
 
 
 class PlaylistEntry:
@@ -69,7 +69,11 @@ class Playlist:
         if 0 <= index < len(self._entries):
             self._entries.pop(index)
             self.updated_at = datetime.now()
+            logger.info(f"Removed entry at index {index} from playlist '{self.name}'")
             return True
+        logger.error(
+            f"Invalid index {index} for removing entry from playlist '{self.name}'"
+        )
         return False
 
     def clear(self) -> None:

@@ -64,36 +64,118 @@ class PlaylistService:
         source_type: SourceType,
         title: Optional[str] = None,
     ) -> tuple[bool, str]:
-        """Add song to playlist"""
-        if self.library.add_to_playlist(
-            playlist_name, original_input, source_type, title
-        ):
-            return (
-                True,
-                f"Added '{title or original_input}' to playlist '{playlist_name}'",
+        """Add song to playlist with input validation"""
+        # Validate input is not empty
+        if not original_input or not original_input.strip():
+            logger.error(
+                f"Validation failed: Empty input for playlist '{playlist_name}'"
             )
-        return (
-            False,
-            f"Failed to add to playlist '{playlist_name}' (playlist may not exist)",
-        )
+            return False, "Input cannot be empty"
 
-    def remove_from_playlist(self, playlist_name: str, index: int) -> tuple[bool, str]:
-        """Remove song from playlist by index (1-based for user)"""
+        # Validate source type
+        if not isinstance(source_type, SourceType):
+            logger.error(
+                f"Validation failed: Invalid source type '{source_type}' for playlist '{playlist_name}'"
+            )
+            return False, "Invalid source type"
+
+        # Validate playlist exists
         playlist = self.library.get_playlist(playlist_name)
         if not playlist:
+            logger.error(
+                f"Validation failed: Playlist '{playlist_name}' not found when adding '{original_input}'"
+            )
             return False, f"Playlist '{playlist_name}' not found"
+
+        # Sanitize and validate input based on source type
+        original_input = original_input.strip()
+
+        # URL validation for URL-based sources
+        if source_type in [
+            SourceType.YOUTUBE,
+            SourceType.SPOTIFY,
+            SourceType.SOUNDCLOUD,
+        ]:
+            if not (
+                original_input.startswith("http://")
+                or original_input.startswith("https://")
+            ):
+                logger.error(
+                    f"Validation failed: Invalid URL '{original_input}' for {source_type.value} in playlist '{playlist_name}'"
+                )
+                return False, f"Invalid URL for {source_type.value}"
+
+        # Try to add to playlist
+        try:
+            if self.library.add_to_playlist(
+                playlist_name, original_input, source_type, title
+            ):
+                logger.info(
+                    f"Successfully added '{title or original_input}' to playlist '{playlist_name}'"
+                )
+                return (
+                    True,
+                    f"Added '{title or original_input}' to playlist '{playlist_name}'",
+                )
+            else:
+                logger.error(
+                    f"Failed to add '{original_input}' to playlist '{playlist_name}' (library rejected)"
+                )
+                return (
+                    False,
+                    f"Failed to add to playlist '{playlist_name}' (internal error)",
+                )
+        except Exception as e:
+            logger.error(
+                f"Exception adding '{original_input}' to playlist '{playlist_name}': {e}"
+            )
+            return False, f"Error adding to playlist: {str(e)}"
+
+    def remove_from_playlist(self, playlist_name: str, index: int) -> tuple[bool, dict]:
+        """Remove song from playlist by index (1-based for user)
+
+        Returns:
+            tuple[bool, dict]: (success, data)
+            - If success: data contains removed_index, removed_title, remaining, message
+            - If failed: data contains error message
+        """
+        playlist = self.library.get_playlist(playlist_name)
+        if not playlist:
+            return False, {
+                "error": f"Playlist '{playlist_name}' not found",
+                "message": f"Playlist '{playlist_name}' không tồn tại",
+            }
 
         # Convert to 0-based index
         zero_index = index - 1
         if zero_index < 0 or zero_index >= playlist.total_songs:
-            return (
-                False,
-                f"Invalid index {index}. Playlist has {playlist.total_songs} songs",
-            )
+            return False, {
+                "error": f"Invalid index {index}. Playlist has {playlist.total_songs} songs",
+                "message": f"Vị trí không hợp lệ. Playlist có {playlist.total_songs} bài hát",
+            }
 
+        # Get song title before removing
+        removed_song_title = (
+            playlist.entries[zero_index].title if playlist.entries else "Unknown"
+        )
+
+        # Remove from playlist
         if self.library.remove_from_playlist(playlist_name, zero_index):
-            return True, f"Removed song #{index} from playlist '{playlist_name}'"
-        return False, f"Failed to remove song from playlist '{playlist_name}'"
+            # Get updated playlist to get remaining count
+            updated_playlist = self.library.get_playlist(playlist_name)
+            remaining = updated_playlist.total_songs if updated_playlist else 0
+
+            return True, {
+                "removed_index": index,
+                "removed_title": removed_song_title,
+                "remaining": remaining,
+                "message": f"Đã xóa bài hát #{index}. Còn lại: {remaining} bài hát",
+            }
+
+        return False, {
+            "error": f"Failed to remove song from playlist '{playlist_name}'",
+            "message": f"Không thể xóa bài hát khỏi playlist '{playlist_name}'",
+        }
 
     def list_playlists(self) -> List[str]:
         """List all available playlists"""

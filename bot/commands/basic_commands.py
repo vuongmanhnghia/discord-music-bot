@@ -10,6 +10,13 @@ from discord import app_commands
 from . import BaseCommandHandler
 from ..pkg.logger import logger
 from ..services.audio_service import audio_service
+from ..utils.modern_embeds import (
+    create_ping_embed,
+    create_join_success_embed,
+    create_already_in_channel_embed,
+    create_moved_channel_embed,
+    create_leave_success_embed,
+)
 from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
 
 
@@ -30,11 +37,7 @@ class BasicCommandHandler(BaseCommandHandler):
                 latency = round(self.bot.latency * 1000)
                 response_time = round((end_time - start_time) * 1000)
 
-                embed = self.create_info_embed(
-                    "🏓 Pong!",
-                    f"**Discord Latency:** {latency}ms\n**Response Time:** {response_time}ms",
-                )
-
+                embed = create_ping_embed(latency, response_time)
                 await interaction.edit_original_response(content=None, embed=embed)
 
             except Exception as e:
@@ -58,21 +61,17 @@ class BasicCommandHandler(BaseCommandHandler):
                 # Check if already connected to the same channel
                 if interaction.guild.voice_client:
                     if interaction.guild.voice_client.channel == user_voice_channel:
+                        embed = create_already_in_channel_embed(user_voice_channel.name)
                         await interaction.response.send_message(
-                            SUCCESS_MESSAGES["connected"].format(
-                                user_voice_channel.name
-                            ),
+                            embed=embed,
                             ephemeral=True,
                         )
                         return
                     else:
                         # Move to new channel
                         await interaction.guild.voice_client.move_to(user_voice_channel)
-                        await interaction.response.send_message(
-                            SUCCESS_MESSAGES["moved_channel"].format(
-                                user_voice_channel.name
-                            )
-                        )
+                        embed = create_moved_channel_embed(user_voice_channel.name)
+                        await interaction.response.send_message(embed=embed)
                         return
 
                 # Connect to voice channel
@@ -84,9 +83,8 @@ class BasicCommandHandler(BaseCommandHandler):
                         interaction.guild.id, voice_client
                     )
 
-                    await interaction.response.send_message(
-                        SUCCESS_MESSAGES["connected"].format(user_voice_channel.name)
-                    )
+                    embed = create_join_success_embed(user_voice_channel.name)
+                    await interaction.response.send_message(embed=embed)
 
                     logger.info(
                         f"Connected to voice channel: {user_voice_channel.name} in {interaction.guild.name}"
@@ -130,9 +128,8 @@ class BasicCommandHandler(BaseCommandHandler):
                 # Disconnect from voice
                 await voice_client.disconnect()
 
-                await interaction.response.send_message(
-                    SUCCESS_MESSAGES["disconnected"].format(channel_name)
-                )
+                embed = create_leave_success_embed()
+                await interaction.response.send_message(embed=embed)
 
                 logger.info(
                     f"Left voice channel: {channel_name} in {interaction.guild.name}"

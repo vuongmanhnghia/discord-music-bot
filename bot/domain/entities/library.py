@@ -1,9 +1,10 @@
 from __future__ import annotations
 from typing import List, Optional
 
-from .playlist import Playlist, PlaylistEntry
+from .playlist import Playlist
 from ..repositories.playlist_repository import PlaylistRepository
 from ..valueobjects.source_type import SourceType
+from ...pkg.logger import logger
 
 
 class LibraryManager:
@@ -71,10 +72,12 @@ class LibraryManager:
         """Remove song from playlist by index"""
         playlist = self.get_playlist(playlist_name)
         if not playlist:
+            logger.error(f"Playlist '{playlist_name}' not found")
             return False
 
         if playlist.remove_entry(index):
             return self.save_playlist(playlist)
+        logger.error(f"Failed to remove entry at index {index} from '{playlist_name}'")
         return False
 
     def clear_playlist(self, playlist_name: str) -> bool:

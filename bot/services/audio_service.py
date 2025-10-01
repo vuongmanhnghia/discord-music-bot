@@ -172,6 +172,7 @@ class AudioService:
     def get_queue_manager(self, guild_id: int) -> Optional[QueueManager]:
         """Get queue manager for guild"""
         if guild_id not in self._queue_managers:
+            logger.info(f"Creating new QueueManager for guild {guild_id}")
             self._queue_managers[guild_id] = QueueManager(guild_id)
         return self._queue_managers[guild_id]
 
