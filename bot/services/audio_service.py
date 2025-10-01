@@ -303,9 +303,18 @@ class AudioService:
             await queue_manager.next_song()
             await self.play_next_song(guild_id)
         else:
-            logger.info(
-                f"Reached end of queue in guild {guild_id} (played {total_songs} songs)"
-            )
+            # Reached end of queue - check repeat mode
+            if queue_manager._repeat_mode == "queue" and total_songs > 0:
+                logger.info(
+                    f"Queue finished, repeating from start (repeat mode: {queue_manager._repeat_mode})"
+                )
+                # Advance will reset to position 0 in next_song()
+                await queue_manager.next_song()
+                await self.play_next_song(guild_id)
+            else:
+                logger.info(
+                    f"Reached end of queue in guild {guild_id} (played {total_songs} songs, repeat: {queue_manager._repeat_mode})"
+                )
 
     async def _on_playback_error(self, error, song: Song):
         """Called when playback error occurs"""

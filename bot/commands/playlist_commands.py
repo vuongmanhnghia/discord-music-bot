@@ -79,7 +79,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
                     # Update with success message
                     success_embed = self.create_success_embed(
-                        "Đã chuyển playlist thành công", switch_message
+                        f"**Kích hoạt playlist thành công**", switch_message
                     )
                 else:
                     # Update with error message
@@ -275,7 +275,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
         @self.bot.tree.command(name="playlists", description="Liệt kê tất cả playlist")
         async def list_playlists(interaction: discord.Interaction):
-            """📚 List all playlists"""
+            """List all playlists"""
             try:
                 if not self.playlist_service:
                     await interaction.response.send_message(
@@ -287,7 +287,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
                 if not playlists:
                     await interaction.response.send_message(
-                        "📚 Chưa có playlist nào được tạo!", ephemeral=True
+                        "Chưa có playlist nào được tạo!", ephemeral=True
                     )
                     return
 

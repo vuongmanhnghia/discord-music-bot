@@ -114,7 +114,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
                 if voice_client.is_paused():
                     await interaction.response.send_message(
-                        ERROR_MESSAGES["playback_stopped"], ephemeral=True
+                        "Nhạc đã được tạm dừng rồi", ephemeral=True
                     )
                     return
 
@@ -138,7 +138,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
                 if not voice_client.is_paused():
                     await interaction.response.send_message(
-                        ERROR_MESSAGES["playback_resumed"], ephemeral=True
+                        "Nhạc đang phát rồi", ephemeral=True
                     )
                     return
 
@@ -161,7 +161,9 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 success = await playback_service.stop_playback(interaction.guild.id)
 
                 if success:
-                    embed = self.create_info_embed(ERROR_MESSAGES["playback_stopped"])
+                    embed = self.create_info_embed(
+                        "Đã dừng phát nhạc", "Hàng đợi đã được xóa"
+                    )
                     await interaction.response.send_message(embed=embed)
                 else:
                     await interaction.response.send_message(
@@ -266,7 +268,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
             ]
         )
         async def repeat_mode(interaction: discord.Interaction, mode: str):
-            """🔁 Set repeat mode"""
+            """Set repeat mode"""
             try:
                 if not interaction.guild:
                     await interaction.response.send_message(
@@ -407,14 +409,14 @@ class PlaybackCommandHandler(BaseCommandHandler):
         if voice_client and voice_client.is_paused():
             voice_client.resume()
             await interaction.response.send_message(
-                f"▶️ **Tiếp tục phát từ playlist:** `{active_playlist}`"
+                f"**Tiếp tục phát từ playlist:** `{active_playlist}`"
             )
             return
 
         # Respond immediately to avoid timeout
         embed = self.create_success_embed(
-            "⏳ Đang tải playlist",
-            f"📋 **{active_playlist}**\nĐang xử lý các bài hát...",
+            "⏱ Đang tải playlist…",
+            f"**{active_playlist}**\nĐang xử lý các bài hát...",
         )
         await interaction.response.send_message(embed=embed)
 
@@ -427,7 +429,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
             # Update the message with result
             if success:
                 updated_embed = self.create_success_embed(
-                    "▶️ Đã bắt đầu phát từ playlist", f"📋 **{active_playlist}**"
+                    "Đã bắt đầu phát nhạc từ playlist", f"**{active_playlist}**"
                 )
             else:
                 updated_embed = self.create_error_embed(

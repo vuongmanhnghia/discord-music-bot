@@ -70,7 +70,7 @@ class PlaylistSwitchManager:
                     )
                     return (
                         True,
-                        f"✅ Đã chuyển sang playlist **{new_playlist}**\n{message}",
+                        f"**Đã kích hoạt playlist `{new_playlist}`**\n{message}",
                     )
                 else:
                     logger.error(
@@ -159,7 +159,10 @@ class PlaylistSwitchManager:
                         return True, f"Đã tải {song_count} bài hát từ playlist"
                     else:
                         # Empty playlist is fine - ready for /add commands
-                        return True, f"Playlist '{playlist_name}' đã sẵn sàng (trống, sử dụng /add để thêm bài)"
+                        return (
+                            True,
+                            f"*Playlist **{playlist_name}** đã sẵn sàng (trống, sử dụng `/add` để thêm bài hát)*",
+                        )
                 else:
                     return True, f"Playlist '{playlist_name}' đã được chọn"
             else:

@@ -449,7 +449,7 @@ class MusicBot(commands.Bot):
             self.active_playlists[guild_id] = playlist_name
 
             embed = discord.Embed(
-                title=f"Kích hoạt playlist",
+                title=f"Kích hoạt playlist thành công",
                 description=f"**{playlist_name} đã được load**\n\n" f"{message}\n\n",
                 color=discord.Color.blue(),
             )
