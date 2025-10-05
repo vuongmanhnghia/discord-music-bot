@@ -56,13 +56,32 @@ class Playlist:
         """Get all playlist entries"""
         return self._entries.copy()
 
+    def has_entry(self, original_input: str) -> bool:
+        """Check if an entry with the same original_input already exists"""
+        return any(entry.original_input == original_input for entry in self._entries)
+
     def add_entry(
         self, original_input: str, source_type: SourceType, title: Optional[str] = None
-    ) -> None:
-        """Add a new entry to playlist"""
+    ) -> bool:
+        """Add a new entry to playlist
+
+        Returns:
+            bool: True if added successfully, False if duplicate found
+        """
+        # Check for duplicates
+        if self.has_entry(original_input):
+            logger.warning(
+                f"Duplicate entry '{original_input}' not added to playlist '{self.name}'"
+            )
+            return False
+
         entry = PlaylistEntry(original_input, source_type, title)
         self._entries.append(entry)
         self.updated_at = datetime.now()
+        logger.info(
+            f"Added entry '{title or original_input}' to playlist '{self.name}'"
+        )
+        return True
 
     def remove_entry(self, index: int) -> bool:
         """Remove entry by index"""

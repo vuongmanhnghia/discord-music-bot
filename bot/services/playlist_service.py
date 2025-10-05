@@ -107,9 +107,19 @@ class PlaylistService:
 
         # Try to add to playlist
         try:
-            if self.library.add_to_playlist(
+            success, is_duplicate = self.library.add_to_playlist(
                 playlist_name, original_input, source_type, title
-            ):
+            )
+
+            if success and is_duplicate:
+                logger.info(
+                    f"Duplicate '{title or original_input}' skipped for playlist '{playlist_name}'"
+                )
+                return (
+                    True,
+                    f"**{title or original_input}** đã tồn tại trong playlist '{playlist_name}'",
+                )
+            elif success:
                 logger.info(
                     f"Successfully added '{title or original_input}' to playlist '{playlist_name}'"
                 )

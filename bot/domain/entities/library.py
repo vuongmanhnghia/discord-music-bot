@@ -59,14 +59,36 @@ class LibraryManager:
         original_input: str,
         source_type: SourceType,
         title: Optional[str] = None,
-    ) -> bool:
-        """Add song to playlist"""
+    ) -> tuple[bool, bool]:
+        """Add song to playlist
+
+        Returns:
+            tuple[bool, bool]: (success, is_duplicate)
+            - (True, False): Added successfully
+            - (True, True): Duplicate found, not added
+            - (False, False): Playlist not found or save failed
+        """
         playlist = self.get_playlist(playlist_name)
         if not playlist:
-            return False
+            return False, False
 
-        playlist.add_entry(original_input, source_type, title)
-        return self.save_playlist(playlist)
+        # Check for duplicate before adding
+        if playlist.has_entry(original_input):
+            logger.info(
+                f"Duplicate '{original_input}' skipped in playlist '{playlist_name}'"
+            )
+            return True, True  # Success = True (no error), Duplicate = True
+
+        # Add entry (returns True if successful)
+        if playlist.add_entry(original_input, source_type, title):
+            if self.save_playlist(playlist):
+                return True, False  # Added successfully
+            else:
+                # Revert the add if save failed
+                playlist._entries.pop()
+                return False, False
+
+        return False, False
 
     def remove_from_playlist(self, playlist_name: str, index: int) -> bool:
         """Remove song from playlist by index"""
