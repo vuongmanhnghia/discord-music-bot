@@ -10,13 +10,7 @@ from discord import app_commands
 from . import BaseCommandHandler
 from ..pkg.logger import logger
 from ..services.audio_service import audio_service
-from ..utils.modern_embeds import (
-    create_ping_embed,
-    create_join_success_embed,
-    create_already_in_channel_embed,
-    create_moved_channel_embed,
-    create_leave_success_embed,
-)
+from ..utils.discord_ui import EmbedFactory
 from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
 
 
@@ -37,7 +31,7 @@ class BasicCommandHandler(BaseCommandHandler):
                 latency = round(self.bot.latency * 1000)
                 response_time = round((end_time - start_time) * 1000)
 
-                embed = create_ping_embed(latency, response_time)
+                embed = EmbedFactory.success("🏓 Pong!", "Bot đang hoạt động tốt!", details={"Độ trễ API": f"{latency}ms", "Thời gian phản hồi": f"{response_time}ms"}, footer="Thời gian tính bằng milliseconds")
                 await interaction.edit_original_response(content=None, embed=embed)
 
             except Exception as e:
@@ -61,16 +55,13 @@ class BasicCommandHandler(BaseCommandHandler):
                 # Check if already connected to the same channel
                 if interaction.guild.voice_client:
                     if interaction.guild.voice_client.channel == user_voice_channel:
-                        embed = create_already_in_channel_embed(user_voice_channel.name)
-                        await interaction.response.send_message(
-                            embed=embed,
-                            ephemeral=True,
-                        )
+                        embed = EmbedFactory.info("Đã trong voice channel", f"Bot đã ở trong **{user_voice_channel.name}** rồi!", info_fields={"Kênh hiện tại": user_voice_channel.name}, footer="Bot đã kết nối")
+                        await interaction.response.send_message(embed=embed, ephemeral=True)
                         return
                     else:
                         # Move to new channel
                         await interaction.guild.voice_client.move_to(user_voice_channel)
-                        embed = create_moved_channel_embed(user_voice_channel.name)
+                        embed = EmbedFactory.success("Đã chuyển kênh", f"Bot đã di chuyển đến **{user_voice_channel.name}**!", details={"Kênh mới": user_voice_channel.name}, footer="Bot đã sẵn sàng!")
                         await interaction.response.send_message(embed=embed)
                         return
 
@@ -83,7 +74,7 @@ class BasicCommandHandler(BaseCommandHandler):
                         interaction.guild.id, voice_client
                     )
 
-                    embed = create_join_success_embed(user_voice_channel.name)
+                    embed = EmbedFactory.success("✅ Đã kết nối", f"Bot đã tham gia **{user_voice_channel.name}**!", details={"Kênh": user_voice_channel.name}, footer="Sẵn sàng phát nhạc!")
                     await interaction.response.send_message(embed=embed)
 
                     logger.info(
@@ -125,7 +116,7 @@ class BasicCommandHandler(BaseCommandHandler):
                 # Cleanup audio service and disconnect from voice
                 await audio_service.disconnect_from_guild(interaction.guild.id)
 
-                embed = create_leave_success_embed()
+                embed = EmbedFactory.success("👋 Đã rời khỏi kênh", "Bot đã ngắt kết nối voice!", details={"Trạng thái": "Đã ngắt kết nối"}, footer="Dùng /join để kết nối lại")
                 await interaction.response.send_message(embed=embed)
 
                 logger.info(

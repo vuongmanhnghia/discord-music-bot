@@ -22,7 +22,7 @@ class AudioPlayer:
         self.guild_id = guild_id
         self.current_song: Optional[Song] = None
         self.current_playlist: Optional[str] = None
-        self.volume: float = 0.5
+        self.volume: float = 0.3  # Default to 100% volume
         self.is_playing: bool = False
         self.is_paused: bool = False
 
@@ -102,6 +102,9 @@ class AudioPlayer:
                 return False
 
             logger.debug(f"Creating audio source for: {song.stream_url}")
+            logger.info(
+                f"🔊 Stream URL: {song.stream_url[:100]}..."
+            )  # Log first 100 chars
 
             # Create audio source with timeout protection
             audio_source = self._create_audio_source(song.stream_url)
@@ -116,8 +119,22 @@ class AudioPlayer:
                 else:
                     return False
 
+            logger.info(
+                f"✅ Audio source created successfully, type: {type(audio_source).__name__}"
+            )
+
+            # Check voice client connection
+            if not self.voice_client.is_connected():
+                logger.error(f"❌ Voice client not connected in guild {self.guild_id}")
+                return False
+
+            logger.info(
+                f"✅ Voice client connected to channel: {self.voice_client.channel.name if self.voice_client.channel else 'Unknown'}"
+            )
+
             # Stop current playback if any
             if self.voice_client.is_playing() or self.voice_client.is_paused():
+                logger.info("🛑 Stopping current playback")
                 self.voice_client.stop()
                 await asyncio.sleep(0.5)
 
@@ -149,7 +166,18 @@ class AudioPlayer:
 
                 self._on_playback_finished(error, song)
 
+            logger.info(f"🎵 Calling voice_client.play() with volume={self.volume:.2f}")
             self.voice_client.play(audio_source, after=after_callback)
+
+            # Verify playback started
+            await asyncio.sleep(0.1)  # Give it a moment to start
+            if not self.voice_client.is_playing():
+                logger.error(
+                    "❌ voice_client.play() called but is_playing() returns False!"
+                )
+                return False
+
+            logger.info(f"✅ voice_client.is_playing() = True")
 
             # Update state
             self.current_song = song
@@ -268,18 +296,13 @@ class AudioPlayer:
                 f"Creating FFmpeg source with enhanced options: before_options='{before_options}', options='{options}'"
             )
 
-            # Create audio source with stderr redirected to suppress TLS warnings at EOF
-            # These warnings are normal when stream ends and don't indicate errors
+            # Create audio source - let FFmpeg output go through normally
             audio_source = FFmpegPCMAudio(
-                stream_url, 
-                before_options=before_options, 
-                options=options,
-                stderr=open(os.devnull, 'w')  # Redirect stderr to /dev/null
+                stream_url, before_options=before_options, options=options
             )
 
-            # Apply volume transformation
-            if self.volume != 1.0:
-                audio_source = PCMVolumeTransformer(audio_source, volume=self.volume)
+            # Always apply volume transformation for better control
+            audio_source = PCMVolumeTransformer(audio_source, volume=self.volume)
 
             logger.debug("Audio source created successfully")
             return audio_source

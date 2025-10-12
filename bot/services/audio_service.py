@@ -4,7 +4,7 @@ import discord
 
 from ..domain.entities.song import Song
 from ..domain.entities.queue import QueueManager
-from ..utils.resource_manager import ResourceManager
+from ..utils.cache import ResourceManager
 from ..config.performance import performance_config
 from ..pkg.logger import logger
 from .audio_player import AudioPlayer

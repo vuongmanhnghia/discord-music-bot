@@ -11,13 +11,7 @@ from ..config.config import config
 from ..pkg.logger import logger
 
 from ..config.constants import ERROR_MESSAGES
-from ..utils.modern_embeds import (
-    create_help_embed,
-    create_recovery_status_embed,
-    create_stream_status_embed,
-    create_switch_status_embed,
-    create_switch_auto_clear_embed,
-)
+from ..utils.discord_ui import EmbedFactory
 
 
 class AdvancedCommandHandler(BaseCommandHandler):
@@ -33,7 +27,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
         async def show_help(interaction: discord.Interaction):
             """❓ Show help information"""
             try:
-                embed = create_help_embed(
+                embed = EmbedFactory.info(
                     config.BOT_NAME, getattr(config, "VERSION", "1.0.0")
                 )
                 await interaction.response.send_message(embed=embed)
@@ -57,7 +51,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
                 if not await self.ensure_user_in_voice(interaction):
                     return
 
-                from ..utils.youtube_playlist_handler import YouTubePlaylistHandler
+                from ..utils.youtube import YouTubePlaylistHandler
 
                 # Check if it's a valid playlist URL
                 if not YouTubePlaylistHandler.is_playlist_url(url):
@@ -103,7 +97,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
                 from ..services.auto_recovery import auto_recovery_service
 
                 stats = auto_recovery_service.get_recovery_stats()
-                embed = create_recovery_status_embed(stats)
+                embed = EmbedFactory.info(stats)
                 await interaction.response.send_message(embed=embed)
 
             except Exception as e:
@@ -118,7 +112,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
                 from ..services.stream_refresh import stream_refresh_service
 
                 stats = stream_refresh_service.get_refresh_stats()
-                embed = create_stream_status_embed(stats)
+                embed = EmbedFactory.info(stats)
                 await interaction.response.send_message(embed=embed)
 
             except Exception as e:

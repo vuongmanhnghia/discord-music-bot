@@ -6,8 +6,7 @@ Handles queue display and management with pagination
 import discord
 
 from . import BaseCommandHandler
-from ..utils.pagination import PaginationHelper, send_paginated_embed
-from ..utils.modern_embeds import create_empty_queue_embed
+from ..utils.discord_ui import Paginator, send_paginated_embed, create_empty_queue_embed
 
 from ..config.constants import ERROR_MESSAGES
 from ..pkg.logger import logger
@@ -100,7 +99,7 @@ class QueueCommandHandler(BaseCommandHandler):
                     end_idx = min(start_idx + items_per_page, len(song_dicts))
                     page_songs = song_dicts[start_idx:end_idx]
 
-                    embed = PaginationHelper.create_queue_embed(
+                    embed = Paginator.create_queue_embed(
                         songs=page_songs,
                         page_num=page_num,
                         total_pages=total_pages,

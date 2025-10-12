@@ -10,10 +10,10 @@ from discord import app_commands
 from . import BaseCommandHandler
 from ..pkg.logger import logger
 from ..services.playback import playback_service
-from ..utils.youtube_playlist_handler import YouTubePlaylistHandler
-from ..utils.validation import ValidationUtils
-from ..utils.message_updater import message_update_manager
-from ..utils.modern_embeds import (
+from ..utils.youtube import YouTubePlaylistHandler
+from ..utils.core import Validator
+from ..utils.events import message_update_manager
+from ..utils.discord_ui import (
     create_pause_embed,
     create_resume_embed,
     create_stop_embed,
@@ -63,8 +63,8 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 # Handle two modes: with query or from active playlist
                 if query:
                     # Validate and sanitize query
-                    query = ValidationUtils.sanitize_query(query)
-                    is_valid, error_msg = ValidationUtils.validate_query_length(query)
+                    query = Validator.sanitize_query(query)
+                    is_valid, error_msg = Validator.validate_query_length(query)
                     if not is_valid:
                         await interaction.response.send_message(
                             error_msg, ephemeral=True
@@ -187,8 +187,8 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 if not await self.ensure_same_voice_channel(interaction):
                     return
 
-                # Validate volume using ValidationUtils
-                is_valid, error_msg = ValidationUtils.validate_volume(volume)
+                # Validate volume using Validator
+                is_valid, error_msg = Validator.validate_volume(volume)
                 if not is_valid:
                     await interaction.response.send_message(error_msg, ephemeral=True)
                     return

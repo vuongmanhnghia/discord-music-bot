@@ -16,9 +16,9 @@ from .services.playback import playback_service
 from .services.playlist_service import PlaylistService
 from .services.auto_recovery import auto_recovery_service
 from .domain.entities.library import LibraryManager
-from .utils.interaction_manager import InteractionManager
-from .utils.message_updater import message_update_manager
-from .utils.bot_helpers import VoiceStateHelper, ErrorEmbedFactory
+from .utils.discord_ui import InteractionManager
+from .utils.events import message_update_manager
+from .utils.core import VoiceStateHelper, ErrorEmbedFactory
 from .utils.playlist_processors import PlaylistProcessor, PlaylistResultFactory
 from .utils.maintenance import CacheManager, MaintenanceScheduler
 

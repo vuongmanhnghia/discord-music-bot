@@ -486,7 +486,7 @@ async def initialize_async_processor(
         # Create progress callback for Discord updates
         progress_callback = None
         if bot_instance:
-            progress_callback = lambda task: send_discord_progress_update(
+            progress_callback = lambda task: default_discord_progress_callback(
                 bot_instance, task
             )
 
@@ -504,11 +504,13 @@ async def initialize_async_processor(
     return async_processor
 
 
-async def send_discord_progress_update(bot, task: ProcessingTask):
-    """Send progress update to Discord with real-time embeds"""
-    from .discord_progress import send_discord_progress_update as discord_update
-
-    await discord_update(bot, task)
+async def default_discord_progress_callback(bot, task: ProcessingTask):
+    """Default Discord progress update callback - imports locally to avoid circular deps"""
+    try:
+        from .discord_ui import send_discord_progress_update as discord_update
+        await discord_update(bot, task)
+    except Exception as e:
+        logger.error(f"Discord progress update failed: {e}")
 
 
 async def get_async_processor() -> AsyncSongProcessor:

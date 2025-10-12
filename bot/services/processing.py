@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any
 from ..domain.valueobjects.source_type import SourceType
 from ..domain.entities.song import Song, SongMetadata
 from ..domain.valueobjects.song_processor import SongProcessor
-from ..utils.youtube_error_handler import youtube_error_handler
+from ..utils.youtube import youtube_error_handler
 from .auto_recovery import auto_recovery_service
 from ..pkg.logger import logger
 

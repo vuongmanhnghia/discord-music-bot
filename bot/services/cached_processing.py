@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, Tuple
 import yt_dlp
 import json
 
-from ..utils.smart_cache import SmartCache
+from ..utils.cache import SmartCache
 from ..domain.valueobjects.source_type import SourceType
 from ..domain.entities.song import Song, SongMetadata
 from ..config.performance import performance_config

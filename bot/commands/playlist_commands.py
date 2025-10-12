@@ -12,21 +12,17 @@ from . import BaseCommandHandler
 from ..pkg.logger import logger
 from ..services.playback import playback_service
 from ..domain.valueobjects.source_type import SourceType
-from ..utils.youtube_playlist_handler import YouTubePlaylistHandler
-from ..utils.validation import ValidationUtils
-from ..utils.pagination import PaginationHelper, send_paginated_embed
-from ..utils.modern_embeds import (
+from ..utils.youtube import YouTubePlaylistHandler
+from ..utils.core import Validator
+from ..utils.discord_ui import (
+    Paginator, send_paginated_embed,
     create_playlist_created_embed,
     create_playlist_deleted_embed,
     create_song_added_to_playlist_embed,
     create_song_removed_from_playlist_embed,
     create_playlist_loaded_embed,
     create_no_playlists_found_embed,
-    create_playlist_not_found_embed,
-    create_playlist_already_exists_embed,
-    create_youtube_playlist_loading_embed,
-    create_youtube_playlist_complete_embed,
-    ModernEmbedFactory,
+    EmbedFactory,
 )
 
 from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
@@ -117,7 +113,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     return
 
                 # Validate playlist name
-                is_valid, error_msg = ValidationUtils.validate_playlist_name(name)
+                is_valid, error_msg = Validator.validate_playlist_name(name)
                 if not is_valid:
                     await interaction.response.send_message(error_msg, ephemeral=True)
                     return
@@ -135,7 +131,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     ):
                         embed = create_playlist_already_exists_embed(name)
                     else:
-                        embed = ModernEmbedFactory.create_error_embed(
+                        embed = EmbedFactory.create_error_embed(
                             title="Lỗi tạo playlist",
                             description=message,
                             suggestions=["Kiểm tra lại tên playlist", "Dùng tên khác"],
@@ -160,8 +156,8 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     return
 
                 # Validate and sanitize song input
-                song_input = ValidationUtils.sanitize_query(song_input)
-                is_valid, error_msg = ValidationUtils.validate_query_length(song_input)
+                song_input = Validator.sanitize_query(song_input)
+                is_valid, error_msg = Validator.validate_query_length(song_input)
                 if not is_valid:
                     await interaction.response.send_message(error_msg, ephemeral=True)
                     return
@@ -336,7 +332,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     ):
                         embed = create_playlist_not_found_embed(playlist_name)
                     else:
-                        embed = ModernEmbedFactory.create_error_embed(
+                        embed = EmbedFactory.create_error_embed(
                             title="Lỗi xóa bài hát",
                             description=message,
                             suggestions=[
@@ -374,7 +370,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     indicator = "▸" if playlist_name == active_playlist else "○"
                     playlist_items.append(f"{indicator} **{playlist_name}**")
 
-                embed = ModernEmbedFactory.create_list_embed(
+                embed = EmbedFactory.create_list_embed(
                     title="Danh sách Playlist",
                     description="Các playlist đã tạo:",
                     items=playlist_items,
@@ -450,7 +446,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     end_idx = min(start_idx + items_per_page, len(songs))
                     page_songs = songs[start_idx:end_idx]
 
-                    embed = PaginationHelper.create_playlist_embed(
+                    embed = Paginator.create_playlist_embed(
                         songs=page_songs,
                         page_num=page_num,
                         total_pages=total_pages,
@@ -502,7 +498,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     ):
                         embed = create_playlist_not_found_embed(name)
                     else:
-                        embed = ModernEmbedFactory.create_error_embed(
+                        embed = EmbedFactory.create_error_embed(
                             title="Lỗi xóa playlist",
                             description=message,
                             suggestions=[

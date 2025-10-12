@@ -286,7 +286,7 @@ class PlaybackService:
             # Step 4: Submit for async processing with enhanced callback
             callback = None
             if interaction:
-                from ..utils.discord_progress import EnhancedProgressCallback
+                from ..utils.discord_ui import EnhancedProgressCallback
 
                 callback = EnhancedProgressCallback(interaction)
             else:
