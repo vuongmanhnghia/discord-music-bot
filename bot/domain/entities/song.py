@@ -11,12 +11,12 @@ from ..valueobjects.song_metadata import SongMetadata
 
 @dataclass
 class Song:
-    """Core Song entity - rich domain object"""
+    """Core Song entity - rich domain object with improved state management"""
 
     # Identity
-    original_input: str  # What user originally entered
+    original_input: str
     source_type: SourceType
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))  # Unique identifier
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     # State
     status: SongStatus = SongStatus.PENDING
@@ -27,9 +27,7 @@ class Song:
     # Timestamps
     created_at: datetime = field(default_factory=datetime.now)
     processed_at: Optional[datetime] = None
-    stream_url_timestamp: Optional[float] = (
-        None  # When stream URL was obtained (for refresh)
-    )
+    stream_url_timestamp: Optional[float] = None
 
     # Requester info
     requested_by: Optional[str] = None
@@ -47,23 +45,19 @@ class Song:
     @property
     def display_name(self) -> str:
         """Get display name for the song"""
-        if self.metadata:
-            return self.metadata.display_name
-        return self.original_input
+        return self.metadata.display_name if self.metadata else self.original_input
 
     @property
     def duration_formatted(self) -> str:
         """Get formatted duration"""
-        if self.metadata:
-            return self.metadata.duration_formatted
-        return "00:00"
+        return self.metadata.duration_formatted if self.metadata else "00:00"
 
-    def mark_processing(self):
+    def mark_processing(self) -> None:
         """Mark song as being processed"""
         self.status = SongStatus.PROCESSING
         self.processed_at = datetime.now()
 
-    def mark_ready(self, metadata: SongMetadata, stream_url: str):
+    def mark_ready(self, metadata: SongMetadata, stream_url: str) -> None:
         """Mark song as ready with metadata and stream URL"""
         self.status = SongStatus.READY
         self.metadata = metadata
@@ -73,7 +67,13 @@ class Song:
         # Publish song update event for real-time title updates
         self._publish_update_event()
 
-    def _publish_update_event(self):
+    def mark_failed(self, error: str) -> None:
+        """Mark song as failed with error message"""
+        self.status = SongStatus.FAILED
+        self.error_message = error
+        self.processed_at = datetime.now()
+
+    def _publish_update_event(self) -> None:
         """Publish song metadata update event"""
         try:
             from ...utils.song_events import song_event_bus, SongUpdateEvent
@@ -86,18 +86,9 @@ class Song:
                 loop = asyncio.get_running_loop()
                 loop.create_task(song_event_bus.publish("song_metadata_updated", event))
             except RuntimeError:
-                # No event loop running, skip event
-                pass
-        except Exception as e:
-            # Don't fail if event system has issues
-            from ...pkg.logger import logger
-            logger.debug(f"Could not publish song update event: {e}")
-
-    def mark_failed(self, error: str):
-        """Mark song as failed with error message"""
-        self.status = SongStatus.FAILED
-        self.error_message = error
-        self.processed_at = datetime.now()
+                pass  # No event loop running, skip event
+        except Exception:
+            pass  # Don't fail if event system has issues
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
@@ -106,23 +97,21 @@ class Song:
             "original_input": self.original_input,
             "source_type": self.source_type.value,
             "status": self.status.value,
-            "metadata": (
-                {
-                    "title": self.metadata.title,
-                    "artist": self.metadata.artist,
-                    "duration": self.metadata.duration,
-                    "album": self.metadata.album,
-                    "thumbnail_url": self.metadata.thumbnail_url,
-                }
-                if self.metadata
-                else None
-            ),
+            "metadata": self._metadata_to_dict() if self.metadata else None,
             "stream_url": self.stream_url,
             "error_message": self.error_message,
             "created_at": self.created_at.isoformat(),
-            "processed_at": (
-                self.processed_at.isoformat() if self.processed_at else None
-            ),
+            "processed_at": self.processed_at.isoformat() if self.processed_at else None,
             "requested_by": self.requested_by,
             "guild_id": self.guild_id,
+        }
+
+    def _metadata_to_dict(self) -> Dict[str, Any]:
+        """Convert metadata to dictionary"""
+        return {
+            "title": self.metadata.title,
+            "artist": self.metadata.artist,
+            "duration": self.metadata.duration,
+            "album": self.metadata.album,
+            "thumbnail_url": self.metadata.thumbnail_url,
         }

@@ -6,7 +6,6 @@ from ..domain.entities.song import Song
 from ..domain.entities.queue import QueueManager
 from ..utils.resource_manager import ResourceManager
 from ..config.performance import performance_config
-
 from ..pkg.logger import logger
 from .audio_player import AudioPlayer
 
@@ -14,23 +13,22 @@ from .audio_player import AudioPlayer
 class AudioService:
     """
     Main audio service managing all guild audio players
-    Handles voice connections and playback coordination
+    Thread-safe with optimized resource management
     """
 
     def __init__(self):
-        # Load performance configuration
         self.config = performance_config
-
+        
         self._voice_clients: Dict[int, discord.VoiceClient] = {}
         self._audio_players: Dict[int, AudioPlayer] = {}
         self._queue_managers: Dict[int, QueueManager] = {}
 
-        # Thread-safe locks for concurrent access
+        # Thread-safe locks
         self._voice_lock = asyncio.Lock()
         self._player_lock = asyncio.Lock()
         self._queue_lock = asyncio.Lock()
 
-        # Initialize ResourceManager with dynamic config
+        # Resource manager
         self.resource_manager = ResourceManager(
             max_connections=min(10, self.config.max_concurrent_processing * 3),
             cleanup_interval=self.config.cleanup_interval_seconds,
@@ -39,7 +37,7 @@ class AudioService:
     async def connect_to_channel(
         self, channel: Union[discord.VoiceChannel, discord.StageChannel]
     ) -> bool:
-        """Connect to a voice channel"""
+        """Connect to a voice channel with timeout"""
         guild_id = channel.guild.id
 
         async with self._voice_lock:
@@ -48,88 +46,62 @@ class AudioService:
                 if guild_id in self._voice_clients:
                     await self.disconnect_from_guild(guild_id)
 
-                logger.info(f"Attempting to connect to voice channel: {channel.name}")
+                logger.info(f"Connecting to voice channel: {channel.name}")
 
-                # Connect to new channel with timeout
-                try:
-                    voice_client = await asyncio.wait_for(
-                        channel.connect(), timeout=30.0
-                    )
-                except asyncio.TimeoutError:
-                    logger.error(f"❌ Connection timeout for {channel.name}")
-                    return False
-
+                # Connect with timeout
+                voice_client = await asyncio.wait_for(channel.connect(), timeout=30.0)
                 self._voice_clients[guild_id] = voice_client
 
-                # Register connection with ResourceManager
+                # Register connection
                 self.resource_manager.register_connection(guild_id, voice_client)
 
-                # Create audio player
-                audio_player = AudioPlayer(voice_client, guild_id)
-                audio_player.on_song_finished = self._on_song_finished
-                audio_player.on_error = self._on_playback_error
+                # Initialize audio infrastructure
+                await self._initialize_audio_player(guild_id, voice_client)
 
-                # Set event loop for async callbacks
-                audio_player._set_event_loop(asyncio.get_running_loop())
-                self._audio_players[guild_id] = audio_player
-
-                # Create queue manager if not exists
-                if guild_id not in self._queue_managers:
-                    self._queue_managers[guild_id] = QueueManager(guild_id)
-
-                logger.info(
-                    f"✅ Successfully connected to voice channel: {channel.name} in guild {guild_id}"
-                )
+                logger.info(f"✅ Connected to {channel.name} in guild {guild_id}")
                 return True
 
             except asyncio.TimeoutError:
-                logger.error(
-                    f"❌ Timeout connecting to voice channel {channel.name} (>35s)"
-                )
+                logger.error(f"❌ Connection timeout for {channel.name}")
                 return False
             except Exception as e:
-                logger.error(
-                    f"❌ Failed to connect to voice channel {channel.name}: {e}"
-                )
+                logger.error(f"❌ Failed to connect to {channel.name}: {e}")
                 return False
 
     async def initialize_guild(
         self, guild_id: int, voice_client: discord.VoiceClient
     ) -> bool:
-        """Initialize audio infrastructure for a guild with existing voice client"""
+        """Initialize audio infrastructure for a guild"""
         try:
             async with self._voice_lock:
-                # Store voice client
                 self._voice_clients[guild_id] = voice_client
-
-                # Register connection with ResourceManager
                 self.resource_manager.register_connection(guild_id, voice_client)
-
-                # Create audio player
-                audio_player = AudioPlayer(voice_client, guild_id)
-                audio_player.on_song_finished = self._on_song_finished
-                audio_player.on_error = self._on_playback_error
-
-                # Set event loop for async callbacks
-                audio_player._set_event_loop(asyncio.get_running_loop())
-                self._audio_players[guild_id] = audio_player
-
-                # Create queue manager if not exists
-                if guild_id not in self._queue_managers:
-                    self._queue_managers[guild_id] = QueueManager(guild_id)
-
+                await self._initialize_audio_player(guild_id, voice_client)
+                
                 logger.info(f"✅ Audio infrastructure initialized for guild {guild_id}")
                 return True
-
         except Exception as e:
             logger.error(f"❌ Failed to initialize guild {guild_id}: {e}")
             return False
+
+    async def _initialize_audio_player(self, guild_id: int, voice_client: discord.VoiceClient) -> None:
+        """Initialize audio player for a guild"""
+        # Create audio player
+        audio_player = AudioPlayer(voice_client, guild_id)
+        audio_player.on_song_finished = self._on_song_finished
+        audio_player.on_error = self._on_playback_error
+        audio_player._set_event_loop(asyncio.get_running_loop())
+        self._audio_players[guild_id] = audio_player
+
+        # Create queue manager if not exists
+        if guild_id not in self._queue_managers:
+            self._queue_managers[guild_id] = QueueManager(guild_id)
 
     async def disconnect_from_guild(self, guild_id: int) -> bool:
         """Disconnect from voice channel in guild"""
         async with self._voice_lock:
             try:
-                # Stop playback with error handling
+                # Stop playback
                 if guild_id in self._audio_players:
                     try:
                         self._audio_players[guild_id].stop()
@@ -138,7 +110,7 @@ class AudioService:
                     finally:
                         del self._audio_players[guild_id]
 
-                # Disconnect voice client with timeout
+                # Disconnect voice client
                 if guild_id in self._voice_clients:
                     voice_client = self._voice_clients[guild_id]
                     try:
@@ -150,17 +122,16 @@ class AudioService:
                     finally:
                         del self._voice_clients[guild_id]
 
-                # Clean up queue manager
+                # Clean queue
                 if guild_id in self._queue_managers:
                     await self._queue_managers[guild_id].clear()
                     del self._queue_managers[guild_id]
 
-                # Unregister from ResourceManager
+                # Unregister from resource manager
                 self.resource_manager.unregister_connection(guild_id)
 
                 logger.info(f"Disconnected from voice in guild {guild_id}")
                 return True
-
             except Exception as e:
                 logger.error(f"Error disconnecting from guild {guild_id}: {e}")
                 return False
@@ -170,7 +141,7 @@ class AudioService:
         return self._audio_players.get(guild_id)
 
     def get_queue_manager(self, guild_id: int) -> Optional[QueueManager]:
-        """Get queue manager for guild"""
+        """Get or create queue manager for guild"""
         if guild_id not in self._queue_managers:
             logger.info(f"Creating new QueueManager for guild {guild_id}")
             self._queue_managers[guild_id] = QueueManager(guild_id)
@@ -235,50 +206,33 @@ class AudioService:
             logger.error(f"No queue manager found for guild {guild_id}")
             return False
 
-        logger.info(f"Queue position before skip: {queue_manager.position}")
-        current_before = queue_manager.current_song
-        logger.info(
-            f"Current song before skip: {current_before.display_name if current_before else 'None'}"
-        )
-
         # Move to next song
         next_song = await queue_manager.next_song()
         if not next_song:
             logger.info(f"No next song in queue for guild {guild_id}")
             return False
 
-        logger.info(f"Queue position after advancing: {queue_manager.position}")
-        logger.info(
-            f"Next song to play: {next_song.display_name} (ready: {next_song.is_ready}, status: {next_song.status.value})"
-        )
+        logger.info(f"Next song: {next_song.display_name} (ready: {next_song.is_ready})")
 
-        # Stop current playback first
+        # Stop current playback
         audio_player = self._audio_players.get(guild_id)
         if audio_player:
-            logger.info(
-                f"Stopping current playback (was playing: {audio_player.is_playing})"
-            )
             audio_player.stop()
-            await asyncio.sleep(0.5)  # Small delay to ensure stop is processed
+            await asyncio.sleep(0.3)  # Small delay for stop processing
         else:
             logger.warning(f"No audio player found for guild {guild_id}")
 
-        # Force play next song (even if not ready yet - will use wait mechanism)
-        logger.info(f"Attempting to play next song: {next_song.display_name}")
+        # Play next song
         success = await self.play_next_song(guild_id)
-
+        
         if success:
-            logger.info(
-                f"✅ Successfully started playback of: {next_song.display_name}"
-            )
+            logger.info(f"✅ Started playback: {next_song.display_name}")
         else:
-            logger.error(
-                f"❌ Failed to play next song after skip: {next_song.display_name}"
-            )
+            logger.error(f"❌ Failed to play: {next_song.display_name}")
 
         return success
 
-    async def _on_song_finished(self, song: Song):
+    async def _on_song_finished(self, song: Song) -> None:
         """Called when a song finishes playing"""
         guild_id = song.guild_id
         if not guild_id:
@@ -286,38 +240,28 @@ class AudioService:
 
         logger.info(f"Song finished: {song.display_name} in guild {guild_id}")
 
-        # Auto-play next song
         queue_manager = self._queue_managers.get(guild_id)
         if not queue_manager:
             logger.warning(f"No queue manager found for guild {guild_id}")
             return
 
-        # Get current position (tuple format: (current, total))
         current_pos, total_songs = queue_manager.position
 
-        # Check if there are more songs after current position
+        # Check if there are more songs
         if current_pos < total_songs:
-            logger.info(
-                f"Auto-playing next song (position {current_pos}/{total_songs})"
-            )
-            # Advance to next song and play
+            logger.info(f"Auto-playing next song ({current_pos}/{total_songs})")
             await queue_manager.next_song()
             await self.play_next_song(guild_id)
         else:
-            # Reached end of queue - check repeat mode
+            # Handle queue end based on repeat mode
             if queue_manager._repeat_mode == "queue" and total_songs > 0:
-                logger.info(
-                    f"Queue finished, repeating from start (repeat mode: {queue_manager._repeat_mode})"
-                )
-                # Advance will reset to position 0 in next_song()
+                logger.info(f"Queue finished, repeating from start")
                 await queue_manager.next_song()
                 await self.play_next_song(guild_id)
             else:
-                logger.info(
-                    f"Reached end of queue in guild {guild_id} (played {total_songs} songs, repeat: {queue_manager._repeat_mode})"
-                )
+                logger.info(f"Reached end of queue (repeat: {queue_manager._repeat_mode})")
 
-    async def _on_playback_error(self, error, song: Song):
+    async def _on_playback_error(self, error: Exception, song: Song) -> None:
         """Called when playback error occurs"""
         guild_id = song.guild_id
         logger.error(f"Playback error in guild {guild_id}: {error}")
