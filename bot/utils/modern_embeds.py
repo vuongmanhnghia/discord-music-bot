@@ -374,7 +374,7 @@ def create_skip_embed(song_title: str) -> discord.Embed:
         title="Đã bỏ qua bài hát",
         description=f"**{song_title}**",
         details={"Tiếp theo": "Đang chuyển sang bài tiếp theo..."},
-        footer="Dùng /nowplaying để xem bài đang phát",
+        footer="Dùng /now để xem bài đang phát",
     )
 
 
@@ -459,9 +459,35 @@ def create_already_playing_embed() -> discord.Embed:
         title="Nhạc đang phát rồi",
         description="Nhạc hiện đang được phát.",
         info_fields={
-            "Gợi ý": "▸ `/pause` - Tạm dừng\n▸ `/skip` - Bỏ qua bài\n▸ `/nowplaying` - Xem thông tin bài hát"
+            "Gợi ý": "▸ `/pause` - Tạm dừng\n▸ `/skip` - Bỏ qua bài\n▸ `/now` - Xem thông tin bài hát"
         },
         footer="Nhạc đang phát...",
+    )
+
+
+def create_shuffle_embed(total_songs: int) -> discord.Embed:
+    """Create embed for shuffle queue"""
+    return ModernEmbedFactory.create_success_embed(
+        title="🔀 Đã xáo trộn queue",
+        description=f"Queue đã được shuffle với **{total_songs}** bài hát.",
+        details={
+            "Lưu ý": "Bài đang phát không bị ảnh hưởng",
+            "Tiếp theo": "Các bài tiếp theo đã được sắp xếp ngẫu nhiên",
+        },
+        footer="Dùng /queue để xem thứ tự mới",
+    )
+
+
+def create_shuffle_failed_embed(reason: str) -> discord.Embed:
+    """Create embed for shuffle failed"""
+    return ModernEmbedFactory.create_error_embed(
+        title="Không thể shuffle queue",
+        description=reason,
+        suggestions=[
+            "Thêm nhiều bài hát vào queue bằng `/play` hoặc `/aplay`",
+            "Kiểm tra queue hiện tại bằng `/queue`",
+        ],
+        footer="Cần ít nhất 2 bài trong queue để shuffle",
     )
 
 
@@ -723,7 +749,7 @@ def create_help_embed(bot_name: str, version: str = "1.0.0") -> discord.Embed:
         "> **`/skip`           - Bỏ qua bài hiện tại**",
         "> **`/stop`           - Dừng và xóa queue**",
         "> **`/volume <0-100>` - Đặt âm lượng**",
-        "> **`/nowplaying`     - Hiển thị bài đang phát**",
+        "> **`/now`     - Hiển thị bài đang phát**",
         "> **`/repeat <mode>`  - Đặt chế độ lặp**",
     ]
     embed.add_field(name="Phát nhạc", value="\n".join(playback_cmds), inline=False)

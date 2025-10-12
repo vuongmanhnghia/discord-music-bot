@@ -187,13 +187,13 @@ class PaginationHelper:
 
                 status = song.get("status", "unknown")
                 status_indicators = {
-                    "ready": "▸",
+                    "ready": "",
                     "processing": "○",
                     "failed": "×",
                     "pending": "·",
                 }.get(status, "?")
 
-                songs_text += f"`{actual_pos}.` {status_indicators} **{title}**\n"
+                songs_text += f"{actual_pos}. {status_indicators} **{title}**\n"
 
             embed.add_field(
                 name=f"Danh sách ({len(songs)} bài)",
@@ -202,7 +202,7 @@ class PaginationHelper:
             )
 
         embed.set_footer(
-            text=f"Trang {page_num}/{total_pages} • Tổng cộng {queue_position[1]} bài"
+            text=f"Trang {page_num}/{total_pages} • Tổng {queue_position[1]} bài"
         )
         return embed
 

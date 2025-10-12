@@ -1,6 +1,6 @@
 """
 Playback commands for the music bot
-Handles play, skip, pause, resume, stop, volume, nowplaying, repeat commands
+Handles play, skip, pause, resume, stop, volume, now, repeat commands
 """
 
 from typing import Optional
@@ -22,6 +22,8 @@ from ..utils.modern_embeds import (
     create_repeat_mode_embed,
     create_already_paused_embed,
     create_already_playing_embed,
+    create_shuffle_embed,
+    create_shuffle_failed_embed,
 )
 
 from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
@@ -193,7 +195,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
                 # Convert volume from 0-100 to 0.0-1.0 for audio player
                 volume_float = volume / 100.0
-                
+
                 success, message = await playback_service.set_volume(
                     interaction.guild.id, volume_float
                 )
@@ -203,13 +205,14 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     await interaction.response.send_message(embed=embed)
                 else:
                     await interaction.response.send_message(
-                        f"{ERROR_MESSAGES['cannot_set_volume']}\n{message}", ephemeral=True
+                        f"{ERROR_MESSAGES['cannot_set_volume']}\n{message}",
+                        ephemeral=True,
                     )
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "volume")
 
-        @self.bot.tree.command(name="nowplaying", description="Hiển thị bài đang phát")
+        @self.bot.tree.command(name="now", description="Hiển thị bài đang phát")
         async def now_playing(interaction: discord.Interaction):
             """🎵 Show currently playing song"""
             try:
@@ -249,7 +252,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     )
 
             except Exception as e:
-                await self.handle_command_error(interaction, e, "nowplaying")
+                await self.handle_command_error(interaction, e, "now")
 
         @self.bot.tree.command(name="repeat", description="Set repeat mode")
         @app_commands.describe(
@@ -285,6 +288,61 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "repeat")
+
+        @self.bot.tree.command(name="shuffle", description="Xáo trộn thứ tự queue")
+        async def shuffle_queue(interaction: discord.Interaction):
+            """🔀 Shuffle the current queue"""
+            try:
+                if not interaction.guild:
+                    await interaction.response.send_message(
+                        ERROR_MESSAGES["guild_only"], ephemeral=True
+                    )
+                    return
+
+                if not await self.ensure_same_voice_channel(interaction):
+                    return
+
+                queue_manager = self.get_queue_manager(interaction.guild.id)
+                if not queue_manager:
+                    embed = create_shuffle_failed_embed(
+                        "Không có queue nào đang hoạt động"
+                    )
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                    return
+
+                # Check if there are enough songs to shuffle
+                total_songs = queue_manager.queue_size
+                upcoming_songs = len(queue_manager.get_upcoming(limit=1000))
+
+                if total_songs <= 1:
+                    embed = create_shuffle_failed_embed(
+                        "Queue chỉ có 1 bài hoặc rỗng, không thể shuffle"
+                    )
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                    return
+
+                if upcoming_songs == 0:
+                    embed = create_shuffle_failed_embed(
+                        "Không có bài nào tiếp theo để shuffle (chỉ còn bài đang phát)"
+                    )
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                    return
+
+                # Perform shuffle
+                success = await queue_manager.shuffle()
+
+                if success:
+                    embed = create_shuffle_embed(upcoming_songs)
+                    await interaction.response.send_message(embed=embed)
+                    logger.info(
+                        f"Shuffled queue in guild {interaction.guild.id} - {upcoming_songs} songs"
+                    )
+                else:
+                    embed = create_shuffle_failed_embed("Không thể shuffle queue")
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+            except Exception as e:
+                await self.handle_command_error(interaction, e, "shuffle")
 
     async def _handle_play_with_query(
         self, interaction: discord.Interaction, query: str

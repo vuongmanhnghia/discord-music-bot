@@ -259,7 +259,7 @@ class AudioService:
                 f"Stopping current playback (was playing: {audio_player.is_playing})"
             )
             audio_player.stop()
-            await asyncio.sleep(0.1)  # Small delay to ensure stop is processed
+            await asyncio.sleep(0.5)  # Small delay to ensure stop is processed
         else:
             logger.warning(f"No audio player found for guild {guild_id}")
 
