@@ -8,15 +8,12 @@ from discord import app_commands
 
 from . import BaseCommandHandler
 from ..config.config import config
+from ..utils.youtube import YouTubePlaylistHandler
 
 from ..config.constants import ERROR_MESSAGES
 from ..utils.discord_ui import (
     create_help_embed,
-    EmbedFactory,
 )
-
-from ..services.playlist_switch import playlist_switch_manager
-from ..utils.discord_ui import create_switch_status_embed
 
 
 class AdvancedCommandHandler(BaseCommandHandler):
@@ -56,8 +53,6 @@ class AdvancedCommandHandler(BaseCommandHandler):
                 if not await self.ensure_user_in_voice(interaction):
                     return
 
-                from ..utils.youtube import YouTubePlaylistHandler
-
                 # Check if it's a valid playlist URL
                 if not YouTubePlaylistHandler.is_playlist_url(url):
                     await interaction.response.send_message(
@@ -92,88 +87,3 @@ class AdvancedCommandHandler(BaseCommandHandler):
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "aplay")
-
-        @self.bot.tree.command(
-            name="recovery", description="Kiểm tra trạng thái auto-recovery system"
-        )
-        async def recovery_status(interaction: discord.Interaction):
-            """🛠️ Check auto-recovery status"""
-            try:
-                from ..services.auto_recovery import auto_recovery_service
-
-                stats = auto_recovery_service.get_recovery_stats()
-                embed = EmbedFactory.info(stats)
-                await interaction.response.send_message(embed=embed)
-
-            except Exception as e:
-                await self.handle_command_error(interaction, e, "recovery")
-
-        @self.bot.tree.command(
-            name="stream", description="Kiểm tra trạng thái stream URL refresh system"
-        )
-        async def stream_status(interaction: discord.Interaction):
-            """🔄 Check stream refresh status"""
-            try:
-                from ..services.stream_refresh import stream_refresh_service
-
-                stats = stream_refresh_service.get_refresh_stats()
-                embed = EmbedFactory.info(stats)
-                await interaction.response.send_message(embed=embed)
-
-            except Exception as e:
-                await self.handle_command_error(interaction, e, "stream")
-
-        @self.bot.tree.command(
-            name="switch", description="Kiểm tra trạng thái playlist switch system"
-        )
-        @app_commands.describe(action="Action: status, clear, settings")
-        async def switch_status(
-            interaction: discord.Interaction, action: str = "status"
-        ):
-            """🔄 Kiểm tra trạng thái playlist switch system"""
-            try:
-                if not interaction.guild:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["guild_only"], ephemeral=True
-                    )
-                    return
-
-                await interaction.response.defer()
-
-                if action == "status":
-                    # Show current switch status
-
-                    guild_id = interaction.guild.id
-                    is_switching = playlist_switch_manager.is_switching(guild_id)
-                    switching_to = playlist_switch_manager.get_switching_playlist(
-                        guild_id
-                    )
-
-                    # Get current active playlist
-                    active_playlist = getattr(self.bot, "active_playlists", {}).get(
-                        guild_id
-                    )
-
-                    # Use standardized embed function
-                    embed = create_switch_status_embed(
-                        is_switching=is_switching,
-                        switching_to=switching_to,
-                        active_playlist=active_playlist,
-                    )
-
-                    await interaction.followup.send(embed=embed)
-
-                elif action == "clear":
-                    # Note: Switch locks auto-clear after switch completes
-                    # This action is kept for compatibility but does nothing
-                    await interaction.followup.send(
-                        "ℹ️ Switch locks auto-clear automatically. No manual action needed."
-                    )
-
-                else:
-                    await interaction.followup.send(
-                        "❌ Invalid action. Use: status, clear"
-                    )
-
-            except Exception as e:
-                await self.handle_command_error(interaction, e, "switch")

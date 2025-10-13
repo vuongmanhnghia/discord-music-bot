@@ -3,6 +3,7 @@ Playlist commands for the music bot
 Handles playlist creation, management, and operations with pagination
 """
 
+import re
 import asyncio
 from typing import Optional
 import discord
@@ -10,13 +11,17 @@ from discord import app_commands
 
 from . import BaseCommandHandler
 from ..pkg.logger import logger
+from ..domain.entities.song import Song
 from ..services.playback import playback_service
+from ..services.playlist_switch import playlist_switch_manager
 from ..domain.valueobjects.source_type import SourceType
 from ..utils.youtube import YouTubePlaylistHandler
 from ..utils.core import Validator
+from ..config.constants import ERROR_MESSAGES
 from ..utils.discord_ui import (
     Paginator,
     send_paginated_embed,
+    create_list_embed,
     create_playlist_created_embed,
     create_playlist_deleted_embed,
     create_song_removed_from_playlist_embed,
@@ -25,8 +30,6 @@ from ..utils.discord_ui import (
     create_playlist_already_exists_embed,
     EmbedFactory,
 )
-
-from ..config.constants import ERROR_MESSAGES
 
 
 class PlaylistCommandHandler(BaseCommandHandler):
@@ -75,7 +78,6 @@ class PlaylistCommandHandler(BaseCommandHandler):
                 await interaction.response.send_message(embed=embed)
 
                 # Perform safe playlist switch
-                from ..services.playlist_switch import playlist_switch_manager
 
                 switch_success, switch_message = (
                     await playlist_switch_manager.safe_playlist_switch(
@@ -301,7 +303,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
         async def remove_from_playlist(
             interaction: discord.Interaction, playlist_name: str, song_index: int
         ):
-            """🗑️ Remove song from playlist"""
+            """Remove song from playlist"""
             try:
                 if not self.playlist_service:
                     await interaction.response.send_message(
@@ -369,13 +371,13 @@ class PlaylistCommandHandler(BaseCommandHandler):
                 playlist_items = []
                 for i, playlist_name in enumerate(playlists, 1):
                     indicator = "▸" if playlist_name == active_playlist else "○"
-                    playlist_items.append(f"{indicator} **{playlist_name}**")
+                    playlist_items.append(f"**{indicator} {playlist_name}**")
 
-                embed = EmbedFactory.create_list_embed(
+                embed = create_list_embed(
                     title="Danh sách Playlist",
-                    description="Các playlist đã tạo:",
+                    description="",
                     items=playlist_items,
-                    footer="Dùng /playlist show [tên] để xem chi tiết playlist",
+                    footer="Dùng /playlist [tên] để xem chi tiết playlist",
                 )
 
                 if active_playlist:
@@ -465,7 +467,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
         @self.bot.tree.command(name="delete", description="Xóa playlist")
         @app_commands.describe(name="Tên playlist cần xóa")
         async def delete_playlist(interaction: discord.Interaction, name: str):
-            """🗑️ Delete playlist"""
+            """Delete playlist"""
             try:
                 if not self.playlist_service:
                     await interaction.response.send_message(
@@ -483,7 +485,6 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     # Extract song count from message if available
                     song_count = 0
                     # Try to parse from message like "Đã xóa playlist 'name' (X bài hát)"
-                    import re
 
                     match = re.search(r"\((\d+)\s+bài", message)
                     if match:
@@ -652,8 +653,6 @@ class PlaylistCommandHandler(BaseCommandHandler):
             for i, video_url in enumerate(video_urls[:50]):  # Limit to 50 videos
                 try:
                     # Create and process song to get metadata
-                    from ..domain.entities.song import Song
-                    from ..services.playback import playback_service
 
                     # Create song object
                     song = Song(
@@ -856,5 +855,3 @@ class PlaylistCommandHandler(BaseCommandHandler):
             )
 
         await interaction.edit_original_response(embed=final_embed)
-
-    # Helper methods removed - now using PaginationHelper

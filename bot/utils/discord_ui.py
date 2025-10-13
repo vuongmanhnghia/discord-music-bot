@@ -173,7 +173,7 @@ class PaginationView(View):
             embed=self.pages[self.current_page], view=self
         )
 
-    @discord.ui.button(emoji="🗑️", style=discord.ButtonStyle.danger)
+    @discord.ui.button(emoji="✖", style=discord.ButtonStyle.danger)
     async def delete_message(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
         if self.message:
@@ -247,13 +247,13 @@ class Paginator:
         current_song: Optional[dict] = None,
         queue_position: tuple = (0, 0),
     ) -> discord.Embed:
-        embed = discord.Embed(title="Hàng đợi phát nhạc", color=discord.Color.blue())
+        embed = discord.Embed(title="Queue", color=discord.Color.blue())
 
         if current_song:
             current_title = current_song.get("title", "Unknown")
             embed.add_field(
                 name="Đang phát",
-                value=f"**{current_title}**\n`Vị trí: {queue_position[0]}/{queue_position[1]}`",
+                value=f"> **{current_title}**\n> Vị trí: {queue_position[0]}/{queue_position[1]}",
                 inline=False,
             )
 
@@ -272,7 +272,7 @@ class Paginator:
                     "failed": "×",
                     "pending": "·",
                 }.get(status, "?")
-                songs_text += f"**{actual_pos}. {status_indicators} {title}**\n"
+                songs_text += f"{actual_pos}. **{status_indicators} {title}**\n"
 
             embed.add_field(
                 name=f"Danh sách ({len(songs)} bài)",
@@ -307,12 +307,12 @@ class Paginator:
                 source = song.get("source_type", "Unknown")
                 if len(title) > 50:
                     title = title[:47] + "..."
-                songs_text += f"`{actual_pos}.` **{title}** `({source})`\n"
+                songs_text += f"> {actual_pos}. **{title}** `({source})`\n"
 
             embed.add_field(name="Nội dung", value=songs_text or "Trống", inline=False)
 
         embed.set_footer(
-            text=f"Trang {page_num}/{total_pages} • Tổng cộng {total_songs} bài"
+            text=f"Page {page_num}/{total_pages} • Tổng số {total_songs} bài"
         )
         return embed
 
@@ -794,12 +794,50 @@ def create_empty_queue_embed() -> discord.Embed:
     )
 
 
+def create_list_embed(
+    title: str,
+    description: str,
+    items: List[str],
+    footer: Optional[str] = None,
+    color: discord.Color = discord.Color.blue(),
+) -> discord.Embed:
+    """
+    Create an embed with a list of items
+
+    Args:
+        title: List title
+        description: List description
+        items: List of items to display
+        footer: Optional footer
+        color: Embed color (default: blue)
+    """
+    # Build fields dict
+    fields = {}
+
+    if items:
+        items_text = "\n".join([f"{item}" for item in items])
+        fields[f"Tổng: {len(items)} Playlist"] = items_text[
+            :1024
+        ]  # Discord field value limit
+    else:
+        fields["Danh sách trống"] = "Không có mục nào"
+
+    # Use EmbedFactory
+    return EmbedFactory.info(
+        title=title,
+        description=description,
+        info_fields=fields,
+        footer=footer,
+        color=color,
+    )
+
+
 def create_playlist_created_embed(playlist_name: str) -> discord.Embed:
     return EmbedFactory.success(
-        "Playlist đã tạo",
+        "Create playlist",
         f"Playlist **{playlist_name}** đã được tạo thành công!",
         details={
-            "Tiếp theo": f"▸ Thêm bài hát bằng `/playlist add {playlist_name} [URL]`\n▸ Tải playlist bằng `/playlist load {playlist_name}`"
+            "Tiếp theo": f"▸ Thêm bài hát bằng `/add {playlist_name} [URL]`\n▸ Sử dụng playlist bằng `/use {playlist_name}`"
         },
         footer="Playlist trống, hãy thêm bài hát vào!",
     )
@@ -807,7 +845,7 @@ def create_playlist_created_embed(playlist_name: str) -> discord.Embed:
 
 def create_playlist_deleted_embed(playlist_name: str, song_count: int) -> discord.Embed:
     return EmbedFactory.success(
-        "Playlist đã xóa",
+        "Delete playlist",
         f"Playlist **{playlist_name}** ({song_count} bài) đã được xóa.",
         footer="Playlist đã được xóa vĩnh viễn",
     )
@@ -1005,7 +1043,7 @@ def create_leave_success_embed() -> discord.Embed:
 
 
 # ============================================================================
-# Advanced Commands - Help, Recovery, Stream, Switch
+# Advanced Commands - Help
 # ============================================================================
 
 
@@ -1059,171 +1097,3 @@ def create_help_embed(bot_name: str, version: str = "1.0.0") -> discord.Embed:
     embed.set_footer(text=f"{bot_name} - version {version}")
 
     return embed
-
-
-def create_recovery_status_embed(stats: Dict[str, Any]) -> discord.Embed:
-    """Create embed for auto-recovery system status"""
-    is_enabled = stats.get("auto_recovery_enabled", True)
-    color = discord.Color.green() if is_enabled else discord.Color.red()
-
-    # Build fields
-    fields = {}
-
-    # Status
-    status = "🟢 Enabled" if is_enabled else "🔴 Disabled"
-    fields["Trạng thái"] = status
-
-    # Recovery count
-    recovery_count = stats.get("recovery_count", 0)
-    fields["Số lần recovery"] = f"{recovery_count} lần"
-
-    # Last recovery
-    last_recovery_time = stats.get("last_recovery_time", 0)
-    if last_recovery_time > 0:
-        import datetime
-
-        last_recovery = datetime.datetime.fromtimestamp(last_recovery_time)
-        fields["Recovery cuối"] = f"{last_recovery.strftime('%H:%M:%S %d/%m')}"
-    else:
-        fields["Recovery cuối"] = "Chưa có"
-
-    # Cooldown
-    cooldown_remaining = stats.get("cooldown_remaining", 0)
-    if cooldown_remaining > 0:
-        fields["Cooldown còn lại"] = f"{cooldown_remaining:.0f}s"
-    else:
-        fields["Cooldown"] = "✅ Sẵn sàng"
-
-    # Features info
-    features = [
-        "▸ Tự động clear cache khi gặp lỗi 403",
-        "▸ Cập nhật yt-dlp tự động",
-        "▸ Bảo trì định kỳ mỗi 6 giờ",
-        "▸ Retry với format khác nhau",
-        "▸ Cooldown 5 phút giữa các lần recovery",
-    ]
-    fields["Tính năng"] = "\n".join(features)
-
-    # Create embed using factory
-    embed = EmbedFactory.info(
-        title="🛠️ Auto-Recovery System Status",
-        description="Hệ thống tự động xử lý lỗi và bảo trì",
-        info_fields=fields,
-        footer="Auto-recovery giúp bot tự động xử lý lỗi YouTube",
-        color=color,
-    )
-
-    return embed
-
-
-def create_stream_status_embed(stats: Dict[str, Any]) -> discord.Embed:
-    """Create embed for stream URL refresh status"""
-    is_enabled = stats.get("enabled", True)
-    color = discord.Color.green() if is_enabled else discord.Color.red()
-
-    # Build fields
-    fields = {}
-
-    # Status
-    status = "🟢 Enabled" if is_enabled else "🔴 Disabled"
-    fields["Trạng thái"] = status
-
-    # Refresh count
-    refresh_count = stats.get("refresh_count", 0)
-    fields["Số lần refresh"] = f"{refresh_count} lần"
-
-    # Cached URLs
-    cached_urls = stats.get("cached_urls", 0)
-    fields["URLs đã cache"] = f"{cached_urls} URLs"
-
-    # Last refresh
-    last_refresh_time = stats.get("last_refresh_time", 0)
-    if last_refresh_time > 0:
-        import datetime
-
-        last_refresh = datetime.datetime.fromtimestamp(last_refresh_time)
-        fields["Refresh cuối"] = f"{last_refresh.strftime('%H:%M:%S %d/%m')}"
-    else:
-        fields["Refresh cuối"] = "Chưa có"
-
-    # Time since last refresh
-    time_since = stats.get("time_since_last_refresh", 0)
-    if time_since > 0:
-        hours = time_since / 3600
-        fields["Thời gian từ lần cuối"] = f"{hours:.1f} giờ"
-
-    # Features info
-    features = [
-        "▸ Tự động refresh URL hết hạn (5 giờ)",
-        "▸ Proactive refresh mỗi 6 giờ",
-        "▸ Retry khi URL fail",
-        "▸ Cache URL để tối ưu performance",
-        "▸ Hỗ trợ bot hoạt động 24/7",
-    ]
-    fields["Tính năng"] = "\n".join(features)
-
-    # Create embed using factory
-    embed = EmbedFactory.info(
-        title="🔄 Stream URL Refresh Status",
-        description="Hệ thống tự động refresh stream URL cho bot 24/7",
-        info_fields=fields,
-        footer="Stream refresh đảm bảo bot hoạt động liên tục",
-        color=color,
-    )
-
-    return embed
-
-
-def create_switch_status_embed(
-    is_switching: bool,
-    switching_to: Optional[str] = None,
-    active_playlist: Optional[str] = None,
-) -> discord.Embed:
-    """Create embed for playlist switch status"""
-    color = discord.Color.orange() if is_switching else discord.Color.green()
-
-    # Build fields
-    fields = {}
-
-    # Switch status
-    status = "⏳ Switching..." if is_switching else "✅ Ready"
-    fields["Switch Status"] = status
-
-    # Switching to
-    if switching_to:
-        fields["Switching To"] = f"**{switching_to}**"
-
-    # Active playlist
-    if active_playlist:
-        fields["Active Playlist"] = f"**{active_playlist}**"
-
-    # Info
-    info = [
-        "▸ Switch locks auto-clear sau khi hoàn tất",
-        "▸ Không cần thao tác thủ công",
-        "▸ Hệ thống tự động quản lý",
-    ]
-    fields["Thông tin"] = "\n".join(info)
-
-    # Create embed using factory
-    embed = EmbedFactory.info(
-        title="🔄 Playlist Switch Status",
-        description="Trạng thái chuyển đổi playlist",
-        info_fields=fields,
-        footer="Dùng /use <playlist> để chuyển playlist",
-        color=color,
-    )
-
-    return embed
-
-
-def create_switch_auto_clear_embed() -> discord.Embed:
-    """Create embed for switch auto-clear info"""
-    return EmbedFactory.info(
-        title="ℹ️ Switch Auto-Clear",
-        description="Switch locks tự động clear khi playlist switch hoàn tất.",
-        info_fields={
-            "Thông tin": "▸ Không cần thao tác thủ công\n▸ Hệ thống tự động quản lý locks\n▸ Đảm bảo không bị deadlock"
-        },
-        footer="Switch system hoạt động tự động",
-    )

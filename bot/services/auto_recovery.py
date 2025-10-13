@@ -302,17 +302,6 @@ class AutoRecoveryService:
         self._auto_recovery_enabled = True
         logger.info("🔓 Auto-recovery enabled")
 
-    def get_recovery_stats(self) -> Dict:
-        """Get recovery statistics"""
-        return {
-            "recovery_count": self._recovery_count,
-            "last_recovery_time": self._last_recovery_time,
-            "auto_recovery_enabled": self._auto_recovery_enabled,
-            "cooldown_remaining": max(
-                0, self._recovery_cooldown - (time.time() - self._last_recovery_time)
-            ),
-        }
-
 
 # Global auto recovery service instance
 auto_recovery_service = AutoRecoveryService()

@@ -109,22 +109,6 @@ class StreamRefreshService:
 
         return refreshed_count
 
-    def get_refresh_stats(self) -> dict:
-        """Get refresh statistics"""
-        current_time = time.time()
-
-        return {
-            "enabled": self.enabled,
-            "refresh_count": self.refresh_count,
-            "last_refresh_time": self.last_refresh_time,
-            "cached_urls": len(self.url_cache),
-            "time_since_last_refresh": (
-                current_time - self.last_refresh_time
-                if self.last_refresh_time > 0
-                else 0
-            ),
-        }
-
     def enable_refresh(self):
         """Enable stream URL refresh"""
         self.enabled = True
