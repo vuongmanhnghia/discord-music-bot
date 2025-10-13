@@ -4,7 +4,6 @@ Implements complete playback flow with proper separation of concerns
 """
 
 import asyncio
-from typing import Optional
 
 import discord
 from discord.ext import commands
@@ -33,7 +32,7 @@ from .commands.advanced_commands import AdvancedCommandHandler
 
 class MusicBot(commands.Bot):
     """Modern Music Bot with intelligent processing"""
-    
+
     def __init__(self):
         # Discord intents
         intents = discord.Intents.default()
@@ -78,7 +77,9 @@ class MusicBot(commands.Bot):
 
             # Start auto-recovery service
             auto_recovery_service.enable_auto_recovery()
-            asyncio.create_task(MaintenanceScheduler.run_scheduled_maintenance(self.guilds))
+            asyncio.create_task(
+                MaintenanceScheduler.run_scheduled_maintenance(self.guilds)
+            )
             logger.info("🔧 Auto-recovery service started")
 
             # Initialize message update manager
@@ -114,7 +115,7 @@ class MusicBot(commands.Bot):
         """Bot ready event"""
         logger.info(f"🎵 {config.BOT_NAME} is ready!")
         logger.info(f"📊 Connected to {len(self.guilds)} guilds")
-        
+
         if self.user:
             logger.info(f"🎯 Bot ID: {self.user.id}")
 
@@ -162,7 +163,9 @@ class MusicBot(commands.Bot):
         elif isinstance(error, commands.CommandOnCooldown):
             embed = ErrorEmbedFactory.create_cooldown_embed(error.retry_after)
         elif isinstance(error, discord.HTTPException) and error.status == 429:
-            retry_after = getattr(error, "retry_after", None) or error.response.headers.get("Retry-After", "60")
+            retry_after = getattr(
+                error, "retry_after", None
+            ) or error.response.headers.get("Retry-After", "60")
             embed = ErrorEmbedFactory.create_rate_limit_embed(float(retry_after))
         else:
             embed = ErrorEmbedFactory.create_error_embed(
@@ -202,17 +205,21 @@ class MusicBot(commands.Bot):
 
         # Handle based on 24/7 mode
         if config.STAY_CONNECTED_24_7:
-            logger.info(f"Bot alone in {member.guild.name}, staying connected (24/7 mode)")
+            logger.info(
+                f"Bot alone in {member.guild.name}, staying connected (24/7 mode)"
+            )
             return
-        
+
         # Auto-disconnect after delay
         logger.info(f"Bot alone in {member.guild.name}, will disconnect")
-        await VoiceStateHelper.handle_auto_disconnect(voice_client, member.guild.id, delay=60)
+        await VoiceStateHelper.handle_auto_disconnect(
+            voice_client, member.guild.id, delay=60
+        )
 
     def _setup_commands(self):
         """Setup all bot slash commands using command registry"""
         registry = CommandRegistry(self)
-        
+
         # Register all command handlers
         for handler in [
             BasicCommandHandler,
@@ -222,7 +229,7 @@ class MusicBot(commands.Bot):
             AdvancedCommandHandler,
         ]:
             registry.register_handler(handler)
-        
+
         # Setup all commands
         registry.setup_all_commands()
 

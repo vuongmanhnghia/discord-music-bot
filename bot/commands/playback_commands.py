@@ -17,7 +17,6 @@ from ..utils.discord_ui import (
     create_pause_embed,
     create_resume_embed,
     create_stop_embed,
-    create_skip_embed,
     create_volume_embed,
     create_repeat_mode_embed,
     create_already_paused_embed,
@@ -26,7 +25,7 @@ from ..utils.discord_ui import (
     create_shuffle_failed_embed,
 )
 
-from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
+from ..config.constants import ERROR_MESSAGES
 
 
 class PlaybackCommandHandler(BaseCommandHandler):

@@ -2,7 +2,7 @@ import platform
 import os
 import asyncio
 import subprocess
-from typing import Optional, Callable, Union
+from typing import Optional, Callable
 import discord
 from discord import FFmpegPCMAudio, PCMVolumeTransformer
 

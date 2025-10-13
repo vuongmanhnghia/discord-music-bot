@@ -5,9 +5,8 @@ Provides intelligent caching and faster song processing
 
 import asyncio
 import time
-from typing import Dict, Any, Optional, Tuple
+from typing import Tuple
 import yt_dlp
-import json
 
 from ..utils.cache import SmartCache
 from ..domain.valueobjects.source_type import SourceType

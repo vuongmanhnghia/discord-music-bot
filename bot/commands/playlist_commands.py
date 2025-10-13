@@ -15,17 +15,18 @@ from ..domain.valueobjects.source_type import SourceType
 from ..utils.youtube import YouTubePlaylistHandler
 from ..utils.core import Validator
 from ..utils.discord_ui import (
-    Paginator, send_paginated_embed,
+    Paginator,
+    send_paginated_embed,
     create_playlist_created_embed,
     create_playlist_deleted_embed,
-    create_song_added_to_playlist_embed,
     create_song_removed_from_playlist_embed,
-    create_playlist_loaded_embed,
     create_no_playlists_found_embed,
+    create_playlist_not_found_embed,
+    create_playlist_already_exists_embed,
     EmbedFactory,
 )
 
-from ..config.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
+from ..config.constants import ERROR_MESSAGES
 
 
 class PlaylistCommandHandler(BaseCommandHandler):

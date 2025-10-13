@@ -275,34 +275,28 @@ class PlaybackService:
                     None,
                 )
 
-            # Step 2: Add to queue immediately (before processing)
+            # Step 2: Verify queue manager exists
             queue_manager = audio_service.get_queue_manager(guild_id)
             if not queue_manager:
                 logger.error(f"No queue manager found for guild {guild_id}")
                 return (False, "Lỗi hệ thống: Không tìm thấy queue manager", None, None)
 
-            position = await queue_manager.add_song(song)
-
-            # Step 4: Submit for async processing with enhanced callback
+            # Step 3: Submit for async processing with callback that adds to queue AFTER completion
             callback = None
             if interaction:
                 from ..utils.discord_ui import EnhancedProgressCallback
 
                 callback = EnhancedProgressCallback(interaction)
             else:
-                callback = self._create_async_callback(guild_id)
+                callback = self._create_async_callback_with_queue(guild_id, auto_play)
 
             task_id = await self.async_processor.submit_task(
                 song=song, priority=priority, callback=callback
             )
 
-            # Step 5: Start playback if not already playing and auto_play is True
-            if auto_play and not audio_service.is_playing(guild_id):
-                await self._try_start_playback(guild_id)
-
             return (
                 True,
-                f"🔄 **{song.display_name}** đã được thêm vào hàng đợi ・ *(Vị trí: {position})* ・ *(Đang xử lý...)*",
+                f"🔄 **{song.display_name}** đang được xử lý...",
                 song,
                 task_id,
             )
@@ -311,27 +305,39 @@ class PlaybackService:
             logger.error(f"Error processing async play request '{user_input}': {e}")
             return (False, f"Lỗi: {str(e)}", None, None)
 
-    def _create_async_callback(self, guild_id: int):
-        """Create simple callback for async processing completion"""
+    def _create_async_callback_with_queue(self, guild_id: int, auto_play: bool = True):
+        """Create callback that adds song to queue AFTER processing completes"""
 
         async def callback(task):
             try:
                 if task.status.value == "completed":
-                    logger.info(f"✅ Async processing completed for task {task.id}")
+                    logger.info(
+                        f"✅ Async processing completed for task {task.id}: {task.song.display_name}"
+                    )
 
-                    # Try to start playbook if not already playing
-                    await self._try_start_playback(guild_id)
+                    # Add to queue ONLY after successful processing
+                    queue_manager = audio_service.get_queue_manager(guild_id)
+                    if queue_manager:
+                        position = await queue_manager.add_song(task.song)
+                        logger.info(
+                            f"📝 Added processed song to queue at position {position}: {task.song.display_name}"
+                        )
+
+                        # Try to start playback if not already playing
+                        if auto_play and not audio_service.is_playing(guild_id):
+                            await self._try_start_playback(guild_id)
+                    else:
+                        logger.error(f"❌ No queue manager found for guild {guild_id}")
 
                 elif task.status.value == "failed":
                     logger.error(
                         f"❌ Async processing failed for task {task.id}: {task.error_message}"
                     )
-
-                    # Mark song as failed
-                    task.song.mark_failed(task.error_message or "Processing failed")
+                    # Don't add failed songs to queue
+                    logger.info(f"⏭️ Skipping failed song: {task.song.display_name}")
 
             except Exception as e:
-                logger.error(f"Error in async callback: {e}")
+                logger.error(f"Error in async callback with queue: {e}")
 
         return callback
 
@@ -535,11 +541,11 @@ class PlaybackService:
     async def set_volume(self, guild_id: int, volume: float) -> tuple[bool, str]:
         """
         Set playback volume
-        
+
         Args:
             guild_id: Guild ID
             volume: Volume level as float (0.0 to 1.0)
-            
+
         Returns:
             (success, message) tuple
         """
@@ -630,7 +636,7 @@ class PlaybackService:
             if not success:
                 logger.error(f"Failed to load playlist '{playlist_name}'")
                 return False
-            
+
             # Empty playlist is OK - just set as active without loading songs
             if not playlist_songs:
                 logger.info(
@@ -651,7 +657,10 @@ class PlaybackService:
                 await queue_manager.clear()
 
             # Add songs from playlist to queue with smart processing
-            added_count = 0
+            processed_count = 0  # Songs processed immediately (in queue)
+            queued_for_processing = (
+                0  # Songs queued for async processing (not in queue yet)
+            )
             immediate_process_count = min(
                 3, len(playlist_songs)
             )  # Process first 3 songs immediately
@@ -674,7 +683,7 @@ class PlaybackService:
                             auto_play=(idx == 0),  # Only auto-play the first song
                         )
                         if success:
-                            added_count += 1
+                            processed_count += 1
                             logger.info(
                                 f"✅ Song {idx+1} ready for playback: {song.display_name if song else 'Unknown'}"
                             )
@@ -696,27 +705,30 @@ class PlaybackService:
                             )
                         )
                         if success_async:
-                            added_count += 1
+                            queued_for_processing += 1
                             logger.info(
-                                f"📝 Song {idx+1} queued with task ID: {task_id}"
+                                f"📝 Song {idx+1} submitted for processing with task ID: {task_id}"
                             )
                         else:
                             logger.warning(
-                                f"⚠️ Failed to queue song {idx+1} for async processing"
+                                f"⚠️ Failed to submit song {idx+1} for async processing"
                             )
 
                 except Exception as e:
                     logger.error(f"Error adding song {idx+1} to playlist playback: {e}")
                     continue
 
-            if added_count > 0:
+            # Summary logging
+            total_handled = processed_count + queued_for_processing
+            if total_handled > 0:
                 logger.info(
-                    f"Started playlist playback: {added_count} songs from '{playlist_name}'"
+                    f"✅ Started playlist playback: {processed_count} songs ready, "
+                    f"{queued_for_processing} processing in background from '{playlist_name}'"
                 )
                 return True
             else:
                 logger.error(
-                    f"Failed to start any songs from playlist '{playlist_name}'"
+                    f"❌ Failed to start any songs from playlist '{playlist_name}'"
                 )
                 return False
 

@@ -14,15 +14,13 @@ Features:
 """
 
 import asyncio
-import logging
-from typing import Dict, List, Optional, Callable, Any, Tuple, Set
+from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass, field
 from enum import Enum
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-import discord
 
 from ..domain.entities.song import Song
 from ..domain.valueobjects.song_status import SongStatus
@@ -508,6 +506,7 @@ async def default_discord_progress_callback(bot, task: ProcessingTask):
     """Default Discord progress update callback - imports locally to avoid circular deps"""
     try:
         from .discord_ui import send_discord_progress_update as discord_update
+
         await discord_update(bot, task)
     except Exception as e:
         logger.error(f"Discord progress update failed: {e}")

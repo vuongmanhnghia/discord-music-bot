@@ -156,7 +156,10 @@ class PlaylistSwitchManager:
                 if queue_manager:
                     song_count = len(queue_manager.get_all_songs())
                     if song_count > 0:
-                        return True, f"Đã tải {song_count} bài hát từ playlist"
+                        return (
+                            True,
+                            f"Đã tải {song_count} bài hát từ playlist, các bài hát còn lại sẽ được load ngay sau đó. Sử dụng `/queue` để xem",
+                        )
                     else:
                         # Empty playlist is fine - ready for /add commands
                         return (

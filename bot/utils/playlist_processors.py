@@ -1,6 +1,5 @@
 """Playlist processing utilities for bot"""
 
-import asyncio
 from typing import List, Optional
 import discord
 
@@ -17,7 +16,7 @@ class PlaylistProcessor:
         playlist_message: str,
         guild_id: int,
         requested_by: str,
-        limit: int = 50
+        limit: int = 50,
     ) -> discord.Embed:
         """Process YouTube playlist videos with progress tracking"""
         added_count = 0
@@ -61,7 +60,7 @@ class PlaylistProcessor:
         guild_id: int,
         requested_by: str,
         playlist_service,
-        limit: int = 50
+        limit: int = 50,
     ) -> discord.Embed:
         """Process YouTube playlist videos for /add command"""
         added_count = 0
@@ -122,7 +121,7 @@ class PlaylistResultFactory:
         message: str,
         playlist_name: str,
         guild_id: int,
-        active_playlists: dict
+        active_playlists: dict,
     ) -> discord.Embed:
         """Create result embed for /use command"""
         if success:
@@ -158,7 +157,7 @@ class PlaylistResultFactory:
         playlist_name: str,
         guild_id: int,
         job_id: Optional[str],
-        active_playlists: dict
+        active_playlists: dict,
     ) -> discord.Embed:
         """Create result embed for lazy /use command"""
         if success:
@@ -181,7 +180,9 @@ class PlaylistResultFactory:
                     inline=False,
                 )
 
-            embed.set_footer(text="💡 First few songs load instantly, others process in background")
+            embed.set_footer(
+                text="💡 First few songs load instantly, others process in background"
+            )
         else:
             embed = discord.Embed(
                 title="❌ Lỗi",

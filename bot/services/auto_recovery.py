@@ -7,12 +7,10 @@ import asyncio
 import os
 import shutil
 import tempfile
-import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Dict, Optional
-import json
 
 from ..pkg.logger import logger
 

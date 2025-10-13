@@ -3,7 +3,6 @@
 import logging
 import json
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict
 from ..config.config import config
 

@@ -123,13 +123,6 @@ class PerformanceConfig:
             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         }
 
-    def get_ffmpeg_opts(self) -> Dict[str, str]:
-        """Generate FFmpeg options based on current config"""
-        return {
-            "before_options": f"-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max {self.reconnect_delay_max} -thread_queue_size 512",
-            "options": f"-vn -b:a {self.audio_bitrate}",
-        }
-
     def is_low_resource_mode(self) -> bool:
         """Check if running in low resource mode (RPi-like)"""
         return (
@@ -137,64 +130,6 @@ class PerformanceConfig:
             or self.max_concurrent_processing <= 1
             or self.memory_limit_mb <= 256
         )
-
-    def get_preset_rpi4(self) -> "PerformanceConfig":
-        """Get optimized preset for Raspberry Pi 4"""
-        config = PerformanceConfig(
-            # Minimal async processing
-            async_workers=1,
-            max_concurrent_processing=1,
-            enable_background_processing=False,
-            # Conservative caching
-            cache_size=30,
-            cache_duration_minutes=30,
-            memory_limit_mb=200,
-            # Limited queues
-            max_queue_size=20,
-            processing_queue_size=10,
-            # Lower quality audio to save bandwidth/CPU
-            audio_bitrate="128k",
-            audio_format="opus",
-            # Aggressive timeouts
-            connection_timeout=20,
-            max_retries=2,
-            fragment_retries=2,
-            reconnect_delay_max=3,
-            # Frequent monitoring
-            memory_threshold_percent=75,
-            enable_resource_monitoring=True,
-            cleanup_interval_seconds=180,
-        )
-        return config
-
-    def get_preset_powerful(self) -> "PerformanceConfig":
-        """Get optimized preset for powerful servers"""
-        config = PerformanceConfig(
-            # Full async processing
-            async_workers=5,
-            max_concurrent_processing=5,
-            enable_background_processing=True,
-            # Aggressive caching
-            cache_size=200,
-            cache_duration_minutes=120,
-            memory_limit_mb=1024,
-            # Large queues
-            max_queue_size=200,
-            processing_queue_size=100,
-            # High quality audio
-            audio_bitrate="320k",
-            audio_format="opus",
-            # Generous timeouts
-            connection_timeout=45,
-            max_retries=5,
-            fragment_retries=5,
-            reconnect_delay_max=10,
-            # Less frequent monitoring
-            memory_threshold_percent=90,
-            enable_resource_monitoring=True,
-            cleanup_interval_seconds=600,
-        )
-        return config
 
     def log_config(self):
         """Log current configuration for debugging"""

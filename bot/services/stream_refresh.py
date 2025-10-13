@@ -5,12 +5,11 @@ Handles automatic refresh of expired YouTube stream URLs
 
 import asyncio
 import time
-from typing import Optional, Dict, Tuple
-import logging
+from typing import Dict, Tuple
 
 from ..domain.entities.song import Song
 from ..pkg.logger import logger
-from ..config.constants import STREAM_URL_REFRESH_INTERVAL, STREAM_URL_MAX_AGE
+from ..config.constants import STREAM_URL_MAX_AGE
 
 
 class StreamRefreshService:
@@ -30,7 +29,10 @@ class StreamRefreshService:
             return False
 
         # Check if URL is older than max age (default 5 hours to be safe)
-        if hasattr(song, "stream_url_timestamp") and song.stream_url_timestamp is not None:
+        if (
+            hasattr(song, "stream_url_timestamp")
+            and song.stream_url_timestamp is not None
+        ):
             age = time.time() - song.stream_url_timestamp
             if age > STREAM_URL_MAX_AGE:
                 logger.info(

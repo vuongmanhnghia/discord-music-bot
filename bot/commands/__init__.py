@@ -6,12 +6,12 @@ Provides common utilities and patterns for all command handlers
 from typing import Optional
 import discord
 from discord.ext import commands
-from discord import app_commands
 
 from ..pkg.logger import logger
 from ..services.audio_service import audio_service
-from ..services.playback import playback_service
 from ..config.constants import ERROR_MESSAGES, COLORS
+
+from ..utils.discord_ui import EmbedFactory
 
 
 class BaseCommandHandler:
@@ -73,26 +73,20 @@ class BaseCommandHandler:
 
     def create_error_embed(self, title: str, description: str) -> discord.Embed:
         """Create standardized error embed"""
-        return discord.Embed(
-            title=title,
-            description=description,
-            color=COLORS["error"]
+        return EmbedFactory.error(
+            title=title, description=description, color=COLORS["error"]
         )
 
     def create_success_embed(self, title: str, description: str) -> discord.Embed:
         """Create standardized success embed"""
-        return discord.Embed(
-            title=title,
-            description=description,
-            color=COLORS["success"]
+        return EmbedFactory.success(
+            title=title, description=description, color=COLORS["success"]
         )
 
     def create_info_embed(self, title: str, description: str) -> discord.Embed:
         """Create standardized info embed"""
-        return discord.Embed(
-            title=title,
-            description=description,
-            color=COLORS["info"]
+        return EmbedFactory.info(
+            title=title, description=description, color=COLORS["info"]
         )
 
     async def handle_command_error(

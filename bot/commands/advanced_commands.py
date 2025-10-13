@@ -8,10 +8,15 @@ from discord import app_commands
 
 from . import BaseCommandHandler
 from ..config.config import config
-from ..pkg.logger import logger
 
 from ..config.constants import ERROR_MESSAGES
-from ..utils.discord_ui import EmbedFactory
+from ..utils.discord_ui import (
+    create_help_embed,
+    EmbedFactory,
+)
+
+from ..services.playlist_switch import playlist_switch_manager
+from ..utils.discord_ui import create_switch_status_embed
 
 
 class AdvancedCommandHandler(BaseCommandHandler):
@@ -27,8 +32,8 @@ class AdvancedCommandHandler(BaseCommandHandler):
         async def show_help(interaction: discord.Interaction):
             """❓ Show help information"""
             try:
-                embed = EmbedFactory.info(
-                    config.BOT_NAME, getattr(config, "VERSION", "1.0.0")
+                embed = create_help_embed(
+                    bot_name=config.BOT_NAME, version=config.VERSION
                 )
                 await interaction.response.send_message(embed=embed)
 
@@ -137,11 +142,6 @@ class AdvancedCommandHandler(BaseCommandHandler):
 
                 if action == "status":
                     # Show current switch status
-                    embed = discord.Embed(
-                        title="🔄 Playlist Switch Status", color=discord.Color.blue()
-                    )
-
-                    from ..services.playlist_switch import playlist_switch_manager
 
                     guild_id = interaction.guild.id
                     is_switching = playlist_switch_manager.is_switching(guild_id)
@@ -149,30 +149,17 @@ class AdvancedCommandHandler(BaseCommandHandler):
                         guild_id
                     )
 
-                    # Add status fields
-                    embed.add_field(
-                        name="Switch Status",
-                        value="� Switching..." if is_switching else "✅ Ready",
-                        inline=True,
-                    )
-
-                    if switching_to:
-                        embed.add_field(
-                            name="Switching To",
-                            value=f"**{switching_to}**",
-                            inline=True,
-                        )
-
-                    # Show current active playlist
+                    # Get current active playlist
                     active_playlist = getattr(self.bot, "active_playlists", {}).get(
                         guild_id
                     )
-                    if active_playlist:
-                        embed.add_field(
-                            name="Active Playlist",
-                            value=f"**{active_playlist}**",
-                            inline=False,
-                        )
+
+                    # Use standardized embed function
+                    embed = create_switch_status_embed(
+                        is_switching=is_switching,
+                        switching_to=switching_to,
+                        active_playlist=active_playlist,
+                    )
 
                     await interaction.followup.send(embed=embed)
 
