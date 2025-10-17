@@ -7,12 +7,16 @@ import asyncio
 import json
 import re
 from typing import Optional, Dict, Any
+import time
+
 
 from ..domain.valueobjects.source_type import SourceType
 from ..domain.entities.song import Song, SongMetadata
 from ..domain.valueobjects.song_processor import SongProcessor
 from ..utils.youtube import youtube_error_handler
+from ..config.service_constants import ServiceConstants
 from .auto_recovery import auto_recovery_service
+from .retry_strategy import RetryStrategy
 from ..pkg.logger import logger
 
 
@@ -31,12 +35,10 @@ class SpotifyService(SongProcessor):
 
     async def process(self, song: Song) -> bool:
         """Extract Spotify metadata"""
-        logger.info(f"Processing Spotify track: {song.original_input}")
-
         try:
             song.mark_processing()
 
-            # Extract Spotify track ID
+            # Extract and validate track ID
             track_id = self._extract_track_id(song.original_input)
             if not track_id:
                 song.mark_failed("Invalid Spotify URL format")
@@ -45,32 +47,25 @@ class SpotifyService(SongProcessor):
             # Check cache first
             cache_key = f"spotify:{track_id}"
             if cache_key in self._cache:
-                logger.debug(f"Using cached Spotify metadata: {track_id}")
                 metadata = self._cache[cache_key]
-                # Note: No stream URL for Spotify, will be handled by YouTube search
                 song.mark_ready(metadata, "")
                 return True
 
-            # Extract metadata using yt-dlp (for metadata only)
+            # Extract metadata using yt-dlp
             metadata = await self._extract_metadata(song.original_input)
             if not metadata:
                 song.mark_failed("Failed to extract Spotify metadata")
                 return False
 
-            # Cache the metadata
+            # Cache and mark ready
             self._cache[cache_key] = metadata
-
-            # Mark as ready (no stream URL yet, will be handled by YouTube search)
             song.mark_ready(metadata, "")
 
-            logger.info(
-                f"Successfully processed Spotify track: {metadata.display_name}"
-            )
             return True
 
         except Exception as e:
-            logger.error(f"Error processing Spotify track {song.original_input}: {e}")
-            song.mark_failed(f"Spotify processing error: {str(e)}")
+            logger.error(f"Spotify processing failed: {e}")
+            song.mark_failed(f"Spotify error: {str(e)}")
             return False
 
     def _extract_track_id(self, spotify_url: str) -> Optional[str]:
@@ -78,17 +73,15 @@ class SpotifyService(SongProcessor):
         try:
             # Input validation
             if not spotify_url or not isinstance(spotify_url, str):
-                logger.warning("Invalid Spotify URL: not a string")
                 return None
 
             # Length check to prevent DoS
             if len(spotify_url) > 500:
-                logger.warning(f"Spotify URL too long: {len(spotify_url)} chars")
                 return None
 
             # Handle different Spotify URL formats
             patterns = [
-                r"spotify\.com/track/([a-zA-Z0-9]{22})",  # Exact 22 chars
+                r"spotify\.com/track/([a-zA-Z0-9]{22})",
                 r"open\.spotify\.com/track/([a-zA-Z0-9]{22})",
                 r"spotify:track:([a-zA-Z0-9]{22})",
             ]
@@ -101,9 +94,6 @@ class SpotifyService(SongProcessor):
                     if len(track_id) == 22 and track_id.isalnum():
                         return track_id
 
-            logger.warning(
-                f"Could not extract valid Spotify track ID from: {spotify_url[:100]}"
-            )
             return None
 
         except Exception as e:
@@ -130,26 +120,15 @@ class SpotifyService(SongProcessor):
 
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
 
-            if process.returncode != 0:
-                logger.warning(f"yt-dlp failed for Spotify URL: {stderr.decode()}")
+            if process.returncode != 0 or not stdout.strip():
                 return None
 
-            if not stdout.strip():
-                logger.warning("Empty response from yt-dlp for Spotify URL")
-                return None
-
-            # Parse JSON
+            # Parse JSON and return metadata
             info = json.loads(stdout.decode())
             return self._parse_spotify_metadata(info)
 
-        except asyncio.TimeoutError:
-            logger.error("Timeout extracting Spotify metadata")
-            return None
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Spotify metadata JSON: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error extracting Spotify metadata: {e}")
+        except (asyncio.TimeoutError, json.JSONDecodeError, Exception) as e:
+            logger.error(f"Spotify metadata extraction failed: {e}")
             return None
 
     def _parse_spotify_metadata(self, info: Dict[str, Any]) -> Optional[SongMetadata]:
@@ -243,7 +222,10 @@ class YouTubeService(SongProcessor):
             return False
 
         except Exception as e:
+            import traceback
+
             logger.error(f"Error processing YouTube {song.original_input}: {e}")
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
             song.mark_failed(f"YouTube processing error: {str(e)}")
             return False
 
@@ -253,34 +235,20 @@ class YouTubeService(SongProcessor):
             logger.error("Cannot search YouTube: Song has no metadata")
             return False
 
-        logger.info(
-            f"Searching YouTube for Spotify track: {song.metadata.display_name}"
-        )
-
         try:
-            # Create search query from metadata
             search_query = f"ytsearch1:{song.metadata.search_query}"
-
-            # Get YouTube data
             result = await self._extract_youtube_data(search_query)
+
             if not result:
                 song.mark_failed("Failed to find YouTube equivalent")
                 return False
 
             metadata, stream_url = result
-
-            # Update song with stream URL (keep original Spotify metadata)
             song.stream_url = stream_url
-            song.status = song.status  # Keep current status
-
-            # Set stream URL timestamp
-            import time
+            song.status = song.status
 
             song.stream_url_timestamp = time.time()
 
-            logger.info(
-                f"Found YouTube stream for Spotify track: {song.metadata.display_name}"
-            )
             return True
 
         except Exception as e:
@@ -293,86 +261,70 @@ class YouTubeService(SongProcessor):
     ) -> Optional[tuple[SongMetadata, str]]:
         """Extract both metadata and stream URL from YouTube with retries"""
 
-        for attempt in range(max_retries):
-            try:
-                # Increase timeout based on attempt
-                timeout = 30 + (attempt * 15)  # 30s, 45s, 60s
+        async def _extract() -> tuple[SongMetadata, str]:
+            timeout = ServiceConstants.YOUTUBE_EXTRACT_TIMEOUT_BASE
 
-                # Faster metadata extraction
-                metadata_cmd = [
-                    "yt-dlp",
-                    "--dump-json",
-                    "--no-playlist",
-                    "--quiet",
-                    "--no-warnings",
-                    "--ignore-errors",
-                    "--skip-download",
-                    "--no-check-certificate",  # Skip cert checks
-                    "--socket-timeout",
-                    "20",  # Socket timeout
-                    "--fragment-retries",
-                    "3",  # Retry fragments
-                    "--retries",
-                    "3",  # Retry requests
-                    "--concurrent-fragments",
-                    "1",  # Reduce concurrency
-                    query,
-                ]
+            metadata_cmd = [
+                "yt-dlp",
+                "--dump-json",
+                "--no-playlist",
+                "--quiet",
+                "--no-warnings",
+                "--ignore-errors",
+                "--skip-download",
+                "--no-check-certificate",
+                "--socket-timeout",
+                "20",
+                "--fragment-retries",
+                "3",
+                "--retries",
+                "3",
+                "--concurrent-fragments",
+                "1",
+                query,
+            ]
 
-                metadata_process = await asyncio.create_subprocess_exec(
-                    *metadata_cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
+            process = await asyncio.create_subprocess_exec(
+                *metadata_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
 
-                stdout, stderr = await asyncio.wait_for(
-                    metadata_process.communicate(), timeout=timeout
-                )
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=timeout
+            )
 
-                if metadata_process.returncode != 0:
-                    logger.warning(
-                        f"yt-dlp metadata extraction failed: {stderr.decode()}"
-                    )
-                    return None
+            if process.returncode != 0 or not stdout.strip():
+                raise Exception(f"Extraction failed: {stderr.decode()}")
 
-                if not stdout.strip():
-                    logger.warning("Empty metadata response from yt-dlp")
-                    return None
+            info = json.loads(stdout.decode())
+            metadata = self._parse_youtube_metadata(info)
+            if not metadata:
+                raise Exception("Failed to parse metadata")
 
-                # Parse metadata
-                info = json.loads(stdout.decode())
-                metadata = self._parse_youtube_metadata(info)
-                if not metadata:
-                    return None
+            stream_url = await self._get_stream_url(query)
+            if not stream_url:
+                raise Exception("Failed to get stream URL")
 
-                # Get stream URL
-                stream_url = await self._get_stream_url(query)
-                if not stream_url:
-                    logger.error("Failed to get YouTube stream URL")
-                    return None
+            return (metadata, stream_url)
 
-                return (metadata, stream_url)
+        retry_strategy = RetryStrategy(
+            max_attempts=max_retries,
+            base_delay=1.0,
+            backoff_factor=2.0,
+            timeout=ServiceConstants.YOUTUBE_EXTRACT_TIMEOUT_BASE,
+        )
 
-            except asyncio.TimeoutError:
-                logger.warning(
-                    f"Timeout attempt {attempt + 1}/{max_retries} for: {query}"
-                )
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(2**attempt)  # exponential backoff: 1s, 2s, 4s
-                    continue
-                logger.error("Final timeout extracting YouTube data")
-                return None
-            except Exception as e:
-                logger.error(f"Unexpected error on attempt {attempt + 1}: {e}")
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(1)
-                    continue
-                return None
+        try:
+            return await retry_strategy.execute(_extract, "Extract YouTube data")
+        except Exception as e:
+            logger.error(f"YouTube data extraction failed: {e}")
+            return None
 
     async def _get_stream_url(self, query: str) -> Optional[str]:
-        """Extract stream URL with better format selection and 403 handling"""
-        try:
-            # Enhanced format selection to avoid 403 errors
+        """Extract stream URL with 403 handling"""
+
+        async def _extract_url() -> str:
             stream_cmd = [
                 "yt-dlp",
                 "--get-url",
@@ -383,12 +335,11 @@ class YouTubeService(SongProcessor):
                 "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
                 "--no-check-certificate",
                 "--socket-timeout",
-                "30",  # Increased timeout
+                "30",
                 "--retries",
-                "5",  # More retries
+                "5",
                 "--fragment-retries",
                 "5",
-                # Anti-detection measures
                 "--user-agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "--extractor-args",
@@ -396,100 +347,40 @@ class YouTubeService(SongProcessor):
                 query,
             ]
 
-            # Try with retries for 403 errors
-            for attempt in range(3):
-                try:
-                    process = await asyncio.create_subprocess_exec(
-                        *stream_cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
+            process = await asyncio.create_subprocess_exec(
+                *stream_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
 
-                    stdout, stderr = await asyncio.wait_for(
-                        process.communicate(), timeout=45
-                    )
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=ServiceConstants.YOUTUBE_STREAM_TIMEOUT,
+            )
 
-                    if process.returncode == 0 and stdout.strip():
-                        url = stdout.decode().strip()
-                        logger.info(
-                            f"Successfully extracted stream URL (attempt {attempt + 1})"
-                        )
-                        return url
+            if process.returncode == 0 and stdout.strip():
+                return stdout.decode().strip()
 
-                    # Check for 403 error
-                    error_msg = stderr.decode()
-                    if youtube_error_handler.is_403_error(error_msg):
-                        logger.warning(
-                            f"403 error on attempt {attempt + 1}: {error_msg}"
-                        )
+            error_msg = stderr.decode()
 
-                        # Try auto-recovery on first 403 error
-                        if attempt == 0:
-                            logger.info("🚨 Attempting auto-recovery for 403 error...")
-                            recovery_success = (
-                                await auto_recovery_service.check_and_recover_if_needed(
-                                    error_msg
-                                )
-                            )
+            # Try auto-recovery on 403 errors (only on first attempt)
+            if youtube_error_handler.is_403_error(error_msg):
+                await auto_recovery_service.check_and_recover_if_needed(error_msg)
+                await asyncio.sleep(ServiceConstants.STREAM_REFRESH_RETRY_DELAY)
 
-                            if recovery_success:
-                                logger.info("✅ Auto-recovery completed, retrying...")
-                                await asyncio.sleep(5)  # Wait a bit after recovery
-                                continue
+            raise Exception(f"Stream URL extraction failed: {error_msg}")
 
-                        if attempt < 2 and youtube_error_handler.should_retry_403(
-                            query, attempt
-                        ):
-                            # Wait before retry
-                            delay = await youtube_error_handler.get_retry_delay(attempt)
-                            logger.info(
-                                f"Retrying in {delay} seconds with different format..."
-                            )
-                            await asyncio.sleep(delay)
+        retry_strategy = RetryStrategy(
+            max_attempts=3,
+            base_delay=2.0,
+            backoff_factor=1.5,
+            timeout=ServiceConstants.YOUTUBE_STREAM_TIMEOUT,
+        )
 
-                            # Update command with alternative format
-                            alt_format = youtube_error_handler.get_alternative_format(
-                                attempt + 1
-                            )
-                            stream_cmd[
-                                stream_cmd.index(
-                                    "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best"
-                                )
-                                - 1
-                            ] = alt_format
-                            continue
-
-                    logger.error(
-                        f"Failed to get stream URL (attempt {attempt + 1}): {error_msg}"
-                    )
-
-                    # Try auto-recovery on last attempt if not tried yet
-                    if attempt == 2 and not youtube_error_handler.is_403_error(
-                        error_msg
-                    ):
-                        recovery_success = (
-                            await auto_recovery_service.check_and_recover_if_needed(
-                                error_msg
-                            )
-                        )
-                        if recovery_success:
-                            logger.info("✅ Auto-recovery completed on final attempt")
-
-                    if attempt == 2:  # Last attempt
-                        return None
-
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        f"Timeout on stream URL extraction attempt {attempt + 1}"
-                    )
-                    if attempt == 2:
-                        return None
-                    await asyncio.sleep(2)
-
-            return None
-
+        try:
+            return await retry_strategy.execute(_extract_url, "Get stream URL")
         except Exception as e:
-            logger.error(f"Error extracting stream URL: {e}")
+            logger.error(f"Failed to extract stream URL: {e}")
             return None
 
     def _parse_youtube_metadata(self, info: Dict[str, Any]) -> Optional[SongMetadata]:
@@ -584,10 +475,8 @@ class SongProcessingService:
 
     async def process_song(self, song: Song) -> bool:
         """Process a song using appropriate processor"""
-        logger.info(f"Starting song processing: {song.original_input}")
-
         try:
-            # Find appropriate processor
+            # Find and use appropriate processor
             processor = None
             for p in self._processors:
                 if await p.can_process(song):
@@ -595,30 +484,26 @@ class SongProcessingService:
                     break
 
             if not processor:
-                logger.error(f"No processor found for song: {song.original_input}")
+                logger.error(f"No processor found for: {song.original_input}")
                 song.mark_failed("Unsupported song source")
                 return False
 
-            # Process the song
             success = await processor.process(song)
 
-            # Special handling for Spotify: need to find YouTube stream
+            # Spotify songs need YouTube stream URL
             if (
                 success
                 and song.source_type == SourceType.SPOTIFY
                 and not song.stream_url
             ):
-                logger.info("Spotify song processed, searching for YouTube stream...")
-                youtube_success = await self.youtube_service.search_for_spotify_song(
-                    song
-                )
-                if not youtube_success:
-                    logger.warning("Failed to find YouTube stream for Spotify song")
-                    return False
+                return await self.youtube_service.search_for_spotify_song(song)
 
             return success
 
         except Exception as e:
-            logger.error(f"Unexpected error processing song {song.original_input}: {e}")
+            import traceback
+
+            logger.error(f"Error processing {song.original_input}: {e}")
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
             song.mark_failed(f"Processing error: {str(e)}")
             return False

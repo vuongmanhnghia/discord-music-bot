@@ -12,6 +12,7 @@ from ..utils.cache import SmartCache
 from ..domain.valueobjects.source_type import SourceType
 from ..domain.entities.song import Song, SongMetadata
 from ..config.performance import performance_config
+from ..config.service_constants import ServiceConstants
 from ..pkg.logger import logger
 
 
@@ -44,8 +45,6 @@ class CachedSongProcessor:
             "average_processing_time": 0.0,
         }
 
-        logger.info("🚄 CachedSongProcessor initialized with SmartCache")
-
     async def process_song(
         self, url: str, source_type: SourceType = None
     ) -> Tuple[dict, bool]:
@@ -68,15 +67,8 @@ class CachedSongProcessor:
             if was_cached:
                 self._processing_stats["cache_hits"] += 1
                 self._processing_stats["processing_time_saved"] += processing_time
-                logger.info(
-                    f"⚡ Cache hit: {song_data.get('title', 'Unknown')} ({processing_time:.2f}s saved)"
-                )
             else:
-                # Update average processing time for non-cached items
                 self._update_average_processing_time(processing_time)
-                logger.info(
-                    f"🔄 Processed: {song_data.get('title', 'Unknown')} ({processing_time:.2f}s)"
-                )
 
             return song_data, was_cached
 
@@ -175,27 +167,27 @@ class CachedSongProcessor:
         # Filter out failed results
         successful_results = [r for r in results if r[0] is not None]
 
-        logger.info(f"Batch processed {len(successful_results)}/{len(urls)} songs")
         return successful_results
 
     async def warm_popular_cache(self) -> int:
         """Warm cache with popular songs"""
-        popular_urls = self.smart_cache.get_popular_urls(limit=20)
+        popular_urls = self.smart_cache.get_popular_urls(
+            limit=ServiceConstants.CACHE_WARM_POPULAR_LIMIT
+        )
 
         if not popular_urls:
-            logger.info("No popular URLs to warm cache with")
             return 0
 
         urls_to_warm = [
-            url for url, count in popular_urls if count > 2
-        ]  # Only URLs accessed more than twice
+            url
+            for url, count in popular_urls
+            if count > ServiceConstants.CACHE_WARM_ACCESS_THRESHOLD
+        ]
 
         if urls_to_warm:
-            warmed_count = await self.smart_cache.warm_cache(
+            return await self.smart_cache.warm_cache(
                 urls_to_warm, self._extract_song_info
             )
-            logger.info(f"🔥 Cache warmed with {warmed_count} popular songs")
-            return warmed_count
 
         return 0
 
@@ -264,7 +256,6 @@ class CachedSongProcessor:
             "cleanup_performed_at": time.time(),
         }
 
-        logger.info(f"🧹 Cache cleanup: removed {expired_count} expired entries")
         return cleanup_stats
 
     async def clear_all_cache(self) -> int:
@@ -279,11 +270,8 @@ class CachedSongProcessor:
             "average_processing_time": 0.0,
         }
 
-        logger.info(f"🗑️ Cleared all cache: {cleared_count} entries removed")
         return cleared_count
 
     async def shutdown(self):
         """Clean shutdown of processor"""
-        logger.info("🛑 CachedSongProcessor shutting down...")
         await self.smart_cache.shutdown()
-        logger.info("✅ CachedSongProcessor shutdown complete")

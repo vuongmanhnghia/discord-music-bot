@@ -8,8 +8,9 @@ import time
 from typing import Dict, Tuple
 
 from ..domain.entities.song import Song
-from ..pkg.logger import logger
 from ..config.constants import STREAM_URL_MAX_AGE
+from ..config.service_constants import ServiceConstants
+from ..pkg.logger import logger
 
 
 class StreamRefreshService:
@@ -28,17 +29,13 @@ class StreamRefreshService:
         if not self.enabled or not song.stream_url:
             return False
 
-        # Check if URL is older than max age (default 5 hours to be safe)
+        # Check if URL is older than max age
         if (
             hasattr(song, "stream_url_timestamp")
             and song.stream_url_timestamp is not None
         ):
             age = time.time() - song.stream_url_timestamp
-            if age > STREAM_URL_MAX_AGE:
-                logger.info(
-                    f"🔄 Stream URL for '{song.display_name}' is {age/3600:.1f} hours old, needs refresh"
-                )
-                return True
+            return age > STREAM_URL_MAX_AGE
 
         return False
 
@@ -48,45 +45,24 @@ class StreamRefreshService:
             if not song.original_input:
                 return False
 
-            # Import here to avoid circular imports
             from ..services.processing import YouTubeService
 
-            # Create new processor instance for refresh
             processor = YouTubeService()
-
-            # Get fresh stream URL
-            logger.info(f"🔄 Refreshing stream URL for: {song.display_name}")
             new_stream_url = await processor._get_stream_url(song.original_input)
 
             if new_stream_url:
-                # Update song with new URL
-                old_url = song.stream_url
                 song.stream_url = new_stream_url
                 song.stream_url_timestamp = time.time()
-
-                # Update cache
                 self.url_cache[song.original_input] = (new_stream_url, time.time())
-
                 self.refresh_count += 1
                 self.last_refresh_time = time.time()
-
-                logger.info(
-                    f"✅ Stream URL refreshed for '{song.display_name}' (#{self.refresh_count})"
-                )
-                logger.debug(f"Old URL: {old_url[:50]}...")
-                logger.debug(f"New URL: {new_stream_url[:50]}...")
-
                 return True
             else:
-                logger.error(
-                    f"❌ Failed to refresh stream URL for '{song.display_name}'"
-                )
+                logger.error(f"Failed to refresh stream URL: {song.display_name}")
                 return False
 
         except Exception as e:
-            logger.error(
-                f"❌ Error refreshing stream URL for '{song.display_name}': {e}"
-            )
+            logger.error(f"Error refreshing stream URL for {song.display_name}: {e}")
             return False
 
     async def refresh_current_song_if_needed(self, song: Song) -> bool:
@@ -105,24 +81,21 @@ class StreamRefreshService:
                 if success:
                     refreshed_count += 1
                     # Small delay to avoid rate limiting
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(ServiceConstants.STREAM_REFRESH_DELAY)
 
         return refreshed_count
 
     def enable_refresh(self):
         """Enable stream URL refresh"""
         self.enabled = True
-        logger.info("🔄 Stream URL refresh enabled")
 
     def disable_refresh(self):
         """Disable stream URL refresh"""
         self.enabled = False
-        logger.info("🔒 Stream URL refresh disabled")
 
     def clear_cache(self):
         """Clear URL cache"""
         self.url_cache.clear()
-        logger.info("🧹 Stream URL cache cleared")
 
 
 # Global service instance

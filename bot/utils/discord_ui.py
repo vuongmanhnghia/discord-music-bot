@@ -259,8 +259,12 @@ class Paginator:
 
         if songs:
             songs_text = ""
+            # Start index for this page (songs after current song)
+            start_idx = (page_num - 1) * 10
+
             for i, song in enumerate(songs, 1):
-                actual_pos = (page_num - 1) * 10 + i + queue_position[0]
+                # Position in queue = start_idx + current item + current song position
+                actual_pos = start_idx + i + queue_position[0]
                 title = song.get("title", song.get("display_name", "Unknown"))
                 if len(title) > 50:
                     title = title[:47] + "..."
@@ -272,7 +276,7 @@ class Paginator:
                     "failed": "×",
                     "pending": "·",
                 }.get(status, "?")
-                songs_text += f"{actual_pos}. **{status_indicators} {title}**\n"
+                songs_text += f"> {actual_pos}. **{status_indicators} {title}**\n"
 
             embed.add_field(
                 name=f"Danh sách ({len(songs)} bài)",

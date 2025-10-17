@@ -53,9 +53,17 @@ class QueueCommandHandler(BaseCommandHandler):
                     )
                     return
 
+                # Get queue position first
+                current_pos, total_songs = queue_manager.position
+
                 # Convert songs to dict format for pagination
+                # Only show songs AFTER current song (upcoming songs)
                 song_dicts = []
-                for song in all_songs:
+                for idx, song in enumerate(all_songs):
+                    # Skip songs before and including current song
+                    if idx < current_pos:
+                        continue
+
                     # Get best available title
                     title = song.display_name
 
@@ -70,9 +78,7 @@ class QueueCommandHandler(BaseCommandHandler):
                         }
                     )
 
-                # Get queue position (position property returns tuple (current, total))
-                current_pos, total_songs = queue_manager.position
-                queue_position = (current_pos, len(all_songs))
+                queue_position = (current_pos, total_songs)
 
                 # Current song dict
                 current_song_dict = None

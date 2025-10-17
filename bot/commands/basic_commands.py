@@ -94,9 +94,9 @@ class BasicCommandHandler(BaseCommandHandler):
                     )
 
                     embed = EmbedFactory.success(
-                        "✅ Đã kết nối",
+                        "Đã kết nối",
                         f"Bot đã tham gia **{user_voice_channel.name}**!",
-                        details={"Kênh": user_voice_channel.name},
+                        details={"Channel": user_voice_channel.name},
                         footer="Sẵn sàng phát nhạc!",
                     )
                     await interaction.response.send_message(embed=embed)

@@ -4,6 +4,7 @@ from typing import List, Optional
 from ..domain.entities.library import LibraryManager
 from ..domain.valueobjects.source_type import SourceType
 from ..pkg.logger import logger
+from ..config.service_constants import ErrorMessages
 
 
 class PlaylistService:
@@ -51,10 +52,7 @@ class PlaylistService:
     def create_playlist(self, name: str) -> tuple[bool, str]:
         """Create a new playlist"""
         if self.library.create_playlist(name):
-            return (
-                True,
-                f"Đã tạo playlist **{name}** thành công, hãy sử dụng `/use {name}` để kich hoạt.",
-            )
+            return (True, ErrorMessages.playlist_created(name))
         return False, f"Playlist '{name}' already exists or failed to create"
 
     def add_to_playlist(
@@ -117,7 +115,9 @@ class PlaylistService:
                 )
                 return (
                     True,
-                    f"**{title or original_input}** đã tồn tại trong playlist '{playlist_name}'",
+                    ErrorMessages.song_exists_in_playlist(
+                        title or original_input, playlist_name
+                    ),
                 )
             elif success:
                 logger.info(
@@ -125,7 +125,9 @@ class PlaylistService:
                 )
                 return (
                     True,
-                    f"Added '{title or original_input}' to playlist '{playlist_name}'",
+                    ErrorMessages.song_added_to_playlist(
+                        title or original_input, playlist_name
+                    ),
                 )
             else:
                 logger.error(
@@ -153,7 +155,7 @@ class PlaylistService:
         if not playlist:
             return False, {
                 "error": f"Playlist '{playlist_name}' not found",
-                "message": f"Playlist '{playlist_name}' không tồn tại",
+                "message": ErrorMessages.playlist_not_found(playlist_name),
             }
 
         # Convert to 0-based index
@@ -161,7 +163,7 @@ class PlaylistService:
         if zero_index < 0 or zero_index >= playlist.total_songs:
             return False, {
                 "error": f"Invalid index {index}. Playlist has {playlist.total_songs} songs",
-                "message": f"Vị trí không hợp lệ. Playlist có {playlist.total_songs} bài hát",
+                "message": ErrorMessages.invalid_position(playlist.total_songs),
             }
 
         # Get song title before removing
@@ -179,12 +181,12 @@ class PlaylistService:
                 "removed_index": index,
                 "removed_title": removed_song_title,
                 "remaining": remaining,
-                "message": f"Đã xóa bài hát #{index}. Còn lại: {remaining} bài hát",
+                "message": ErrorMessages.song_removed(index, remaining),
             }
 
         return False, {
             "error": f"Failed to remove song from playlist '{playlist_name}'",
-            "message": f"Không thể xóa bài hát khỏi playlist '{playlist_name}'",
+            "message": ErrorMessages.cannot_remove_song(playlist_name),
         }
 
     def list_playlists(self) -> List[str]:

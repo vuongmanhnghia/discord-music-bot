@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Dict, Optional
 
+from ..config.service_constants import ServiceConstants
 from ..pkg.logger import logger
 
 
@@ -37,7 +38,7 @@ class AutoRecoveryService:
             ],
         }
         self._auto_recovery_enabled = True
-        self._recovery_cooldown = 300  # 5 minutes between recoveries
+        self._recovery_cooldown = ServiceConstants.RECOVERY_COOLDOWN_SECONDS
 
     async def check_and_recover_if_needed(self, error_msg: str) -> bool:
         """Check if recovery is needed and perform it automatically"""
@@ -48,25 +49,21 @@ class AutoRecoveryService:
 
         # Check cooldown
         if current_time - self._last_recovery_time < self._recovery_cooldown:
-            logger.debug(
-                f"Recovery cooldown active. Next recovery available in {self._recovery_cooldown - (current_time - self._last_recovery_time):.0f}s"
-            )
             return False
 
         # Check if error matches patterns requiring recovery
         error_type = self._classify_error(error_msg)
 
         if error_type in ["403_forbidden", "rate_limit"]:
-            logger.info(f"🚨 Detected {error_type} error, initiating auto-recovery...")
+            logger.info(f"Auto-recovery initiated for {error_type}")
             success = await self._perform_auto_recovery(error_type)
 
             if success:
                 self._last_recovery_time = current_time
                 self._recovery_count += 1
-                logger.info(f"✅ Auto-recovery completed (#{self._recovery_count})")
                 return True
             else:
-                logger.error("❌ Auto-recovery failed")
+                logger.error("Auto-recovery failed")
                 return False
 
         return False
@@ -84,37 +81,26 @@ class AutoRecoveryService:
     async def _perform_auto_recovery(self, error_type: str) -> bool:
         """Perform automatic recovery based on error type"""
         try:
-            logger.info(f"🔄 Starting auto-recovery for {error_type}...")
-
-            # Step 1: Clear yt-dlp cache
             await self._clear_ytdlp_cache()
-
-            # Step 2: Clear bot cache
             await self._clear_bot_cache()
 
-            # Step 3: Update yt-dlp if it's a 403 error
             if error_type == "403_forbidden":
                 await self._update_ytdlp()
 
-            # Step 4: Wait a bit for changes to take effect
-            await asyncio.sleep(2)
-
-            logger.info("✅ Auto-recovery completed successfully")
+            await asyncio.sleep(ServiceConstants.RECOVERY_POST_WAIT)
             return True
 
         except Exception as e:
-            logger.error(f"❌ Auto-recovery failed: {e}")
+            logger.error(f"Auto-recovery error: {e}")
             return False
 
     async def _clear_ytdlp_cache(self):
         """Clear yt-dlp cache directories"""
-        logger.info("🧹 Clearing yt-dlp cache...")
 
         def clear_cache():
             cache_dirs = []
-
-            # Common yt-dlp cache locations
             home = Path.home()
+
             cache_dirs.extend(
                 [
                     home / ".cache" / "yt-dlp",
@@ -145,30 +131,23 @@ class AutoRecoveryService:
 
             return cleared_count
 
-        # Run in thread pool to avoid blocking
         loop = asyncio.get_event_loop()
         cleared_count = await loop.run_in_executor(None, clear_cache)
 
         if cleared_count > 0:
-            logger.info(f"   ✅ Cleared {cleared_count} yt-dlp cache directories")
-        else:
-            logger.debug("   ℹ️ No yt-dlp cache directories found")
+            logger.info(f"Cleared {cleared_count} yt-dlp cache directories")
 
     async def _clear_bot_cache(self):
         """Clear bot-specific cache"""
-        logger.info("🤖 Clearing bot cache...")
 
         def clear_cache():
-            bot_root = Path(__file__).parent.parent.parent  # Navigate to bot root
-            cache_dirs = [
-                bot_root / "cache",
-            ]
+            bot_root = Path(__file__).parent.parent.parent
+            cache_dirs = [bot_root / "cache"]
 
             cleared_count = 0
             for cache_dir in cache_dirs:
                 if cache_dir.exists():
                     try:
-                        # Clear contents but keep structure
                         for item in cache_dir.rglob("*"):
                             if item.is_file() and item.name != "cache_index.json":
                                 item.unlink()
@@ -190,14 +169,10 @@ class AutoRecoveryService:
         cleared_count = await loop.run_in_executor(None, clear_cache)
 
         if cleared_count > 0:
-            logger.info(f"   ✅ Cleared {cleared_count} bot cache files")
-        else:
-            logger.debug("   ℹ️ No bot cache files found")
+            logger.info(f"Cleared {cleared_count} bot cache files")
 
     async def _update_ytdlp(self):
         """Update yt-dlp to latest version"""
-        logger.info("🔄 Updating yt-dlp...")
-
         try:
             process = await asyncio.create_subprocess_exec(
                 sys.executable,
@@ -212,32 +187,24 @@ class AutoRecoveryService:
 
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
 
-            if process.returncode == 0:
-                logger.info("   ✅ yt-dlp updated successfully")
-            else:
-                logger.warning(f"   ⚠️ yt-dlp update warning: {stderr.decode()}")
+            if process.returncode != 0:
+                logger.warning(f"yt-dlp update warning: {stderr.decode()}")
 
         except asyncio.TimeoutError:
-            logger.warning("   ⏱️ yt-dlp update timed out")
+            logger.warning("yt-dlp update timed out")
         except Exception as e:
-            logger.error(f"   ❌ Error updating yt-dlp: {e}")
+            logger.error(f"Error updating yt-dlp: {e}")
 
     async def scheduled_maintenance(self):
         """Perform scheduled maintenance tasks"""
-        logger.info("🔧 Running scheduled maintenance...")
-
         try:
-            # Clear old cache files (older than 24 hours)
             await self._cleanup_old_cache()
 
-            # Update yt-dlp weekly
             if self._should_update_ytdlp():
                 await self._update_ytdlp()
 
-            logger.info("✅ Scheduled maintenance completed")
-
         except Exception as e:
-            logger.error(f"❌ Scheduled maintenance failed: {e}")
+            logger.error(f"Scheduled maintenance failed: {e}")
 
     async def _cleanup_old_cache(self):
         """Clean up cache files older than 24 hours"""
@@ -267,10 +234,7 @@ class AutoRecoveryService:
             return cleaned_count
 
         loop = asyncio.get_event_loop()
-        cleaned_count = await loop.run_in_executor(None, cleanup)
-
-        if cleaned_count > 0:
-            logger.info(f"   🧹 Cleaned {cleaned_count} old cache files")
+        await loop.run_in_executor(None, cleanup)
 
     def _should_update_ytdlp(self) -> bool:
         """Check if yt-dlp should be updated (weekly)"""
@@ -295,12 +259,10 @@ class AutoRecoveryService:
     def disable_auto_recovery(self):
         """Disable automatic recovery"""
         self._auto_recovery_enabled = False
-        logger.info("🔒 Auto-recovery disabled")
 
     def enable_auto_recovery(self):
         """Enable automatic recovery"""
         self._auto_recovery_enabled = True
-        logger.info("🔓 Auto-recovery enabled")
 
 
 # Global auto recovery service instance

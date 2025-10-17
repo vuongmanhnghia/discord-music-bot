@@ -5,6 +5,7 @@ Prevents bugs like mixed playlists, race conditions, and streaming conflicts
 
 import asyncio
 from typing import Optional, Dict, Set
+from ..config.service_constants import ServiceConstants, ErrorMessages
 from ..pkg.logger import logger
 from ..services.audio_service import audio_service
 
@@ -70,7 +71,7 @@ class PlaylistSwitchManager:
                     )
                     return (
                         True,
-                        f"**Đã kích hoạt playlist `{new_playlist}`**\n{message}",
+                        ErrorMessages.playlist_activated(new_playlist, message),
                     )
                 else:
                     logger.error(
@@ -104,7 +105,8 @@ class PlaylistSwitchManager:
             if tasks:
                 try:
                     await asyncio.wait_for(
-                        asyncio.gather(*tasks, return_exceptions=True), timeout=3.0
+                        asyncio.gather(*tasks, return_exceptions=True),
+                        timeout=ServiceConstants.TASK_CANCELLATION_TIMEOUT,
                     )
                 except asyncio.TimeoutError:
                     logger.warning(
@@ -121,7 +123,7 @@ class PlaylistSwitchManager:
                 logger.info(f"⏹️ Stopping current playback in guild {guild_id}")
                 audio_player.stop()
                 # Give a moment for cleanup
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(ServiceConstants.SWITCH_CLEANUP_DELAY)
         except Exception as e:
             logger.warning(f"Warning stopping playback in guild {guild_id}: {e}")
 
@@ -205,10 +207,7 @@ class PlaylistSwitchManager:
             logger.warning(
                 f"⚠️ Blocking add to queue - guild {guild_id} switching to '{switching_to}'"
             )
-            return (
-                False,
-                f"⚠️ Đang chuyển sang playlist **{switching_to}**, vui lòng chờ...",
-            )
+            return (False, ErrorMessages.playlist_switch_in_progress(switching_to))
 
         # Proceed with normal add logic
         from ..services.playback import playback_service
