@@ -8,7 +8,7 @@ from ..config.service_constants import ErrorMessages, ServiceConstants
 
 from ..pkg.logger import logger
 from .processing import SongProcessingService
-from .cached_processing import CachedSongProcessor
+from .youtube_service import youtube_service
 from .audio_service import audio_service
 from ..utils.async_processor import (
     AsyncSongProcessor,
@@ -35,7 +35,6 @@ class PlaybackService:
         self.config.log_config()  # Log current configuration
 
         self.processing_service = SongProcessingService()
-        self.cached_processor = CachedSongProcessor()  # Smart caching processor
         self.async_processor: Optional[AsyncSongProcessor] = (
             None  # Will be initialized later
         )
@@ -45,18 +44,14 @@ class PlaybackService:
     # Common Helper Methods
     # ===============================
 
-    async def _add_song_to_queue(self, song: Song, guild_id: int) -> Optional[int]:
+    async def _add_song_to_queue(self, song: Song, guild_id: int) -> int:
         """
         Add a song to the queue
 
         Returns:
-            Position in queue if successful, None otherwise
+            Position in queue (1-indexed)
         """
         queue_manager = audio_service.get_queue_manager(guild_id)
-        if not queue_manager:
-            logger.error(f"No queue manager found for guild {guild_id}")
-            return None
-
         position = await queue_manager.add_song(song)
         logger.info(f"Added song to queue at position {position}: {song.display_name}")
         return position
@@ -97,8 +92,6 @@ class PlaybackService:
 
             # Add to queue after processing is complete
             position = await self._add_song_to_queue(song, guild_id)
-            if position is None:
-                return (False, ErrorMessages.no_queue_manager(), None)
 
             # Start playback if auto_play is enabled
             await self._handle_auto_play(guild_id, auto_play)
@@ -123,21 +116,13 @@ class PlaybackService:
             (success, message, song) tuple
         """
         try:
-            # Process with smart caching (much faster for cached content)
-            song_data, was_cached = await self.cached_processor.process_song(user_input)
-
-            if not song_data:
-                return (False, ErrorMessages.failed_to_process_song(), None)
-
-            # Create Song object from cached/processed data
-            song = await self.cached_processor.create_song_from_data(
-                song_data, requested_by, guild_id
+            # Process with smart caching via YouTubeService
+            song, was_cached = await youtube_service.create_song(
+                user_input, requested_by, guild_id
             )
 
             # Add to queue
             position = await self._add_song_to_queue(song, guild_id)
-            if position is None:
-                return (False, ErrorMessages.no_queue_manager(), None)
 
             # Start playback if auto_play is enabled
             await self._handle_auto_play(guild_id, auto_play)
@@ -168,9 +153,6 @@ class PlaybackService:
                 return
 
             queue_manager = audio_service.get_queue_manager(guild_id)
-            if not queue_manager:
-                return
-
             current_song = queue_manager.current_song
             if not current_song or not current_song.is_ready:
                 return
@@ -209,10 +191,6 @@ class PlaybackService:
 
             if not song:
                 return (False, "Invalid input", None, None)
-
-            # Verify queue manager exists
-            if not audio_service.get_queue_manager(guild_id):
-                return (False, ErrorMessages.no_queue_manager(), None, None)
 
             # Submit for async processing with callback
             callback = None
@@ -332,9 +310,6 @@ class PlaybackService:
         """Skip current song"""
         try:
             queue_manager = audio_service.get_queue_manager(guild_id)
-            if not queue_manager:
-                return (False, ErrorMessages.no_queue_manager())
-
             current_song = queue_manager.current_song
             if not current_song:
                 return (False, ErrorMessages.no_current_song())
@@ -491,9 +466,6 @@ class PlaybackService:
         """Set repeat mode for queue"""
         try:
             queue_manager = audio_service.get_queue_manager(guild_id)
-            if not queue_manager:
-                return False
-
             return queue_manager.set_repeat_mode(mode)
 
         except Exception as e:
@@ -506,27 +478,15 @@ class PlaybackService:
 
     async def get_cache_performance(self) -> dict:
         """Get cache performance statistics"""
-        return await self.cached_processor.get_cache_stats()
+        return youtube_service.get_stats()
 
-    async def warm_cache_with_popular(self) -> int:
-        """Warm cache with popular songs"""
-        return await self.cached_processor.warm_popular_cache()
-
-    async def cleanup_cache(self) -> dict:
+    async def cleanup_cache(self) -> int:
         """Clean up expired cache entries"""
-        return await self.cached_processor.cleanup_cache()
-
-    async def clear_all_cache(self) -> int:
-        """Clear all cached songs"""
-        return await self.cached_processor.clear_all_cache()
-
-    async def batch_process_songs(self, urls: list, max_concurrent: int = 3) -> list:
-        """Process multiple songs with caching"""
-        return await self.cached_processor.batch_process(urls, max_concurrent)
+        return await youtube_service.cleanup()
 
     async def shutdown_cache_system(self):
         """Clean shutdown of caching system"""
-        await self.cached_processor.shutdown()
+        await youtube_service.shutdown()
 
     async def start_playlist_playback(self, guild_id: int, playlist_name: str) -> bool:
         """
@@ -565,9 +525,6 @@ class PlaybackService:
 
             # Get queue manager
             queue_manager = audio_service.get_queue_manager(guild_id)
-            if not queue_manager:
-                logger.error(f"No queue manager found for guild {guild_id}")
-                return False
 
             # Clear existing queue only if not empty (safe approach)
             existing_songs = queue_manager.get_all_songs()
@@ -576,14 +533,18 @@ class PlaybackService:
                 await queue_manager.clear()
 
             # Check async processor capacity
-            async_songs_count = len(playlist_songs) - ServiceConstants.IMMEDIATE_PROCESS_COUNT
+            async_songs_count = (
+                len(playlist_songs) - ServiceConstants.IMMEDIATE_PROCESS_COUNT
+            )
             if async_songs_count > 0 and self.async_processor:
                 available_capacity = self.async_processor.get_available_capacity()
                 if available_capacity < async_songs_count:
                     logger.warning(
                         f"⚠️ Processing queue has limited capacity: {available_capacity}/{async_songs_count} slots available"
                     )
-                    logger.info("Songs will be queued with retry logic as queue space becomes available")
+                    logger.info(
+                        "Songs will be queued with retry logic as queue space becomes available"
+                    )
 
             # Add songs from playlist to queue with smart processing
             processed_count = 0  # Songs processed immediately (in queue)
@@ -605,11 +566,11 @@ class PlaybackService:
                         logger.info(
                             f"🔄 Processing song {idx+1}/{len(playlist_songs)} immediately: {song_info['original_input'][:50]}..."
                         )
-                        
+
                         # Add delay between immediate processing to avoid rate limits (except first song)
                         if idx > 0:
                             await asyncio.sleep(3)  # 3 second delay between songs
-                        
+
                         success, _, song = await self.play_request(
                             song_info["original_input"],
                             guild_id,
@@ -630,11 +591,11 @@ class PlaybackService:
                         logger.info(
                             f"📋 Queuing song {idx+1}/{len(playlist_songs)} for async processing: {song_info['original_input'][:50]}..."
                         )
-                        
+
                         # Retry logic for queue full scenarios with exponential backoff
                         max_queue_retries = 5  # Increased from 3
                         base_retry_delay = 2  # seconds
-                        
+
                         for retry in range(max_queue_retries):
                             success_async, _, song_async, task_id = (
                                 await self.play_request_async(
@@ -644,7 +605,7 @@ class PlaybackService:
                                     auto_play=False,  # Don't auto-play async songs
                                 )
                             )
-                            
+
                             if success_async:
                                 queued_for_processing += 1
                                 logger.info(
@@ -654,7 +615,7 @@ class PlaybackService:
                             else:
                                 if retry < max_queue_retries - 1:
                                     # Exponential backoff: 2s, 4s, 8s, 16s
-                                    retry_delay = base_retry_delay * (2 ** retry)
+                                    retry_delay = base_retry_delay * (2**retry)
                                     logger.warning(
                                         f"⚠️ Queue full, retrying song {idx+1} in {retry_delay}s (attempt {retry+1}/{max_queue_retries})"
                                     )

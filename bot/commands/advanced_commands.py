@@ -9,6 +9,7 @@ from discord import app_commands
 from . import BaseCommandHandler
 from ..config.config import config
 from ..utils.youtube import YouTubePlaylistHandler
+from ..utils.playlist_processors import PlaylistProcessor
 
 from ..config.constants import ERROR_MESSAGES
 from ..utils.discord_ui import (
@@ -72,7 +73,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
                             ERROR_MESSAGES["playlist_extraction_error"], message
                         )
 
-                    return await self.bot._process_playlist_videos(
+                    return await PlaylistProcessor.process_playlist_videos(
                         video_urls,
                         message,
                         interaction.guild.id,

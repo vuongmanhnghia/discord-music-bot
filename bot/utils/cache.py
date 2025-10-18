@@ -75,9 +75,6 @@ class SmartCache:
             "cache_loads": 0,
             "processing_time_saved": 0.0,
         }
-        self._popular_urls: Dict[str, int] = {}
-        self._warming_queue: List[str] = []
-        self._max_popular_urls = 500
 
         self._cleanup_task: Optional[asyncio.Task] = None
         self._cleanup_interval = 600
@@ -135,9 +132,6 @@ class SmartCache:
             self._cache[key] = cached_song
             self._update_lru(key)
 
-            self._popular_urls[url] = self._popular_urls.get(url, 0) + 1
-            self._enforce_popular_urls_limit()
-
             await self._enforce_size_limit()
 
             if self.persist:
@@ -154,17 +148,6 @@ class SmartCache:
         if key in self._access_order:
             self._access_order.remove(key)
         self._access_order.append(key)
-
-    def _enforce_popular_urls_limit(self):
-        if len(self._popular_urls) > self._max_popular_urls:
-            sorted_urls = sorted(
-                self._popular_urls.items(), key=lambda x: x[1], reverse=True
-            )
-            cutoff = int(self._max_popular_urls * 0.8)
-            self._popular_urls = dict(sorted_urls[:cutoff])
-            logger.debug(
-                f"Pruned popular URLs tracking from {len(sorted_urls)} to {len(self._popular_urls)}"
-            )
 
     async def _enforce_size_limit(self):
         while len(self._cache) > self.max_size:
@@ -244,26 +227,6 @@ class SmartCache:
             logger.error(f"Error processing song {url}: {e}")
             raise
 
-    async def warm_cache(self, urls: List[str], process_func) -> int:
-        warmed_count = 0
-        for url in urls[:10]:
-            try:
-                cached_song = await self.get_cached_song(url)
-                if not cached_song:
-                    song_data = await process_func(url)
-                    if song_data:
-                        await self.cache_song(url, song_data)
-                        warmed_count += 1
-                        logger.debug(f"Cache warmed: {song_data.get('title', url)}")
-            except Exception as e:
-                logger.warning(f"Failed to warm cache for {url}: {e}")
-        return warmed_count
-
-    def get_popular_urls(self, limit: int = 20) -> List[Tuple[str, int]]:
-        return sorted(self._popular_urls.items(), key=lambda x: x[1], reverse=True)[
-            :limit
-        ]
-
     async def cleanup_expired(self) -> int:
         expired_keys = []
 
@@ -291,7 +254,6 @@ class SmartCache:
             "hit_rate": hit_rate,
             "cache_size": len(self._cache),
             "max_size": self.max_size,
-            "popular_count": len(self._popular_urls),
         }
 
     def _get_persistent_path(self, key: str) -> Path:

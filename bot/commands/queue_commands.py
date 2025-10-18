@@ -30,14 +30,6 @@ class QueueCommandHandler(BaseCommandHandler):
                     return
 
                 queue_manager = self.get_queue_manager(interaction.guild.id)
-                if not queue_manager:
-                    logger.error(
-                        f"No queue manager found for guild {interaction.guild.id}"
-                    )
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["no_queue"], ephemeral=True
-                    )
-                    return
 
                 # Get queue info
                 current_song = queue_manager.current_song

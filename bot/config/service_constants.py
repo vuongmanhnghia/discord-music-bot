@@ -35,14 +35,18 @@ class ServiceConstants:
     SWITCH_CLEANUP_DELAY = 0.5  # delay for cleanup after stopping playback
 
     # YouTube Processing
-    YOUTUBE_EXTRACT_TIMEOUT_BASE = 45  # base timeout for YouTube extraction (increased from 30)
+    YOUTUBE_EXTRACT_TIMEOUT_BASE = (
+        45  # base timeout for YouTube extraction (increased from 30)
+    )
     YOUTUBE_EXTRACT_TIMEOUT_INCREMENT = 15  # additional timeout per retry
     YOUTUBE_RETRY_MAX_ATTEMPTS = 3  # max retry attempts for YouTube
     YOUTUBE_STREAM_TIMEOUT = 60  # timeout for stream URL extraction (increased from 45)
     YOUTUBE_RETRY_DELAYS = [2, 5, 10]  # exponential backoff delays (increased)
 
     # Metadata Extraction
-    METADATA_EXTRACTION_TIMEOUT = 45  # timeout for metadata extraction (increased from 30)
+    METADATA_EXTRACTION_TIMEOUT = (
+        45  # timeout for metadata extraction (increased from 30)
+    )
     BASIC_INFO_TIMEOUT = 30  # timeout for basic info fallback (increased from 20)
 
     # Connection
@@ -116,11 +120,6 @@ class ErrorMessages:
     def processing_song() -> str:
         """Message when song is being processed"""
         return "🔄 Đang xử lý bài hát..."
-
-    @staticmethod
-    def no_queue_manager() -> str:
-        """Message when queue manager is not found"""
-        return ErrorMessages.system_error("Không tìm thấy queue manager")
 
     @staticmethod
     def no_audio_player() -> str:

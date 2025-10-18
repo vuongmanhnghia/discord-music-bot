@@ -11,8 +11,15 @@ from . import BaseCommandHandler
 from ..pkg.logger import logger
 from ..services.playback import playback_service
 from ..utils.youtube import YouTubePlaylistHandler
+from ..utils.playlist_processors import PlaylistProcessor
 from ..utils.core import Validator
 from ..utils.events import message_update_manager
+from ..utils.decorators import (
+    handle_command_errors,
+    require_voice_connection,
+    require_same_voice_channel,
+    defer_response,
+)
 from ..utils.discord_ui import (
     create_pause_embed,
     create_resume_embed,
@@ -41,41 +48,25 @@ class PlaybackCommandHandler(BaseCommandHandler):
         @app_commands.describe(
             query="URL hoặc từ khóa tìm kiếm (để trống để phát từ playlist hiện tại)"
         )
-        @app_commands.checks.cooldown(
-            1, 3.0, key=lambda i: (i.guild_id, i.user.id)
-        )  # 3 second cooldown per user per guild
+        @app_commands.checks.cooldown(1, 3.0, key=lambda i: (i.guild_id, i.user.id))
+        @handle_command_errors
+        @require_voice_connection(bot_must_be_connected=False)
         async def play_music(
             interaction: discord.Interaction, query: Optional[str] = None
         ):
             """▶️ Play music from URL/search query or from active playlist"""
-            try:
-                if not interaction.guild:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["guild_only"], ephemeral=True
-                    )
+            # Handle two modes: with query or from active playlist
+            if query:
+                # Validate and sanitize query
+                query = Validator.sanitize_query(query)
+                is_valid, error_msg = Validator.validate_query_length(query)
+                if not is_valid:
+                    await interaction.response.send_message(error_msg, ephemeral=True)
                     return
 
-                # Check voice requirements
-                if not await self.ensure_user_in_voice(interaction):
-                    return
-
-                # Handle two modes: with query or from active playlist
-                if query:
-                    # Validate and sanitize query
-                    query = Validator.sanitize_query(query)
-                    is_valid, error_msg = Validator.validate_query_length(query)
-                    if not is_valid:
-                        await interaction.response.send_message(
-                            error_msg, ephemeral=True
-                        )
-                        return
-
-                    await self._handle_play_with_query(interaction, query)
-                else:
-                    await self._handle_play_from_playlist(interaction)
-
-            except Exception as e:
-                await self.handle_command_error(interaction, e, "play")
+                await self._handle_play_with_query(interaction, query)
+            else:
+                await self._handle_play_from_playlist(interaction)
 
         @self.bot.tree.command(name="skip", description="Bỏ qua bài hiện tại")
         async def skip_song(interaction: discord.Interaction):
@@ -85,12 +76,6 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     return
 
                 queue_manager = self.get_queue_manager(interaction.guild.id)
-                if not queue_manager:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["no_queue"], ephemeral=True
-                    )
-                    return
-
                 current_song = queue_manager.current_song
                 if not current_song:
                     await interaction.response.send_message(
@@ -222,12 +207,6 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     return
 
                 queue_manager = self.get_queue_manager(interaction.guild.id)
-                if not queue_manager:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["no_queue"], ephemeral=True
-                    )
-                    return
-
                 current_song = queue_manager.current_song
                 if not current_song:
                     await interaction.response.send_message(
@@ -302,12 +281,6 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     return
 
                 queue_manager = self.get_queue_manager(interaction.guild.id)
-                if not queue_manager:
-                    embed = create_shuffle_failed_embed(
-                        "Không có queue nào đang hoạt động"
-                    )
-                    await interaction.response.send_message(embed=embed, ephemeral=True)
-                    return
 
                 # Check if there are enough songs to shuffle
                 total_songs = queue_manager.queue_size
@@ -359,7 +332,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 if not success or not video_urls:
                     return self.create_error_embed("Lỗi Playlist", message)
 
-                return await self.bot._process_playlist_videos(
+                return await PlaylistProcessor.process_playlist_videos(
                     video_urls,
                     message,
                     interaction.guild.id,
@@ -438,11 +411,6 @@ class PlaybackCommandHandler(BaseCommandHandler):
             return
 
         queue_manager = self.get_queue_manager(guild_id)
-        if not queue_manager:
-            await interaction.response.send_message(
-                ERROR_MESSAGES["cannot_init_queue"], ephemeral=True
-            )
-            return
 
         # Try to resume if paused
         voice_client = interaction.guild.voice_client

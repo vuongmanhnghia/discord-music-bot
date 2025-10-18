@@ -209,9 +209,6 @@ class MessageUpdateManager:
         except Exception as e:
             logger.error(f"Error updating processing message: {e}")
 
-    async def cleanup_old_tracked_messages(self, max_age_seconds: int = 600):
-        pass
-
     async def shutdown(self):
         if self._subscribed:
             await event_bus.unsubscribe(
