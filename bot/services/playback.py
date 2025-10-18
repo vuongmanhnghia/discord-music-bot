@@ -575,6 +575,16 @@ class PlaybackService:
                 logger.info(f"Clearing {len(existing_songs)} existing songs from queue")
                 await queue_manager.clear()
 
+            # Check async processor capacity
+            async_songs_count = len(playlist_songs) - ServiceConstants.IMMEDIATE_PROCESS_COUNT
+            if async_songs_count > 0 and self.async_processor:
+                available_capacity = self.async_processor.get_available_capacity()
+                if available_capacity < async_songs_count:
+                    logger.warning(
+                        f"⚠️ Processing queue has limited capacity: {available_capacity}/{async_songs_count} slots available"
+                    )
+                    logger.info("Songs will be queued with retry logic as queue space becomes available")
+
             # Add songs from playlist to queue with smart processing
             processed_count = 0  # Songs processed immediately (in queue)
             queued_for_processing = (
@@ -620,23 +630,39 @@ class PlaybackService:
                         logger.info(
                             f"📋 Queuing song {idx+1}/{len(playlist_songs)} for async processing: {song_info['original_input'][:50]}..."
                         )
-                        success_async, _, song_async, task_id = (
-                            await self.play_request_async(
-                                song_info["original_input"],
-                                guild_id,
-                                "Playlist",
-                                auto_play=False,  # Don't auto-play async songs
+                        
+                        # Retry logic for queue full scenarios with exponential backoff
+                        max_queue_retries = 5  # Increased from 3
+                        base_retry_delay = 2  # seconds
+                        
+                        for retry in range(max_queue_retries):
+                            success_async, _, song_async, task_id = (
+                                await self.play_request_async(
+                                    song_info["original_input"],
+                                    guild_id,
+                                    "Playlist",
+                                    auto_play=False,  # Don't auto-play async songs
+                                )
                             )
-                        )
-                        if success_async:
-                            queued_for_processing += 1
-                            logger.info(
-                                f"📝 Song {idx+1} submitted for processing with task ID: {task_id}"
-                            )
-                        else:
-                            logger.warning(
-                                f"⚠️ Failed to submit song {idx+1} for async processing"
-                            )
+                            
+                            if success_async:
+                                queued_for_processing += 1
+                                logger.info(
+                                    f"📝 Song {idx+1} submitted for processing with task ID: {task_id}"
+                                )
+                                break  # Success, exit retry loop
+                            else:
+                                if retry < max_queue_retries - 1:
+                                    # Exponential backoff: 2s, 4s, 8s, 16s
+                                    retry_delay = base_retry_delay * (2 ** retry)
+                                    logger.warning(
+                                        f"⚠️ Queue full, retrying song {idx+1} in {retry_delay}s (attempt {retry+1}/{max_queue_retries})"
+                                    )
+                                    await asyncio.sleep(retry_delay)
+                                else:
+                                    logger.error(
+                                        f"❌ Failed to submit song {idx+1} after {max_queue_retries} attempts - queue persistently full"
+                                    )
 
                 except Exception as e:
                     logger.error(f"Error adding song {idx+1} to playlist playback: {e}")

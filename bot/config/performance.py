@@ -65,7 +65,7 @@ class PerformanceConfig:
             memory_limit_mb=int(os.getenv("BOT_MEMORY_LIMIT_MB", "512")),
             # Queue Management
             max_queue_size=int(os.getenv("BOT_MAX_QUEUE_SIZE", "100")),
-            processing_queue_size=int(os.getenv("BOT_PROCESSING_QUEUE_SIZE", "50")),
+            processing_queue_size=int(os.getenv("BOT_PROCESSING_QUEUE_SIZE", "200")),  # Increased from 50 to handle large playlists
             # Audio Processing
             audio_bitrate=os.getenv("BOT_AUDIO_BITRATE", "192k"),
             audio_format=os.getenv("BOT_AUDIO_FORMAT", "opus"),

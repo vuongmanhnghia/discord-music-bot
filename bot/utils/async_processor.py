@@ -285,6 +285,8 @@ class AsyncSongProcessor:
 
         return {
             "queue_size": queued_count,
+            "max_queue_size": self.max_queue_size,
+            "available_slots": self.max_queue_size - queued_count,
             "active_tasks": active_count,
             "total_processed": self.total_tasks_processed,
             "uptime": datetime.now() - self.start_time,
@@ -298,6 +300,15 @@ class AsyncSongProcessor:
                 for wid, stats in self.worker_stats.items()
             },
         }
+
+    def get_available_capacity(self) -> int:
+        """Get number of available slots in queue"""
+        return self.max_queue_size - self.task_queue.qsize()
+
+    def is_queue_near_full(self, threshold: float = 0.8) -> bool:
+        """Check if queue is near full (above threshold percentage)"""
+        usage = self.task_queue.qsize() / self.max_queue_size
+        return usage >= threshold
 
     async def _worker_loop(self, worker_id: str):
         """Main worker loop for processing tasks"""
