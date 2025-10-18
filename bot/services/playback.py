@@ -595,6 +595,11 @@ class PlaybackService:
                         logger.info(
                             f"🔄 Processing song {idx+1}/{len(playlist_songs)} immediately: {song_info['original_input'][:50]}..."
                         )
+                        
+                        # Add delay between immediate processing to avoid rate limits (except first song)
+                        if idx > 0:
+                            await asyncio.sleep(3)  # 3 second delay between songs
+                        
                         success, _, song = await self.play_request(
                             song_info["original_input"],
                             guild_id,

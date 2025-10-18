@@ -274,13 +274,17 @@ class YouTubeService(SongProcessor):
                 "--skip-download",
                 "--no-check-certificate",
                 "--socket-timeout",
-                "20",
+                "30",  # Increased from 20
                 "--fragment-retries",
-                "3",
+                "5",  # Increased from 3
                 "--retries",
-                "3",
+                "5",  # Increased from 3
                 "--concurrent-fragments",
-                "1",
+                "2",  # Increased from 1 for faster download
+                "--sleep-requests",
+                "1",  # 1 second delay between requests to avoid rate limit
+                "--extractor-retries",
+                "3",  # Retry extractor on failure
                 query,
             ]
 
@@ -340,6 +344,10 @@ class YouTubeService(SongProcessor):
                 "5",
                 "--fragment-retries",
                 "5",
+                "--sleep-requests",
+                "1",  # Add delay between requests
+                "--extractor-retries",
+                "3",  # Retry extractor on failure
                 "--user-agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "--extractor-args",
@@ -426,7 +434,11 @@ class YouTubeService(SongProcessor):
                 "--format",
                 "worst",  # Use worst quality for basic info
                 "--socket-timeout",
-                "15",
+                "20",  # Increased from 15
+                "--retries",
+                "3",
+                "--sleep-requests",
+                "1",  # Add delay
                 query,
             ]
 
@@ -438,10 +450,11 @@ class YouTubeService(SongProcessor):
 
             try:
                 stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), timeout=20
+                    process.communicate(), 
+                    timeout=ServiceConstants.BASIC_INFO_TIMEOUT  # Use config constant (30s)
                 )
             except asyncio.TimeoutError:
-                logger.error(f"Basic info extraction timeout after 20s for {query}")
+                logger.error(f"Basic info extraction timeout after {ServiceConstants.BASIC_INFO_TIMEOUT}s for {query}")
                 process.kill()
                 raise
 

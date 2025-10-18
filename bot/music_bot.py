@@ -85,6 +85,10 @@ class MusicBot(commands.Bot):
             # Initialize message update manager
             await message_update_manager.initialize()
             logger.info("✅ Message update manager initialized")
+            
+            # Start voice connection health check
+            asyncio.create_task(self._voice_health_check_loop())
+            logger.info("💓 Voice health check started")
 
             # Sync slash commands
             await self._sync_commands()
@@ -92,6 +96,31 @@ class MusicBot(commands.Bot):
         except Exception as e:
             logger.error(f"❌ Failed to initialize bot: {e}")
             raise
+
+    async def _voice_health_check_loop(self):
+        """Periodically check voice connections and recover if needed"""
+        await self.wait_until_ready()
+        
+        while not self.is_closed():
+            try:
+                # Check every 60 seconds
+                await asyncio.sleep(60)
+                
+                # Check all voice clients
+                for voice_client in self.voice_clients:
+                    if not voice_client.is_connected():
+                        guild_id = voice_client.guild.id
+                        logger.warning(f"💔 Detected disconnected voice client in guild {guild_id}")
+                        
+                        # Try to recover
+                        try:
+                            await audio_service.ensure_voice_connection(guild_id)
+                        except Exception as e:
+                            logger.error(f"Failed to recover voice connection for guild {guild_id}: {e}")
+                
+            except Exception as e:
+                logger.error(f"Error in voice health check: {e}")
+                await asyncio.sleep(60)  # Continue checking even on error
 
     async def _sync_commands(self):
         """Sync slash commands with rate limit handling"""
@@ -215,6 +244,60 @@ class MusicBot(commands.Bot):
         await VoiceStateHelper.handle_auto_disconnect(
             voice_client, member.guild.id, delay=60
         )
+
+    async def on_error(self, event_method: str, *args, **kwargs):
+        """Handle errors in event listeners"""
+        import traceback
+        import sys
+        
+        # Get exception info
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        
+        # Log the error
+        logger.error(f"Error in {event_method}: {exc_value}")
+        logger.error(f"Traceback: {''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))}")
+        
+        # Handle voice connection errors specifically
+        if event_method == "on_voice_state_update" or "voice" in event_method.lower():
+            # Check if it's a timeout or connection error
+            error_msg = str(exc_value).lower()
+            if any(keyword in error_msg for keyword in ["timeout", "cancelled", "websocket", "connection"]):
+                logger.warning(f"Voice connection issue detected: {exc_value}")
+                await self._attempt_voice_recovery()
+
+    async def _attempt_voice_recovery(self):
+        """Attempt to recover from voice connection issues"""
+        try:
+            logger.info("🔄 Attempting voice connection recovery...")
+            
+            # Wait a bit before recovery
+            await asyncio.sleep(2)
+            
+            # Check all voice clients
+            for voice_client in self.voice_clients:
+                if not voice_client.is_connected():
+                    guild_id = voice_client.guild.id
+                    logger.warning(f"Voice client disconnected for guild {guild_id}")
+                    
+                    # Try to get the channel we were in
+                    queue_manager = audio_service.get_queue_manager(guild_id)
+                    if queue_manager and queue_manager.current_song:
+                        # Get the voice channel
+                        guild = voice_client.guild
+                        # Try to reconnect
+                        try:
+                            logger.info(f"Attempting to reconnect voice in guild {guild_id}")
+                            # The audio service will handle reconnection
+                            await audio_service.ensure_voice_connection(guild_id)
+                        except Exception as e:
+                            logger.error(f"Failed to reconnect voice: {e}")
+            
+            logger.info("✅ Voice recovery attempt completed")
+            
+        except Exception as e:
+            logger.error(f"Error during voice recovery: {e}")
+            import traceback
+            logger.error(f"Recovery traceback: {traceback.format_exc()}")
 
     def _setup_commands(self):
         """Setup all bot slash commands using command registry"""

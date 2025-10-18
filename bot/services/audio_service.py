@@ -151,6 +151,83 @@ class AudioService:
         voice_client = self._voice_clients.get(guild_id)
         return voice_client is not None and voice_client.is_connected()
 
+    async def ensure_voice_connection(self, guild_id: int) -> bool:
+        """Ensure voice connection is active, reconnect if needed"""
+        voice_client = self._voice_clients.get(guild_id)
+        
+        # Already connected and working
+        if voice_client and voice_client.is_connected():
+            return True
+        
+        # Not connected - need to find channel and reconnect
+        async with self._voice_lock:
+            try:
+                # If we have a voice client but it's disconnected
+                if voice_client:
+                    try:
+                        # Try to cleanup old connection first
+                        await asyncio.wait_for(
+                            voice_client.disconnect(),
+                            timeout=2.0
+                        )
+                    except:
+                        pass  # Ignore errors during cleanup
+                    finally:
+                        if guild_id in self._voice_clients:
+                            del self._voice_clients[guild_id]
+                
+                # Get the guild's queue to find where to reconnect
+                queue_manager = self._queue_managers.get(guild_id)
+                if not queue_manager or not queue_manager.current_song:
+                    logger.warning(f"No active queue for guild {guild_id}, cannot reconnect")
+                    return False
+                
+                # Find the guild
+                guild = voice_client.guild if voice_client else None
+                if not guild:
+                    logger.error(f"Cannot find guild {guild_id}")
+                    return False
+                
+                # Try to find a voice channel with bot member
+                bot_member = guild.me
+                if bot_member and bot_member.voice and bot_member.voice.channel:
+                    channel = bot_member.voice.channel
+                    logger.info(f"🔄 Reconnecting to voice channel: {channel.name}")
+                    
+                    # Reconnect
+                    new_voice_client = await asyncio.wait_for(
+                        channel.connect(),
+                        timeout=ServiceConstants.VOICE_CONNECT_TIMEOUT
+                    )
+                    
+                    # Update connection
+                    self._voice_clients[guild_id] = new_voice_client
+                    self.resource_manager.register_connection(guild_id, new_voice_client)
+                    
+                    # Reinitialize audio player with new voice client
+                    await self._initialize_audio_player(guild_id, new_voice_client)
+                    
+                    logger.info(f"✅ Successfully reconnected to {channel.name}")
+                    
+                    # Resume playback if there was a current song
+                    if queue_manager.current_song:
+                        logger.info("🎵 Resuming playback after reconnection")
+                        await self.play_next_song(guild_id)
+                    
+                    return True
+                else:
+                    logger.warning(f"Bot not in any voice channel in guild {guild_id}")
+                    return False
+                    
+            except asyncio.TimeoutError:
+                logger.error(f"Reconnection timeout for guild {guild_id}")
+                return False
+            except Exception as e:
+                logger.error(f"Failed to reconnect voice in guild {guild_id}: {e}")
+                import traceback
+                logger.error(f"Reconnection traceback: {traceback.format_exc()}")
+                return False
+
     def is_playing(self, guild_id: int) -> bool:
         """Check if audio is playing in guild"""
         audio_player = self._audio_players.get(guild_id)

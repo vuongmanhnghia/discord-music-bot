@@ -35,15 +35,15 @@ class ServiceConstants:
     SWITCH_CLEANUP_DELAY = 0.5  # delay for cleanup after stopping playback
 
     # YouTube Processing
-    YOUTUBE_EXTRACT_TIMEOUT_BASE = 30  # base timeout for YouTube extraction
+    YOUTUBE_EXTRACT_TIMEOUT_BASE = 45  # base timeout for YouTube extraction (increased from 30)
     YOUTUBE_EXTRACT_TIMEOUT_INCREMENT = 15  # additional timeout per retry
     YOUTUBE_RETRY_MAX_ATTEMPTS = 3  # max retry attempts for YouTube
-    YOUTUBE_STREAM_TIMEOUT = 45  # timeout for stream URL extraction
-    YOUTUBE_RETRY_DELAYS = [1, 2, 4]  # exponential backoff delays
+    YOUTUBE_STREAM_TIMEOUT = 60  # timeout for stream URL extraction (increased from 45)
+    YOUTUBE_RETRY_DELAYS = [2, 5, 10]  # exponential backoff delays (increased)
 
     # Metadata Extraction
-    METADATA_EXTRACTION_TIMEOUT = 30  # timeout for metadata extraction
-    BASIC_INFO_TIMEOUT = 20  # timeout for basic info fallback
+    METADATA_EXTRACTION_TIMEOUT = 45  # timeout for metadata extraction (increased from 30)
+    BASIC_INFO_TIMEOUT = 30  # timeout for basic info fallback (increased from 20)
 
     # Connection
     VOICE_CONNECT_TIMEOUT = 30.0  # timeout for voice channel connection
