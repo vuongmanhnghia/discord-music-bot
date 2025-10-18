@@ -436,26 +436,68 @@ class YouTubeService(SongProcessor):
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=20)
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=20
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"Basic info extraction timeout after 20s for {query}")
+                process.kill()
+                raise
+
+            if stderr:
+                stderr_text = stderr.decode().strip()
+                if stderr_text:
+                    logger.warning(f"yt-dlp stderr: {stderr_text[:200]}")
 
             if process.returncode == 0 and stdout.strip():
-                info = json.loads(stdout.decode())
-                return self._parse_youtube_metadata(info)
+                try:
+                    info = json.loads(stdout.decode())
+                    metadata = self._parse_youtube_metadata(info)
+                    if metadata:
+                        return metadata
+                except json.JSONDecodeError as je:
+                    logger.error(
+                        f"JSON decode error: {je}. Output: {stdout.decode()[:200]}"
+                    )
 
             # Ultimate fallback: create basic metadata from URL
-            logger.warning("Creating basic metadata from URL")
+            logger.warning(f"Creating basic metadata from URL: {query}")
+            # Extract video ID from URL
+            video_id = query
+            if "youtube.com" in query or "youtu.be" in query:
+                import re
+
+                match = re.search(r"(?:v=|/)([a-zA-Z0-9_-]{11})", query)
+                if match:
+                    video_id = match.group(1)
+
             return SongMetadata(
-                title=f"YouTube Video ({query[-11:]})",  # Use video ID as title
+                title=f"YouTube Video {video_id}",
                 artist="Unknown Artist",
                 duration=0,
                 thumbnail_url="",
             )
 
+        except asyncio.TimeoutError:
+            logger.error(f"Basic info extraction timeout for: {query}")
+            # Return minimal metadata instead of None
+            return SongMetadata(
+                title="YouTube Video (Timeout)",
+                artist="Unknown",
+                duration=0,
+                thumbnail_url="",
+            )
         except Exception as e:
-            logger.error(f"Basic info extraction failed: {e}")
+            import traceback
+
+            error_msg = str(e) if str(e) else type(e).__name__
+            logger.error(f"Basic info extraction failed: {error_msg}")
+            logger.error(f"Query: {query}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             # Last resort: minimal metadata
             return SongMetadata(
-                title="YouTube Video",
+                title="YouTube Video (Error)",
                 artist="Unknown",
                 duration=0,
                 thumbnail_url="",

@@ -3,6 +3,8 @@ music/*
 venv/
 .DS_Store
 
+data/
+
 *.log
 cache/
 
