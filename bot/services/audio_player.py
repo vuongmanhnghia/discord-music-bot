@@ -5,8 +5,8 @@ from typing import Optional
 import discord
 from discord import FFmpegPCMAudio, PCMVolumeTransformer
 
+from ..services.stream_refresh import stream_refresh_service
 from ..domain.entities.song import Song
-from ..config.service_constants import ServiceConstants
 from ..pkg.logger import logger
 
 
@@ -44,7 +44,7 @@ class AudioPlayer:
                 return False
 
             # ✅ 2. Refresh stream URL if needed
-            if not await self._ensure_valid_stream_url(song):
+            if not await self._ensure_valid_stream_url(song, force_refresh=True):
                 return False
 
             # ✅ 3. Create and play audio source
@@ -75,15 +75,10 @@ class AudioPlayer:
         logger.error(f"⏱️ Timeout waiting for: {song.display_name}")
         return False
 
-    async def _ensure_valid_stream_url(self, song: Song) -> bool:
+    async def _ensure_valid_stream_url(
+        self, song: Song, force_refresh: bool = False
+    ) -> bool:
         """Ensure stream URL is valid and fresh"""
-        from ..services.stream_refresh import stream_refresh_service
-
-        # Check if URL needs refresh
-        if await stream_refresh_service.should_refresh_url(song):
-            if not await stream_refresh_service.refresh_stream_url(song):
-                logger.error(f"❌ Failed to refresh URL for: {song.display_name}")
-                return False
 
         # Validate URL
         if not song.stream_url or not song.stream_url.startswith(
@@ -92,6 +87,15 @@ class AudioPlayer:
             logger.error(f"❌ Invalid stream URL: {song.display_name}")
             return False
 
+        if force_refresh:
+            logger.info(f"🔄 Force refreshing stream URL for: {song.display_name}")
+            if not await stream_refresh_service.refresh_stream_url(song):
+                logger.error(f"❌ Failed to refresh URL for: {song.display_name}")
+                return False
+        elif await stream_refresh_service.should_refresh_url(song):
+            if not await stream_refresh_service.refresh_stream_url(song):
+                logger.error(f"❌ Failed to refresh URL for: {song.display_name}")
+                return False
         return True
 
     async def _start_playback(self, song: Song) -> bool:
@@ -137,18 +141,61 @@ class AudioPlayer:
         This is called by FFmpeg in a different thread
         """
         if error:
-            logger.error(f"❌ Playback error for {song.display_name}: {error}")
+            error_str = str(error).lower()
+            is_stream_error = any(
+                keyword in error_str
+                for keyword in ["403", "404", "expired", "unavailable", "http error"]
+            )
+
+            if is_stream_error:
+                logger.warning(
+                    f"⚠️ Stream error detected for {song.display_name}: {error}"
+                )
+                # Schedule retry with fresh URL
+                asyncio.run_coroutine_threadsafe(
+                    self._retry_with_fresh_url(song), self._loop
+                )
+                return
+            else:
+                logger.error(f"❌ Playback error for {song.display_name}: {error}")
 
         # Reset state
         self.is_playing = False
         self.is_paused = False
         self.current_song = None
 
+        # ✅ Không auto-play nếu đang disconnect
         if self._is_disconnected:
             logger.debug(f"Skipping auto-play: guild {self.guild_id} is disconnecting")
             return
 
+        # ✅ AUTO-PLAY NEXT SONG (including loop)
         asyncio.run_coroutine_threadsafe(self._play_next_song(), self._loop)
+
+    async def _retry_with_fresh_url(self, song: Song):
+        """Retry playing the same song with refreshed URL"""
+        try:
+            logger.info(f"🔄 Retrying with fresh URL: {song.display_name}")
+
+            # Force refresh URL
+            from ..services.stream_refresh import stream_refresh_service
+
+            if await stream_refresh_service.refresh_stream_url(song):
+                # Retry playback
+                success = await self.play_song(song)
+                if success:
+                    logger.info(f"✅ Successfully retried: {song.display_name}")
+                else:
+                    # If still fails, skip to next
+                    logger.error(f"❌ Retry failed, skipping: {song.display_name}")
+                    await self._play_next_song()
+            else:
+                logger.error(f"❌ Failed to refresh URL, skipping: {song.display_name}")
+                await self._play_next_song()
+
+        except Exception as e:
+            logger.error(f"❌ Error in retry_with_fresh_url: {e}")
+            await self._play_next_song()
 
     async def _play_next_song(self):
         """Auto-play next song in queue (including loop)"""
@@ -240,22 +287,32 @@ class AudioPlayer:
             except ImportError:
                 memory_mb = 1024
 
-            # ✅ Simple, optimized FFmpeg options
             if is_low_power or memory_mb < 2048:
                 # Low-power devices
                 before_opts = (
-                    "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+                    "-reconnect 1 "
+                    "-reconnect_streamed 1 "
+                    "-reconnect_delay_max 10 "
+                    "-reconnect_on_network_error 1 "
+                    "-reconnect_on_http_error 4xx,5xx"
                 )
                 opts = "-vn -bufsize 32k -maxrate 96k"
             else:
                 # Normal devices
                 before_opts = (
-                    "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+                    "-reconnect 1 "
+                    "-reconnect_streamed 1 "
+                    "-reconnect_delay_max 10 "
+                    "-reconnect_on_network_error 1 "
+                    "-reconnect_on_http_error 4xx,5xx"
                 )
                 opts = "-vn -bufsize 64k -maxrate 128k"
 
             audio_source = FFmpegPCMAudio(
-                stream_url, before_options=before_opts, options=opts
+                stream_url,
+                before_options=before_opts,
+                options=opts,
+                executable="ffmpeg",
             )
 
             return PCMVolumeTransformer(audio_source, volume=self.volume)

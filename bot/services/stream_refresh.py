@@ -7,6 +7,7 @@ import asyncio
 import time
 from typing import Dict, Tuple
 
+from ..utils.youtube import YouTubePlaylistHandler
 from ..domain.entities.song import Song
 from ..config.constants import STREAM_URL_MAX_AGE
 from ..config.service_constants import ServiceConstants
@@ -23,46 +24,49 @@ class StreamRefreshService:
         self.url_cache: Dict[str, Tuple[str, float]] = (
             {}
         )  # original_input -> (stream_url, timestamp)
+        self.youtube_handler = YouTubePlaylistHandler()
+        self.URL_MAX_AGE = 5 * 3600  # 5 hours in seconds
 
     async def should_refresh_url(self, song: Song) -> bool:
-        """Check if stream URL should be refreshed"""
-        if not self.enabled or not song.stream_url:
-            return False
+        """Check if stream URL needs refresh"""
+        if not song.stream_url:
+            return True
 
-        # Check if URL is older than max age
-        if (
-            hasattr(song, "stream_url_timestamp")
-            and song.stream_url_timestamp is not None
-        ):
+        # Check age of URL
+        if hasattr(song, "stream_url_timestamp"):
             age = time.time() - song.stream_url_timestamp
-            return age > STREAM_URL_MAX_AGE
+            if age > self.URL_MAX_AGE:
+                logger.info(
+                    f"🕐 URL expired for {song.display_name} (age: {age//60}min)"
+                )
+                return True
 
         return False
 
     async def refresh_stream_url(self, song: Song) -> bool:
-        """Refresh stream URL for a song"""
+        """Refresh stream URL using yt-dlp"""
         try:
-            if not song.original_input:
+            logger.info(f"🔄 Refreshing stream URL for: {song.display_name}")
+
+            # Re-extract info
+            info = await self.youtube_handler.extract_info(song.original_input)
+            if not info or "url" not in info:
+                logger.error(f"❌ Failed to extract new URL for: {song.display_name}")
                 return False
 
-            from ..services.processing import YouTubeService
+            # Update song with new URL
+            old_url = song.stream_url
+            song.stream_url = info["url"]
+            song.stream_url_timestamp = time.time()  # ✅ Track timestamp
 
-            processor = YouTubeService()
-            new_stream_url = await processor._get_stream_url(song.original_input)
+            logger.info(f"✅ URL refreshed for: {song.display_name}")
+            logger.debug(f"Old URL: {old_url[:100]}...")
+            logger.debug(f"New URL: {song.stream_url[:100]}...")
 
-            if new_stream_url:
-                song.stream_url = new_stream_url
-                song.stream_url_timestamp = time.time()
-                self.url_cache[song.original_input] = (new_stream_url, time.time())
-                self.refresh_count += 1
-                self.last_refresh_time = time.time()
-                return True
-            else:
-                logger.error(f"Failed to refresh stream URL: {song.display_name}")
-                return False
+            return True
 
         except Exception as e:
-            logger.error(f"Error refreshing stream URL for {song.display_name}: {e}")
+            logger.error(f"❌ Error refreshing URL for {song.display_name}: {e}")
             return False
 
     async def refresh_current_song_if_needed(self, song: Song) -> bool:

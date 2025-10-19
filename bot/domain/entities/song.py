@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Dict, Any
 import uuid
+from ...utils.events import song_event_bus, SongUpdateEvent
+import asyncio
 
 from ..valueobjects.source_type import SourceType
 from ..valueobjects.song_status import SongStatus
@@ -22,6 +24,7 @@ class Song:
     status: SongStatus = SongStatus.PENDING
     metadata: Optional[SongMetadata] = None
     stream_url: Optional[str] = None
+    stream_url_timestamp: float = 0.0
     error_message: Optional[str] = None
 
     # Timestamps
@@ -63,7 +66,7 @@ class Song:
         self.metadata = metadata
         self.stream_url = stream_url
         self.error_message = None
-        
+
         # Publish song update event for real-time title updates
         self._publish_update_event()
 
@@ -76,11 +79,8 @@ class Song:
     def _publish_update_event(self) -> None:
         """Publish song metadata update event"""
         try:
-            from ...utils.song_events import song_event_bus, SongUpdateEvent
-            import asyncio
-            
             event = SongUpdateEvent(song_id=self.id, guild_id=self.guild_id)
-            
+
             # Try to publish in event loop if available
             try:
                 loop = asyncio.get_running_loop()
@@ -101,7 +101,9 @@ class Song:
             "stream_url": self.stream_url,
             "error_message": self.error_message,
             "created_at": self.created_at.isoformat(),
-            "processed_at": self.processed_at.isoformat() if self.processed_at else None,
+            "processed_at": (
+                self.processed_at.isoformat() if self.processed_at else None
+            ),
             "requested_by": self.requested_by,
             "guild_id": self.guild_id,
         }
