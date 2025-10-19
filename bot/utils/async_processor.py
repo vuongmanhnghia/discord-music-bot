@@ -26,6 +26,8 @@ from ..domain.entities.song import Song
 from ..domain.valueobjects.song_status import SongStatus
 from ..pkg.logger import setup_logger
 
+from ..services import playback_service
+
 logger = setup_logger(__name__)
 
 
@@ -429,9 +431,6 @@ class AsyncSongProcessor:
         song = task.song
 
         try:
-            # Import playback_service here to avoid circular imports
-            from ..services.playback import playback_service
-
             # Step 1: Validate URL (20%)
             task.progress = 20
             await self._send_progress_update(task)

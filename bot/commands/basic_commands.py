@@ -3,154 +3,198 @@ Basic commands for the music bot
 Handles ping, join, leave commands
 """
 
-import time
 import discord
 
 from . import BaseCommandHandler
 from ..pkg.logger import logger
-from ..services.audio_service import audio_service
 from ..utils.discord_ui import EmbedFactory
 from ..config.constants import ERROR_MESSAGES
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..music_bot import MusicBot
 
 
 class BasicCommandHandler(BaseCommandHandler):
     """Handler for basic bot commands"""
 
+    def __init__(self, bot: "MusicBot"):
+        super().__init__(bot)
+        self.audio_service = bot.audio_service
+
     def setup_commands(self):
         """Setup basic commands"""
 
         @self.bot.tree.command(name="ping", description="Kiểm tra độ trễ bot")
-        async def ping_command(interaction: discord.Interaction):
-            """🏓 Check bot latency"""
+        async def ping(interaction: discord.Interaction):
+            """🏓 Ping command"""
             try:
-                start_time = time.time()
-                await interaction.response.send_message("🏓 Pong!")
-                end_time = time.time()
-
                 latency = round(self.bot.latency * 1000)
-                response_time = round((end_time - start_time) * 1000)
-
                 embed = EmbedFactory.success(
-                    "🏓 Pong!",
-                    "Bot đang hoạt động tốt!",
-                    details={
-                        "Độ trễ API": f"{latency}ms",
-                        "Thời gian phản hồi": f"{response_time}ms",
-                    },
-                    footer="Thời gian tính bằng milliseconds",
+                    "Pong!",
+                    f"> Latency: **{latency}ms**",
                 )
-                await interaction.edit_original_response(content=None, embed=embed)
-
+                await interaction.response.send_message(embed=embed, ephemeral=True)
             except Exception as e:
                 await self.handle_command_error(interaction, e, "ping")
 
         @self.bot.tree.command(name="join", description="Tham gia voice channel")
-        async def join_command(interaction: discord.Interaction):
-            """🔌 Join voice channel"""
+        async def join(interaction: discord.Interaction):
+            """🔊 Join voice channel"""
             try:
+                # Check guild context
                 if not interaction.guild:
                     await interaction.response.send_message(
                         ERROR_MESSAGES["guild_only"], ephemeral=True
                     )
                     return
 
+                # Check if user is in voice channel
                 if not await self.ensure_user_in_voice(interaction):
                     return
 
-                user_voice_channel = interaction.user.voice.channel
+                user_channel = interaction.user.voice.channel
 
-                # Check if already connected to the same channel
-                if interaction.guild.voice_client:
-                    if interaction.guild.voice_client.channel == user_voice_channel:
+                # Check if bot is already in the same channel
+                voice_client = interaction.guild.voice_client
+                if voice_client and voice_client.is_connected():
+                    if voice_client.channel == user_channel:
+                        # Already in same channel
                         embed = EmbedFactory.info(
-                            "Đã trong voice channel",
-                            f"Bot đã ở trong **{user_voice_channel.name}** rồi!",
-                            info_fields={"Kênh hiện tại": user_voice_channel.name},
-                            footer="Bot đã kết nối",
-                        )
-                        await interaction.response.send_message(
-                            embed=embed, ephemeral=True
-                        )
-                        return
-                    else:
-                        # Move to new channel
-                        await interaction.guild.voice_client.move_to(user_voice_channel)
-                        embed = EmbedFactory.success(
-                            "Đã chuyển kênh",
-                            f"Bot đã di chuyển đến **{user_voice_channel.name}**!",
-                            details={"Kênh mới": user_voice_channel.name},
-                            footer="Bot đã sẵn sàng!",
+                            "🔊 Already Connected",
+                            f"Bot is already in **{user_channel.name}**",
+                            details={"Status": "Connected"},
+                            footer="Use /play to start playing music",
                         )
                         await interaction.response.send_message(embed=embed)
                         return
+                    else:
+                        # Move to user's channel
+                        logger.info(
+                            f"Moving bot from {voice_client.channel.name} to {user_channel.name}"
+                        )
 
                 # Connect to voice channel
-                try:
-                    voice_client = await user_voice_channel.connect()
+                success = await self.audio_service.connect_to_channel(user_channel)
 
-                    # Initialize audio service for this guild
-                    await audio_service.initialize_guild(
-                        interaction.guild.id, voice_client
-                    )
-
+                if success:
                     embed = EmbedFactory.success(
-                        "Đã kết nối",
-                        f"Bot đã tham gia **{user_voice_channel.name}**!",
-                        details={"Channel": user_voice_channel.name},
-                        footer="Sẵn sàng phát nhạc!",
+                        "🔊 Joined Voice Channel",
+                        f"Connected to **{user_channel.name}**",
+                        details={"Channel": user_channel.name, "Status": "Connected"},
+                        footer="Ready to play music! Use /play to start",
                     )
                     await interaction.response.send_message(embed=embed)
-
-                    logger.info(
-                        f"Connected to voice channel: {user_voice_channel.name} in {interaction.guild.name}"
+                else:
+                    embed = EmbedFactory.error(
+                        "❌ Connection Failed",
+                        f"Could not connect to **{user_channel.name}**",
+                        suggestions=["Check bot permissions", "Try again in a moment"],
                     )
-
-                except discord.ClientException as e:
-                    error_msg = f"{ERROR_MESSAGES['cannot_connect_voice']}: {str(e)}"
-                    await interaction.response.send_message(error_msg, ephemeral=True)
-                    logger.error(f"Failed to connect to voice: {e}")
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "join")
 
-        @self.bot.tree.command(name="leave", description="Rời voice channel")
-        async def leave_command(interaction: discord.Interaction):
+        @self.bot.tree.command(name="leave", description="Bot rời khỏi voice channel")
+        async def leave(interaction: discord.Interaction):
             """👋 Leave voice channel"""
             try:
+                # Check guild context
                 if not interaction.guild:
                     await interaction.response.send_message(
                         ERROR_MESSAGES["guild_only"], ephemeral=True
                     )
                     return
 
+                # Check if bot is connected
                 voice_client = interaction.guild.voice_client
-                if not voice_client:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["not_connected"], ephemeral=True
+                if not voice_client or not voice_client.is_connected():
+                    embed = EmbedFactory.info(
+                        "ℹ️ Not Connected",
+                        "Bot is not in any voice channel",
+                        footer="Use /join to connect",
                     )
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
                     return
 
-                if not await self.ensure_same_voice_channel(interaction):
-                    return
+                channel_name = voice_client.channel.name
 
-                channel_name = (
-                    voice_client.channel.name if voice_client.channel else "Unknown"
+                # Disconnect from voice channel
+                success = await self.audio_service.disconnect_from_guild(
+                    interaction.guild.id
                 )
 
-                # Cleanup audio service and disconnect from voice
-                await audio_service.disconnect_from_guild(interaction.guild.id)
-
-                embed = EmbedFactory.success(
-                    "👋 Đã rời khỏi kênh",
-                    "Bot đã ngắt kết nối voice!",
-                    details={"Trạng thái": "Đã ngắt kết nối"},
-                    footer="Dùng /join để kết nối lại",
-                )
-                await interaction.response.send_message(embed=embed)
-
-                logger.info(
-                    f"Left voice channel: {channel_name} in {interaction.guild.name}"
-                )
+                if success:
+                    embed = EmbedFactory.success(
+                        "👋 Disconnected",
+                        f"Left **{channel_name}**",
+                        details={"Status": "Disconnected", "Queue": "Cleared"},
+                        footer="Use /join to reconnect",
+                    )
+                    await interaction.response.send_message(embed=embed)
+                else:
+                    embed = EmbedFactory.warning(
+                        "⚠️ Disconnect Warning",
+                        "Bot disconnected but some cleanup may have failed",
+                    )
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
 
             except Exception as e:
-                await self.handle_command_error(interaction, e, "leave")
+                await self.handle_command_error(
+                    interaction, e, "leave"
+                ) @ self.bot.tree.command(name="stats", description="Xem thống kê bot")
+
+        async def stats(interaction: discord.Interaction):
+            """📊 Bot statistics"""
+            try:
+                stats = self.audio_service.get_resource_stats()
+
+                embed = discord.Embed(
+                    title="📊 Bot Statistics",
+                    description="Current bot status and resource usage",
+                    color=discord.Color.blue(),
+                )
+
+                # Audio statistics
+                embed.add_field(
+                    name="🎵 Active Queues",
+                    value=f"`{stats.get('active_queues', 0)}`",
+                    inline=True,
+                )
+                embed.add_field(
+                    name="🔊 Voice Connections",
+                    value=f"`{stats.get('voice_connections', 0)}`",
+                    inline=True,
+                )
+                embed.add_field(
+                    name="🎮 Active Players",
+                    value=f"`{stats.get('active_players', 0)}`",
+                    inline=True,
+                )
+
+                # Bot statistics
+                embed.add_field(
+                    name="🌐 Guilds",
+                    value=f"`{len(self.bot.guilds)}`",
+                    inline=True,
+                )
+                embed.add_field(
+                    name="📶 Latency",
+                    value=f"`{round(self.bot.latency * 1000)}ms`",
+                    inline=True,
+                )
+                embed.add_field(
+                    name="👥 Users",
+                    value=f"`{sum(guild.member_count for guild in self.bot.guilds)}`",
+                    inline=True,
+                )
+
+                embed.set_footer(text=f"Requested by {interaction.user.display_name}")
+                embed.timestamp = discord.utils.utcnow()
+
+                await interaction.response.send_message(embed=embed)
+
+            except Exception as e:
+                await self.handle_command_error(interaction, e, "stats")

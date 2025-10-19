@@ -1,10 +1,10 @@
 """Playlist processing utilities for bot"""
 
-from typing import List, Optional
+from typing import List
 import discord
 
 from ..pkg.logger import logger
-from ..services.playback import playback_service
+from ..services import playback_service
 
 
 class PlaylistProcessor:
@@ -110,84 +110,3 @@ class PlaylistProcessor:
             ),
             color=discord.Color.green() if added_count > 0 else discord.Color.red(),
         )
-
-
-class PlaylistResultFactory:
-    """Factory for creating playlist result embeds"""
-
-    @staticmethod
-    def create_use_result(
-        success: bool,
-        message: str,
-        playlist_name: str,
-        guild_id: int,
-        active_playlists: dict,
-    ) -> discord.Embed:
-        """Create result embed for /use command"""
-        if success:
-            active_playlists[guild_id] = playlist_name
-
-            if "is empty" in message:
-                return discord.Embed(
-                    title="✅ Đã chọn playlist trống",
-                    description=(
-                        f"📋 **{playlist_name}** đã được đặt làm playlist hiện tại\n"
-                        f"⚠️ {message}\n"
-                        f"💡 Sử dụng `/add <song>` để thêm bài hát"
-                    ),
-                    color=discord.Color.orange(),
-                )
-            else:
-                return discord.Embed(
-                    title="✅ Đã load playlist",
-                    description=message,
-                    color=discord.Color.green(),
-                )
-        else:
-            return discord.Embed(
-                title="❌ Lỗi",
-                description=message,
-                color=discord.Color.red(),
-            )
-
-    @staticmethod
-    def create_lazy_use_result(
-        success: bool,
-        message: str,
-        playlist_name: str,
-        guild_id: int,
-        job_id: Optional[str],
-        active_playlists: dict,
-    ) -> discord.Embed:
-        """Create result embed for lazy /use command"""
-        if success:
-            active_playlists[guild_id] = playlist_name
-
-            embed = discord.Embed(
-                title="Kích hoạt playlist thành công",
-                description=f"**{playlist_name} đã được load**\n\n{message}\n\n",
-                color=discord.Color.blue(),
-            )
-
-            if job_id:
-                embed.add_field(
-                    name="📊 Lazy Loading Info",
-                    value=(
-                        f"**Job ID**: `{job_id}`\n"
-                        f"**Strategy**: Load 3 songs immediately, rest in background\n"
-                        f"**Progress**: Use `/playlist_status` to check progress"
-                    ),
-                    inline=False,
-                )
-
-            embed.set_footer(
-                text="💡 First few songs load instantly, others process in background"
-            )
-        else:
-            embed = discord.Embed(
-                title="❌ Lỗi",
-                description=message,
-                color=discord.Color.red(),
-            )
-
-        return embed

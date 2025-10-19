@@ -3,15 +3,12 @@ Playback commands for the music bot
 Handles play, skip, pause, resume, stop, volume, now, repeat commands
 """
 
-from typing import Optional
 import discord
 from discord import app_commands
+from typing import Optional
 
 from . import BaseCommandHandler
 from ..pkg.logger import logger
-from ..services.playback import playback_service
-from ..utils.youtube import YouTubePlaylistHandler
-from ..utils.playlist_processors import PlaylistProcessor
 from ..utils.core import Validator
 from ..utils.events import message_update_manager
 from ..utils.decorators import (
@@ -34,9 +31,23 @@ from ..utils.discord_ui import (
 
 from ..config.constants import ERROR_MESSAGES
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..music_bot import MusicBot
+
 
 class PlaybackCommandHandler(BaseCommandHandler):
     """Handler for playback-related commands"""
+
+    def __init__(self, bot: "MusicBot"):
+        super().__init__(bot)
+        self.audio_service = bot.audio_service
+        self.playback_service = bot.playback_service
+
+        # Utils
+        self.playlist_processor = bot.playlist_processor
+        self.youtube_handler = bot.youtube_handler
 
     def setup_commands(self):
         """Setup playback commands"""
@@ -55,9 +66,8 @@ class PlaybackCommandHandler(BaseCommandHandler):
             interaction: discord.Interaction, query: Optional[str] = None
         ):
             """▶️ Play music from URL/search query or from active playlist"""
-            # Handle two modes: with query or from active playlist
+            # Validate
             if query:
-                # Validate and sanitize query
                 query = Validator.sanitize_query(query)
                 is_valid, error_msg = Validator.validate_query_length(query)
                 if not is_valid:
@@ -84,7 +94,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     return
 
                 # Skip current song
-                success, message = await playback_service.skip_current_song(
+                success, message = await self.playback_service.skip_current_song(
                     interaction.guild.id
                 )
 
@@ -150,7 +160,9 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 if not await self.ensure_same_voice_channel(interaction):
                     return
 
-                success = await playback_service.stop_playback(interaction.guild.id)
+                success = await self.playback_service.stop_playback(
+                    interaction.guild.id
+                )
 
                 if success:
                     embed = create_stop_embed()
@@ -180,7 +192,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 # Convert volume from 0-100 to 0.0-1.0 for audio player
                 volume_float = volume / 100.0
 
-                success, message = await playback_service.set_volume(
+                success, message = await self.playback_service.set_volume(
                     interaction.guild.id, volume_float
                 )
 
@@ -252,7 +264,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     )
                     return
 
-                success = await playback_service.set_repeat_mode(
+                success = await self.playback_service.set_repeat_mode(
                     interaction.guild.id, mode
                 )
 
@@ -320,26 +332,24 @@ class PlaybackCommandHandler(BaseCommandHandler):
         self, interaction: discord.Interaction, query: str
     ):
         """Handle play command with query parameter"""
-        # Check if it's a YouTube playlist (only explicit playlist URLs)
-        if YouTubePlaylistHandler.is_playlist_url(query):
-            # Handle YouTube playlist - use InteractionManager for long operation
+        if self.youtube_handler.is_playlist_url(query):
+
             async def process_youtube_playlist():
-                # Extract playlist videos
                 success, video_urls, message = (
-                    await YouTubePlaylistHandler.extract_playlist_videos(query)
+                    await self.youtube_handler.extract_playlist_videos(query)
                 )
 
                 if not success or not video_urls:
                     return self.create_error_embed("Lỗi Playlist", message)
 
-                return await PlaylistProcessor.process_playlist_videos(
+                return await self.playlist_processor.process_playlist_videos(
                     video_urls,
                     message,
                     interaction.guild.id,
                     str(interaction.user),
                 )
 
-            result = await self.bot.interaction_manager.handle_long_operation(
+            await self.bot.interaction_manager.handle_long_operation(
                 interaction,
                 process_youtube_playlist,
                 "Đang xử lý YouTube Playlist...",
@@ -356,21 +366,16 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
         try:
             # Check if safe to add (not during playlist switch)
-            from ..services.playlist_switch import playlist_switch_manager
-
-            if playlist_switch_manager.is_switching(interaction.guild.id):
-                switching_to = playlist_switch_manager.get_switching_playlist(
-                    interaction.guild.id
-                )
+            if interaction.guild.id in self.bot._switching_playlists:
                 error_embed = self.create_error_embed(
-                    "Đang kích hoạt playlist",
-                    f"Đang chuyển sang playlist **{switching_to}**, vui lòng chờ...",
+                    "⚠️ Đang xử lý",
+                    "Bot đang chuyển playlist, vui lòng đợi...",
                 )
                 await interaction.followup.send(embed=error_embed)
                 return
 
             # Process the song request
-            success, message, song = await playback_service.play_request(
+            success, message, song = await self.playback_service.play_request(
                 user_input=query,
                 guild_id=interaction.guild.id,
                 requested_by=str(interaction.user),
@@ -430,7 +435,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
         # Start playback from active playlist (async, don't wait)
         try:
-            success = await playback_service.start_playlist_playback(
+            success = await self.playback_service.start_playlist_playback(
                 guild_id, active_playlist
             )
 

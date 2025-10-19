@@ -13,9 +13,10 @@ from discord.ext import commands
 from .config.config import config
 from .config.time_constants import TimeIntervals
 from .pkg.logger import logger
-from .services.audio_service import audio_service
-from .services.playback import playback_service
 from .services.playlist_service import PlaylistService
+from .services.audio_service import AudioService
+from .services.playback_service import PlaybackService
+
 from .domain.entities.library import LibraryManager
 from .utils.discord_ui import InteractionManager
 from .utils.events import message_update_manager
@@ -28,6 +29,10 @@ from .commands.playback_commands import PlaybackCommandHandler
 from .commands.queue_commands import QueueCommandHandler
 from .commands.playlist_commands import PlaylistCommandHandler
 from .commands.advanced_commands import AdvancedCommandHandler
+
+# Import utils
+from .utils.playlist_processors import PlaylistProcessor
+from .utils.youtube import YouTubePlaylistHandler
 
 
 class MusicBot(commands.Bot):
@@ -49,8 +54,17 @@ class MusicBot(commands.Bot):
         # Initialize services
         self.library_manager = LibraryManager()
         self.playlist_service = PlaylistService(self.library_manager)
-        self.active_playlists: dict[int, str] = {}
+        self.audio_service = AudioService()
+        self.playback_service = PlaybackService(self.audio_service)
         self.interaction_manager = InteractionManager()
+
+        # Initialize utils
+        self.playlist_processor = PlaylistProcessor()
+        self.youtube_handler = YouTubePlaylistHandler()
+
+        # State
+        self.active_playlists: dict[int, str] = {}
+        self._switching_playlists: set[int] = set()
 
         # Setup commands
         self._setup_commands()
@@ -60,16 +74,8 @@ class MusicBot(commands.Bot):
         try:
             logger.info("🚀 Initializing bot components...")
 
-            # Start resource management
-            await audio_service.resource_manager.start_cleanup_task()
-            logger.info("✅ Resource management started")
-
             # Initialize async processing
-            success = await playback_service.initialize_async_processing(self)
-            if success:
-                logger.info("✅ Async processing system started")
-            else:
-                logger.warning("⚠️ Failed to start async processing system")
+            await self.playback_service.initialize_async_processing(self)
 
             # Initialize message update manager
             await message_update_manager.initialize()
@@ -113,13 +119,15 @@ class MusicBot(commands.Bot):
                             logger.info(
                                 f"🔄 Attempting auto-recovery for guild {guild_id}"
                             )
-                            await audio_service.ensure_voice_connection(guild_id)
+                            await self.audio_service.ensure_voice_connection(guild_id)
 
                             # 3. Resume playback if there was a current song
-                            queue_manager = audio_service.get_queue_manager(guild_id)
+                            queue_manager = self.audio_service.get_queue_manager(
+                                guild_id
+                            )
                             if queue_manager and queue_manager.current_song:
                                 logger.info(f"▶️ Resuming playback for guild {guild_id}")
-                                await audio_service.play_next_song(guild_id)
+                                await self.audio_service.play_next_song(guild_id)
 
                             logger.info(
                                 f"✅ Auto-recovery successful for guild {guild_id}"
@@ -132,8 +140,8 @@ class MusicBot(commands.Bot):
 
                     # 4. Playback health check (for connected clients)
                     elif voice_client.is_connected():
-                        audio_player = audio_service._audio_players.get(guild_id)
-                        queue_manager = audio_service.get_queue_manager(guild_id)
+                        audio_player = self.audio_service._audio_players.get(guild_id)
+                        queue_manager = self.audio_service.get_queue_manager(guild_id)
 
                         # Check for stuck playback
                         if (
@@ -148,7 +156,7 @@ class MusicBot(commands.Bot):
                             )
 
                             try:
-                                await audio_service.play_next_song(guild_id)
+                                await self.audio_service.play_next_song(guild_id)
                                 logger.info(
                                     f"✅ Playback recovered for guild {guild_id}"
                                 )
@@ -174,13 +182,13 @@ class MusicBot(commands.Bot):
                 try:
                     from .utils.maintenance import CacheManager
 
-                    await CacheManager.perform_cache_maintenance()
+                    await CacheManager.perform_cache_maintenance(self.playback_service)
                 except Exception as e:
                     logger.error(f"  ✗ Cache maintenance failed: {e}")
 
                 # 2. Cleanup idle connections
                 try:
-                    cleaned = await audio_service.force_cleanup_idle_connections()
+                    cleaned = await self.audio_service.force_cleanup_idle_connections()
                     logger.info(f"  ✓ Cleaned {cleaned} idle connections")
                 except Exception as e:
                     logger.error(f"  ✗ Connection cleanup failed: {e}")
@@ -189,13 +197,15 @@ class MusicBot(commands.Bot):
                 try:
                     from .utils.maintenance import StreamURLRefreshManager
 
-                    await StreamURLRefreshManager.refresh_queue_urls(self.guilds)
+                    await StreamURLRefreshManager.refresh_queue_urls(
+                        self.guilds, self.audio_service
+                    )
                 except Exception as e:
                     logger.error(f"  ✗ Stream URL refresh failed: {e}")
 
                 # 4. Log statistics
                 try:
-                    stats = audio_service.get_resource_stats()
+                    stats = self.audio_service.get_resource_stats()
                     logger.info(f"  📊 Resource stats: {stats}")
                 except Exception as e:
                     logger.error(f"  ✗ Stats logging failed: {e}")
@@ -252,7 +262,7 @@ class MusicBot(commands.Bot):
     async def on_guild_remove(self, guild: discord.Guild):
         """Handle leaving guild"""
         logger.info(f"👋 Left guild: {guild.name} (ID: {guild.id})")
-        await audio_service.disconnect_from_guild(guild.id)
+        await self.audio_service.disconnect_from_guild(guild.id)
 
     async def on_command_error(self, ctx: commands.Context, error: Exception):
         """Global command error handler"""
@@ -369,12 +379,10 @@ class MusicBot(commands.Bot):
 
         try:
             # Shutdown SmartCache system
-            await playback_service.shutdown_cache_system()
-            logger.info("✅ SmartCache shutdown complete")
+            await self.playback_service.shutdown_cache_system()
 
             # Cleanup audio connections
-            await audio_service.cleanup_all()
-            logger.info("✅ Bot shutdown complete")
+            await self.audio_service.cleanup_all()
 
         except Exception as e:
             logger.error(f"❌ Error during shutdown: {e}")

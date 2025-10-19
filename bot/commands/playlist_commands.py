@@ -12,10 +12,7 @@ from discord import app_commands
 from . import BaseCommandHandler
 from ..pkg.logger import logger
 from ..domain.entities.song import Song
-from ..services.playback import playback_service
-from ..services.playlist_switch import playlist_switch_manager
 from ..domain.valueobjects.source_type import SourceType
-from ..utils.youtube import YouTubePlaylistHandler
 from ..utils.core import Validator
 from ..config.constants import ERROR_MESSAGES
 from ..utils.discord_ui import (
@@ -31,15 +28,24 @@ from ..utils.discord_ui import (
     EmbedFactory,
 )
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..music_bot import MusicBot
+
 
 class PlaylistCommandHandler(BaseCommandHandler):
     """Handler for playlist-related commands"""
 
-    def __init__(self, bot):
+    def __init__(self, bot: "MusicBot"):
         super().__init__(bot)
         # Access bot services
-        self.playlist_service = getattr(bot, "playlist_service", None)
-        self.active_playlists = getattr(bot, "active_playlists", {})
+        self.playlist_service = bot.playlist_service
+        self.playback_service = bot.playback_service
+        self.active_playlists = bot.active_playlists
+
+        # Utils
+        self.youtube_handler = bot.youtube_handler
 
     def setup_commands(self):
         """Setup playlist commands"""
@@ -51,12 +57,6 @@ class PlaylistCommandHandler(BaseCommandHandler):
         async def use_playlist(interaction: discord.Interaction, playlist_name: str):
             """📋 Safe playlist switch"""
             try:
-                if not self.playlist_service:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["playlist_service_unavailable"], ephemeral=True
-                    )
-                    return
-
                 # Check if user is in voice channel
                 if not await self.ensure_user_in_voice(interaction):
                     return
@@ -77,29 +77,55 @@ class PlaylistCommandHandler(BaseCommandHandler):
                 )
                 await interaction.response.send_message(embed=embed)
 
-                # Perform safe playlist switch
+                # Mark as switching
+                guild_id = interaction.guild.id
+                self.bot._switching_playlists.add(guild_id)
 
-                switch_success, switch_message = (
-                    await playlist_switch_manager.safe_playlist_switch(
-                        interaction.guild.id, playlist_name, str(interaction.user)
+                try:
+                    # Step 1: Stop current playback
+                    audio_player = self.audio_service.get_audio_player(guild_id)
+                    if audio_player and audio_player.is_playing:
+                        logger.info(f"⏹️ Stopping current playback in guild {guild_id}")
+                        audio_player.stop()
+                        await asyncio.sleep(0.5)  # Brief delay for cleanup
+
+                    # Step 2: Clear queue
+                    queue_manager = self.audio_service.get_queue_manager(guild_id)
+                    if queue_manager:
+                        old_count = queue_manager.size()
+                        queue_manager.clear()
+                        logger.info(f"🧹 Cleared {old_count} songs from queue")
+
+                    # Step 3: Load new playlist
+                    success = await self.playback_service.start_playlist_playback(
+                        guild_id, playlist_name
                     )
-                )
 
-                if switch_success:
-                    # Set as active playlist
-                    self.active_playlists[interaction.guild.id] = playlist_name
+                    if success:
+                        # Set as active playlist
+                        self.active_playlists[guild_id] = playlist_name
 
-                    # Update with success message
-                    success_embed = self.create_success_embed(
-                        f"**Kích hoạt playlist thành công**", switch_message
-                    )
-                else:
-                    # Update with error message
-                    success_embed = self.create_error_embed(
-                        "Lỗi khi chuyển playlist", switch_message
-                    )
+                        # Get queue info
+                        song_count = queue_manager.size() if queue_manager else 0
 
-                await interaction.edit_original_response(embed=success_embed)
+                        if song_count > 0:
+                            message = f"Đã tải {song_count} bài hát từ playlist"
+                        else:
+                            message = f"Playlist **{playlist_name}** đã sẵn sàng (sử dụng `/add` để thêm bài hát)"
+
+                        success_embed = self.create_success_embed(
+                            "✅ Kích hoạt playlist thành công", message
+                        )
+                    else:
+                        success_embed = self.create_error_embed(
+                            "❌ Lỗi khi chuyển playlist", "Không thể tải playlist"
+                        )
+
+                    await interaction.edit_original_response(embed=success_embed)
+
+                finally:
+                    # Always remove switching state
+                    self.bot._switching_playlists.discard(guild_id)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "use")
@@ -109,12 +135,6 @@ class PlaylistCommandHandler(BaseCommandHandler):
         async def create_playlist(interaction: discord.Interaction, name: str):
             """📝 Create new playlist"""
             try:
-                if not self.playlist_service:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["playlist_service_unavailable"], ephemeral=True
-                    )
-                    return
-
                 # Validate playlist name
                 is_valid, error_msg = Validator.validate_playlist_name(name)
                 if not is_valid:
@@ -173,7 +193,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                 active_playlist = self.active_playlists.get(guild_id)
 
                 # Check if it's a YouTube playlist
-                if YouTubePlaylistHandler.is_playlist_url(song_input):
+                if self.youtube_handler.is_playlist_url(song_input):
                     # Handle YouTube playlist
                     await self._handle_add_youtube_playlist(
                         interaction, song_input, active_playlist
@@ -184,7 +204,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                 await interaction.response.defer()
 
                 # Process song using playback service (same as /play)
-                success, message, song = await playback_service.play_request(
+                success, message, song = await self.playback_service.play_request(
                     user_input=song_input,
                     guild_id=guild_id,
                     requested_by=str(interaction.user),
@@ -305,12 +325,6 @@ class PlaylistCommandHandler(BaseCommandHandler):
         ):
             """Remove song from playlist"""
             try:
-                if not self.playlist_service:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["playlist_service_unavailable"], ephemeral=True
-                    )
-                    return
-
                 success, data = self.playlist_service.remove_from_playlist(
                     playlist_name, song_index
                 )
@@ -352,12 +366,6 @@ class PlaylistCommandHandler(BaseCommandHandler):
         async def list_playlists(interaction: discord.Interaction):
             """List all playlists"""
             try:
-                if not self.playlist_service:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["playlist_service_unavailable"], ephemeral=True
-                    )
-                    return
-
                 playlists = self.playlist_service.list_playlists()
 
                 if not playlists:
@@ -401,12 +409,6 @@ class PlaylistCommandHandler(BaseCommandHandler):
         ):
             """📋 Show playlist contents with interactive pagination"""
             try:
-                if not self.playlist_service:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["playlist_service_unavailable"], ephemeral=True
-                    )
-                    return
-
                 # Use active playlist if no name provided
                 playlist_name = name or self.active_playlists.get(interaction.guild.id)
 
@@ -469,12 +471,6 @@ class PlaylistCommandHandler(BaseCommandHandler):
         async def delete_playlist(interaction: discord.Interaction, name: str):
             """Delete playlist"""
             try:
-                if not self.playlist_service:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["playlist_service_unavailable"], ephemeral=True
-                    )
-                    return
-
                 success, message = self.playlist_service.delete_playlist(name)
 
                 if success:
@@ -518,7 +514,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
     ):
         """Handle adding song to playlist (shared logic for /add and /addto)"""
         # Check if it's a YouTube playlist (only explicit playlist URLs)
-        if YouTubePlaylistHandler.is_playlist_url(song_input):
+        if self.youtube_handler.is_playlist_url(song_input):
             await self._handle_add_playlist_to_playlist(
                 interaction, song_input, playlist_name
             )
@@ -538,7 +534,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
         try:
             # Step 1: Process song like /play (but without auto_play)
-            success, response_message, song = await playback_service.play_request(
+            success, response_message, song = await self.playback_service.play_request(
                 user_input=song_input,
                 guild_id=interaction.guild.id,
                 requested_by=str(interaction.user),
@@ -633,7 +629,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
         # Extract playlist videos
         success_playlist, video_urls, message = (
-            await YouTubePlaylistHandler.extract_playlist_videos(song_input)
+            await self.youtube_handler.extract_playlist_videos(song_input)
         )
 
         if success_playlist and video_urls:
@@ -666,7 +662,9 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     try:
                         # Process song to extract metadata
                         process_success = (
-                            await playback_service.processing_service.process_song(song)
+                            await self.playback_service.processing_service.process_song(
+                                song
+                            )
                         )
 
                         # Wait briefly for metadata (max 5 seconds per song)
@@ -745,7 +743,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
         # Extract playlist videos
         success_extract, video_urls, message = (
-            await YouTubePlaylistHandler.extract_playlist_videos(playlist_url)
+            await self.youtube_handler.extract_playlist_videos(playlist_url)
         )
 
         if not success_extract or not video_urls:
@@ -769,7 +767,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
         for i, video_url in enumerate(video_urls[:50]):  # Limit to 50
             try:
                 # Add to queue via playback service
-                success, msg, song = await playback_service.play_request(
+                success, msg, song = await self.playback_service.play_request(
                     user_input=video_url,
                     guild_id=guild_id,
                     requested_by=str(interaction.user),

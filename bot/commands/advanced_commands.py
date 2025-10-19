@@ -3,22 +3,30 @@ Advanced commands for the music bot
 Handles help, aplay and other advanced features
 """
 
+from typing import TYPE_CHECKING
 import discord
 from discord import app_commands
 
 from . import BaseCommandHandler
 from ..config.config import config
-from ..utils.youtube import YouTubePlaylistHandler
-from ..utils.playlist_processors import PlaylistProcessor
 
 from ..config.constants import ERROR_MESSAGES
 from ..utils.discord_ui import (
     create_help_embed,
 )
 
+if TYPE_CHECKING:
+    from ..music_bot import MusicBot
+
 
 class AdvancedCommandHandler(BaseCommandHandler):
     """Handler for advanced commands"""
+
+    def __init__(self, bot: "MusicBot"):
+        super().__init__(bot)
+        # Utils
+        self.playlist_processor = bot.playlist_processor
+        self.youtube_handler = bot.youtube_handler
 
     def setup_commands(self):
         """Setup advanced commands"""
@@ -55,7 +63,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
                     return
 
                 # Check if it's a valid playlist URL
-                if not YouTubePlaylistHandler.is_playlist_url(url):
+                if not self.youtube_handler.is_playlist_url(url):
                     await interaction.response.send_message(
                         ERROR_MESSAGES["invalid_playlist_url"], ephemeral=True
                     )
@@ -65,7 +73,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
                 async def process_async_playlist():
                     # Extract playlist videos
                     success, video_urls, message = (
-                        await YouTubePlaylistHandler.extract_playlist_videos(url)
+                        await self.youtube_handler.extract_playlist_videos(url)
                     )
 
                     if not success or not video_urls:
@@ -73,7 +81,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
                             ERROR_MESSAGES["playlist_extraction_error"], message
                         )
 
-                    return await PlaylistProcessor.process_playlist_videos(
+                    return await self.playlist_processor.process_playlist_videos(
                         video_urls,
                         message,
                         interaction.guild.id,

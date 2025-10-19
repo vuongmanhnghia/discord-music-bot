@@ -1,17 +1,27 @@
 """Bot maintenance and background task utilities"""
 
 import asyncio
+from typing import TYPE_CHECKING
 from ..pkg.logger import logger
-from ..services.playback import playback_service
+
+if TYPE_CHECKING:
+    from ..services.playback_service import PlaybackService
+    from ..services.audio_service import AudioService
 
 
 class CacheManager:
     """Manages bot cache maintenance"""
 
     @staticmethod
-    async def perform_cache_maintenance():
+    async def perform_cache_maintenance(playback_service: "PlaybackService" = None):
         """Perform cache maintenance tasks"""
         try:
+            # Lazy import if not provided
+            if playback_service is None:
+                from ..services import playback_service as ps
+
+                playback_service = ps
+
             # Get cache performance stats
             cache_stats = await playback_service.get_cache_performance()
             logger.info(f"📊 Cache stats: {cache_stats}")
@@ -28,11 +38,16 @@ class StreamURLRefreshManager:
     """Manages proactive stream URL refresh for 24/7 operation"""
 
     @staticmethod
-    async def refresh_queue_urls(bot_guilds):
+    async def refresh_queue_urls(bot_guilds, audio_service: "AudioService" = None):
         """Proactively refresh stream URLs in all guild queues"""
         try:
             from ..services.stream_refresh import stream_refresh_service
-            from ..services.audio_service import audio_service
+
+            # Lazy import if not provided
+            if audio_service is None:
+                from ..services.audio_service import audio_service as as_
+
+                audio_service = as_
 
             logger.info("🔄 Checking queues for URLs that need refresh...")
 

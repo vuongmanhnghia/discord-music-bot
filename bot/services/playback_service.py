@@ -9,7 +9,7 @@ from ..config.service_constants import ErrorMessages, ServiceConstants
 from ..pkg.logger import logger
 from .processing import SongProcessingService
 from .youtube_service import youtube_service
-from .audio_service import audio_service
+from ..services.audio_service import AudioService
 from ..utils.async_processor import (
     AsyncSongProcessor,
     ProcessingPriority,
@@ -29,7 +29,7 @@ class PlaybackService:
     5. Start playback loop if not already playing
     """
 
-    def __init__(self):
+    def __init__(self, audio_service: AudioService):
         # Load performance configuration
         self.config = performance_config
         self.config.log_config()  # Log current configuration
@@ -40,25 +40,24 @@ class PlaybackService:
         )
         self._processing_tasks: dict[int, set[asyncio.Task]] = {}
 
-    # ===============================
-    # Common Helper Methods
-    # ===============================
+        # Service
+        self.audio_service: AudioService = audio_service
 
-    async def _add_song_to_queue(self, song: Song, guild_id: int) -> int:
+    async def _add_to_queue(self, song: Song, guild_id: int) -> int:
         """
         Add a song to the queue
 
         Returns:
             Position in queue (1-indexed)
         """
-        queue_manager = audio_service.get_queue_manager(guild_id)
+        queue_manager = self.audio_service.get_queue_manager(guild_id)
         position = await queue_manager.add_song(song)
         logger.info(f"Added song to queue at position {position}: {song.display_name}")
         return position
 
     async def _handle_auto_play(self, guild_id: int, auto_play: bool) -> None:
         """Start playback if auto_play is enabled and not already playing"""
-        if auto_play and not audio_service.is_playing(guild_id):
+        if auto_play and not self.audio_service.is_playing(guild_id):
             await self._try_start_playback(guild_id)
 
     # ===============================
@@ -91,9 +90,9 @@ class PlaybackService:
                 )
 
             # Add to queue after processing is complete
-            position = await self._add_song_to_queue(song, guild_id)
+            position = await self._add_to_queue(song, guild_id)
 
-            # Start playback if auto_play is enabled
+            # Start playbsack if auto_play is enabled
             await self._handle_auto_play(guild_id, auto_play)
 
             return (
@@ -122,7 +121,7 @@ class PlaybackService:
             )
 
             # Add to queue
-            position = await self._add_song_to_queue(song, guild_id)
+            position = await self._add_to_queue(song, guild_id)
 
             # Start playback if auto_play is enabled
             await self._handle_auto_play(guild_id, auto_play)
@@ -146,19 +145,19 @@ class PlaybackService:
         """Try to start playback if conditions are met"""
         try:
             # Quick checks
-            if audio_service.is_playing(guild_id):
+            if self.audio_service.is_playing(guild_id):
                 return
 
-            if not audio_service.is_connected(guild_id):
+            if not self.audio_service.is_connected(guild_id):
                 return
 
-            queue_manager = audio_service.get_queue_manager(guild_id)
+            queue_manager = self.audio_service.get_queue_manager(guild_id)
             current_song = queue_manager.current_song
             if not current_song or not current_song.is_ready:
                 return
 
             # Start playback
-            success = await audio_service.play_next_song(guild_id)
+            success = await self.audio_service.play_next_song(guild_id)
 
             if not success:
                 logger.error(f"Failed to start playback in guild {guild_id}")
@@ -223,7 +222,7 @@ class PlaybackService:
             try:
                 if task.status.value == "completed":
                     # Add to queue ONLY after successful processing
-                    position = await self._add_song_to_queue(task.song, guild_id)
+                    position = await self._add_to_queue(task.song, guild_id)
                     if position is not None:
                         # Try to start playback if auto_play is enabled
                         await self._handle_auto_play(guild_id, auto_play)
@@ -309,13 +308,13 @@ class PlaybackService:
     async def skip_current_song(self, guild_id: int) -> tuple[bool, str]:
         """Skip current song"""
         try:
-            queue_manager = audio_service.get_queue_manager(guild_id)
+            queue_manager = self.audio_service.get_queue_manager(guild_id)
             current_song = queue_manager.current_song
             if not current_song:
                 return (False, ErrorMessages.no_current_song())
 
             # Skip to next
-            success = await audio_service.skip_to_next(guild_id)
+            success = await self.audio_service.skip_to_next(guild_id)
 
             if success:
                 next_song = queue_manager.current_song
@@ -333,7 +332,7 @@ class PlaybackService:
     async def pause_playback(self, guild_id: int) -> tuple[bool, str]:
         """Pause current playback"""
         try:
-            audio_player = audio_service.get_audio_player(guild_id)
+            audio_player = self.audio_service.get_audio_player(guild_id)
             if not audio_player:
                 return (False, ErrorMessages.no_audio_player())
 
@@ -358,7 +357,7 @@ class PlaybackService:
     async def resume_playback(self, guild_id: int) -> tuple[bool, str]:
         """Resume paused playback"""
         try:
-            audio_player = audio_service.get_audio_player(guild_id)
+            audio_player = self.audio_service.get_audio_player(guild_id)
             if not audio_player:
                 return (False, ErrorMessages.no_audio_player())
 
@@ -384,12 +383,12 @@ class PlaybackService:
         """Stop playback and clear queue"""
         try:
             # Stop audio
-            audio_player = audio_service.get_audio_player(guild_id)
+            audio_player = self.audio_service.get_audio_player(guild_id)
             if audio_player:
                 audio_player.stop()
 
             # Clear queue
-            queue_manager = audio_service.get_queue_manager(guild_id)
+            queue_manager = self.audio_service.get_queue_manager(guild_id)
             if queue_manager:
                 await queue_manager.clear()
 
@@ -409,8 +408,8 @@ class PlaybackService:
     async def get_queue_status(self, guild_id: int) -> Optional[dict]:
         """Get current queue status"""
         try:
-            queue_manager = audio_service.get_queue_manager(guild_id)
-            audio_player = audio_service.get_audio_player(guild_id)
+            queue_manager = self.audio_service.get_queue_manager(guild_id)
+            audio_player = self.audio_service.get_audio_player(guild_id)
 
             if not queue_manager:
                 return None
@@ -444,7 +443,7 @@ class PlaybackService:
             (success, message) tuple
         """
         try:
-            audio_player = audio_service.get_audio_player(guild_id)
+            audio_player = self.audio_service.get_audio_player(guild_id)
             if not audio_player:
                 return (False, ErrorMessages.no_audio_player())
 
@@ -465,7 +464,7 @@ class PlaybackService:
     async def set_repeat_mode(self, guild_id: int, mode: str) -> bool:
         """Set repeat mode for queue"""
         try:
-            queue_manager = audio_service.get_queue_manager(guild_id)
+            queue_manager = self.audio_service.get_queue_manager(guild_id)
             return queue_manager.set_repeat_mode(mode)
 
         except Exception as e:
@@ -524,7 +523,7 @@ class PlaybackService:
                 return True  # Success even if empty
 
             # Get queue manager
-            queue_manager = audio_service.get_queue_manager(guild_id)
+            queue_manager = self.audio_service.get_queue_manager(guild_id)
 
             # Clear existing queue only if not empty (safe approach)
             existing_songs = queue_manager.get_all_songs()
@@ -646,7 +645,3 @@ class PlaybackService:
         except Exception as e:
             logger.error(f"Error in start_playlist_playback: {e}")
             return False
-
-
-# Global playback service instance
-playback_service = PlaybackService()

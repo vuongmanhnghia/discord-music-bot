@@ -3,22 +3,26 @@ Base command handler for the music bot
 Provides common utilities and patterns for all command handlers
 """
 
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import discord
 from discord.ext import commands
 
 from ..pkg.logger import logger
-from ..services.audio_service import audio_service
 from ..config.constants import ERROR_MESSAGES, COLORS
 
 from ..utils.discord_ui import EmbedFactory
+
+if TYPE_CHECKING:
+    from ..music_bot import MusicBot
 
 
 class BaseCommandHandler:
     """Base class for all command handlers with common utilities"""
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: "MusicBot"):
         self.bot = bot
+        # Store commonly used services for convenience
+        self.audio_service = bot.audio_service
 
     async def ensure_voice_connection(
         self, interaction: discord.Interaction
@@ -69,7 +73,7 @@ class BaseCommandHandler:
 
     def get_queue_manager(self, guild_id: int):
         """Get queue manager for guild"""
-        return audio_service.get_queue_manager(guild_id)
+        return self.audio_service.get_queue_manager(guild_id)
 
     def create_error_embed(self, title: str, description: str) -> discord.Embed:
         """Create standardized error embed"""

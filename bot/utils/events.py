@@ -5,6 +5,8 @@ import discord
 from typing import Callable, Dict, List
 from ..pkg.logger import logger
 
+from ..services import playback_service
+
 
 class SongUpdateEvent:
     """Event fired when song metadata is updated"""
@@ -122,8 +124,6 @@ class MessageUpdateManager:
         try:
             message = msg_info["message"]
             message_type = msg_info["type"]
-
-            from ..services.playback import playback_service
 
             guild_id = msg_info["guild_id"]
             audio_service = playback_service.audio_service

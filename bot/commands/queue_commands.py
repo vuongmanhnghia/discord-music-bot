@@ -3,6 +3,7 @@ Queue commands for the music bot
 Handles queue display and management with pagination
 """
 
+from typing import TYPE_CHECKING
 import discord
 
 from . import BaseCommandHandler
@@ -11,9 +12,16 @@ from ..utils.discord_ui import Paginator, send_paginated_embed, create_empty_que
 from ..config.constants import ERROR_MESSAGES
 from ..pkg.logger import logger
 
+if TYPE_CHECKING:
+    from ..music_bot import MusicBot
+
 
 class QueueCommandHandler(BaseCommandHandler):
     """Handler for queue-related commands"""
+
+    def __init__(self, bot: "MusicBot"):
+        super().__init__(bot)
+        self.audio_service = bot.audio_service
 
     def setup_commands(self):
         """Setup queue commands"""
