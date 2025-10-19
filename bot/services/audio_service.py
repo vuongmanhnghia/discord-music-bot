@@ -347,3 +347,41 @@ class AudioService:
                 logger.error(f"❌ Error cleaning up guild {guild_id}: {e}")
 
         logger.info("✅ AudioService cleanup complete")
+
+    async def force_cleanup_idle_connections(self, idle_seconds: int = 300) -> int:
+        """
+        Force cleanup voice connections considered idle.
+        Disconnect guilds where there's no active playback and the queue is empty.
+        Returns number of disconnected guilds.
+        """
+        disconnected = 0
+        # snapshot keys to avoid runtime dict changes
+        guild_ids = list(self._voice_clients.keys())
+
+        for guild_id in guild_ids:
+            try:
+                audio_player = self._audio_players.get(guild_id)
+                queue_manager = self._queue_managers.get(guild_id)
+
+                is_playing = bool(
+                    audio_player and getattr(audio_player, "is_playing", False)
+                )
+                queue_empty = True
+                if queue_manager:
+                    # queue_size is a sync property
+                    queue_empty = queue_manager.queue_size == 0
+
+                # If not playing and queue empty -> consider idle
+                if not is_playing and queue_empty:
+                    logger.info(
+                        f"🧹 force_cleanup_idle: disconnecting idle guild {guild_id}"
+                    )
+                    success = await self.disconnect_from_guild(guild_id)
+                    if success:
+                        disconnected += 1
+
+            except Exception as e:
+                logger.error(f"❌ Failed to cleanup idle guild {guild_id}: {e}")
+
+        logger.debug(f"🧹 force_cleanup_idle completed: disconnected={disconnected}")
+        return disconnected
