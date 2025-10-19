@@ -38,6 +38,11 @@ class QueueManager:
         """Get current position as (current, total)"""
         return (self._current_index + 1, len(self._songs))
 
+    async def size(self) -> int:
+        """Get queue size"""
+        async with self._lock:
+            return len(self._songs)
+
     async def add_song(self, song: Song) -> int:
         """Add song to queue, return position"""
         async with self._lock:
@@ -108,7 +113,9 @@ class QueueManager:
                 self._songs.pop(index)
                 if index < self._current_index:
                     self._current_index -= 1
-                elif index == self._current_index and self._current_index >= len(self._songs):
+                elif index == self._current_index and self._current_index >= len(
+                    self._songs
+                ):
                     self._current_index = 0
                 return True
             return False
@@ -119,7 +126,10 @@ class QueueManager:
 
     def find_song_by_input(self, original_input: str) -> Optional[Song]:
         """Find song in queue by original input"""
-        return next((song for song in self._songs if song.original_input == original_input), None)
+        return next(
+            (song for song in self._songs if song.original_input == original_input),
+            None,
+        )
 
     def set_repeat_mode(self, mode: str) -> bool:
         """Set repeat mode (off, track, queue)"""

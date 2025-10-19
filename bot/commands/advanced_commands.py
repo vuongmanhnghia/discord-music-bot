@@ -9,6 +9,7 @@ from discord import app_commands
 
 from . import BaseCommandHandler
 from ..config.config import config
+from ..pkg.logger import logger
 
 from ..config.constants import ERROR_MESSAGES
 from ..utils.discord_ui import (
@@ -45,6 +46,34 @@ class AdvancedCommandHandler(BaseCommandHandler):
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "help")
+
+        @self.bot.tree.command(
+            name="sync", description="[Admin] Đồng bộ slash commands với Discord"
+        )
+        async def sync_commands(interaction: discord.Interaction):
+            """🔄 Sync slash commands (Owner only)"""
+            try:
+                # Check if user is bot owner
+                if interaction.user.id != self.bot.application.owner.id:
+                    embed = self.create_error_embed(
+                        "Permission Denied", "Only the bot owner can use this command."
+                    )
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                    return
+
+                await interaction.response.defer(ephemeral=True)
+
+                synced = await self.bot.tree.sync()
+
+                embed = self.create_success_embed(
+                    "✅ Commands Synced",
+                    f"Successfully synced **{len(synced)}** slash commands with Discord.",
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                logger.info(f"Commands manually synced by {interaction.user}")
+
+            except Exception as e:
+                await self.handle_command_error(interaction, e, "sync")
 
         @self.bot.tree.command(
             name="aplay", description="Phát toàn bộ playlist YouTube (Async Processing)"

@@ -92,9 +92,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     # Step 2: Clear queue
                     queue_manager = self.audio_service.get_queue_manager(guild_id)
                     if queue_manager:
-                        old_count = queue_manager.size()
-                        queue_manager.clear()
-                        logger.info(f"🧹 Cleared {old_count} songs from queue")
+                        await queue_manager.clear()
 
                     # Step 3: Load new playlist
                     success = await self.playback_service.start_playlist_playback(
@@ -106,7 +104,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                         self.active_playlists[guild_id] = playlist_name
 
                         # Get queue info
-                        song_count = queue_manager.size() if queue_manager else 0
+                        song_count = await queue_manager.size() if queue_manager else 0
 
                         if song_count > 0:
                             message = f"Đã tải {song_count} bài hát từ playlist"

@@ -84,14 +84,19 @@ class AudioService:
                 # Stop audio player
                 if guild_id in self._audio_players:
                     audio_player = self._audio_players[guild_id]
+                    audio_player._is_disconnected = True  # Ngăn auto-play
+
                     if audio_player.is_playing:
                         audio_player.stop()
                         logger.debug(f"🛑 Stopped audio player for guild {guild_id}")
+                        await asyncio.sleep(1)  # Wait for FFmpeg cleanup
+
                     del self._audio_players[guild_id]
 
                 # Clear queue
                 if guild_id in self._queue_managers:
-                    queue_size = self._queue_managers[guild_id].size()
+                    queue_size = self._queue_managers[guild_id].queue_size
+                    await self._queue_managers[guild_id].clear()
                     del self._queue_managers[guild_id]
                     logger.debug(
                         f"🗑️ Cleared queue ({queue_size} songs) for guild {guild_id}"
@@ -173,12 +178,15 @@ class AudioService:
             # Create queue manager if not exists
             if guild_id not in self._queue_managers:
                 self._queue_managers[guild_id] = QueueManager(guild_id)
-                logger.debug(f"📋 Created queue manager for guild {guild_id}")
 
-            # Create audio player
-            audio_player = AudioPlayer(voice_client, self._queue_managers[guild_id])
-            self._audio_players[guild_id] = audio_player
-            logger.debug(f"🎵 Created audio player for guild {guild_id}")
+            self._audio_players[guild_id] = AudioPlayer(
+                voice_client=voice_client,
+                guild_id=guild_id,
+                queue_manager=self._queue_managers[guild_id],
+                loop=asyncio.get_event_loop(),
+            )
+
+            logger.debug(f"✅ Initialized audio player for guild {guild_id}")
 
             return True
 
@@ -216,19 +224,21 @@ class AudioService:
                 return False
 
             queue_manager = self._queue_managers.get(guild_id)
-            if not queue_manager or queue_manager.is_empty():
+            if not queue_manager or queue_manager.queue_size == 0:
                 logger.info(f"📭 Queue is empty for guild {guild_id}")
                 return False
 
             # Get next song
-            next_song = queue_manager.get_next_song()
+            next_song = queue_manager.current_song
             if not next_song:
                 logger.warning(f"⚠️ No next song available for guild {guild_id}")
                 return False
 
             # Start playback
             await audio_player.play_song(next_song)
-            logger.info(f"▶️ Started playing: {next_song.title} in guild {guild_id}")
+            logger.info(
+                f"▶️ Started playing: {next_song.metadata.title} in guild {guild_id}"
+            )
             return True
 
         except Exception as e:
@@ -321,7 +331,7 @@ class AudioService:
             "active_players": active_players,
             "queue_managers": len(self._queue_managers),
             "total_queued_songs": sum(
-                qm.size() for qm in self._queue_managers.values()
+                qm.queue_size for qm in self._queue_managers.values()
             ),
         }
 

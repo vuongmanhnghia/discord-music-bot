@@ -12,12 +12,12 @@ class PlaylistProcessor:
 
     @staticmethod
     async def process_playlist_videos(
-        video_urls: List[str],
-        playlist_message: str,
-        guild_id: int,
-        requested_by: str,
-        limit: int = 50,
-    ) -> discord.Embed:
+        video_urls: List[str],  # Danh sách URL video từ playlist
+        playlist_message: str,  # Thông điệp mô tả playlist (tên, số video)
+        guild_id: int,  # ID của Discord server
+        requested_by: str,  # Tên người yêu cầu
+        limit: int = 50,  # Giới hạn số video xử lý (mặc định 50)
+    ) -> discord.Embed:  # Trả về embed thông báo kết quả
         """Process YouTube playlist videos with progress tracking"""
         added_count = 0
         failed_count = 0

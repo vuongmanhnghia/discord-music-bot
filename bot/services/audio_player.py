@@ -1,8 +1,7 @@
 import platform
 import os
 import asyncio
-import subprocess
-from typing import Optional, Callable
+from typing import Optional
 import discord
 from discord import FFmpegPCMAudio, PCMVolumeTransformer
 
@@ -13,126 +12,183 @@ from ..pkg.logger import logger
 
 class AudioPlayer:
     """
-    Individual audio player for a guild
-    Manages playback state and controls
+    Simplified audio player for a guild
+    Manages playback state and auto-play next song
     """
 
-    def __init__(self, voice_client: discord.VoiceClient, guild_id: int):
+    def __init__(
+        self,
+        voice_client: discord.VoiceClient,
+        guild_id: int,
+        queue_manager,  # Reference to QueueManager
+        loop: asyncio.AbstractEventLoop,
+    ):
         self.voice_client = voice_client
         self.guild_id = guild_id
+        self.queue_manager = queue_manager
+        self._loop = loop
+
+        # Playback state
         self.current_song: Optional[Song] = None
-        self.current_playlist: Optional[str] = None
-        self.volume: float = 0.3  # Default to 100% volume
+        self.volume: float = 0.3
         self.is_playing: bool = False
         self.is_paused: bool = False
 
-        # Callbacks
-        self.on_song_finished: Optional[Callable] = None
-        self.on_error: Optional[Callable] = None
+        self._is_disconnected: bool = False
 
-        # Store event loop for async callbacks
-        self._loop = None
-
-    def _set_event_loop(self, loop):
-        """Set event loop for async callbacks"""
-        self._loop = loop
-
-    async def play_song(self, song: Song, retry_count: int = 0) -> bool:
-        """Play a song with retry mechanism and processing wait"""
-        # Wait for processing completion if needed
-        if not song.is_ready:
-            if song.status.value == "processing":
-                for wait_time in range(ServiceConstants.SONG_PROCESSING_WAIT_TIMEOUT):
-                    if song.is_ready:
-                        break
-                    elif song.status.value == "failed":
-                        logger.error(f"Song processing failed: {song.display_name}")
-                        return False
-                    await asyncio.sleep(1)
-
-                if not song.is_ready:
-                    logger.error(f"Timeout waiting for: {song.display_name}")
-                    return False
-            else:
-                logger.error(f"Cannot play unready song: {song.display_name}")
-                return False
-
+    async def play_song(self, song: Song) -> bool:
+        """Play a song (simplified with single retry)"""
         try:
-            # Refresh stream URL if needed
-            from ..services.stream_refresh import stream_refresh_service
-
-            if await stream_refresh_service.should_refresh_url(song):
-                refresh_success = await stream_refresh_service.refresh_stream_url(song)
-                if not refresh_success:
-                    if retry_count < 2:
-                        await asyncio.sleep(5)
-                        return await self.play_song(song, retry_count + 1)
-                    return False
-
-            # Validate stream URL
-            if not song.stream_url or not song.stream_url.startswith(
-                ("http://", "https://")
-            ):
-                logger.error(f"Invalid stream URL: {song.display_name}")
+            # ✅ 1. Wait for song processing
+            if not await self._wait_for_song_ready(song):
                 return False
 
-            # Create audio source
-            audio_source = self._create_audio_source(song.stream_url)
-            if not audio_source:
-                if retry_count < ServiceConstants.PLAYBACK_RETRY_MAX_ATTEMPTS - 1:
-                    await asyncio.sleep(ServiceConstants.PLAYBACK_RETRY_DELAY)
-                    return await self.play_song(song, retry_count + 1)
+            # ✅ 2. Refresh stream URL if needed
+            if not await self._ensure_valid_stream_url(song):
                 return False
 
-            # Check voice client connection
-            if not self.voice_client.is_connected():
-                logger.error(f"Voice client not connected in guild {self.guild_id}")
-                return False
-
-            # Stop current playback if any
-            if self.voice_client.is_playing() or self.voice_client.is_paused():
-                self.voice_client.stop()
-                await asyncio.sleep(0.5)
-
-            # Start playing with enhanced error callback
-            def after_callback(error):
-                if error:
-                    logger.error(f"Playback error: {error}")
-                    # Trigger error callback for reconnection handling
-                    if self.on_error and "voice" in str(error).lower():
-                        try:
-                            if self._loop:
-                                self._loop.create_task(self.on_error(error, song))
-                        except Exception as e:
-                            logger.error(f"Error in error callback: {e}")
-                self._on_playback_finished(error, song)
-
-            self.voice_client.play(audio_source, after=after_callback)
-
-            # Verify playback started
-            await asyncio.sleep(0.1)
-            if not self.voice_client.is_playing():
-                logger.error("Playback failed to start")
-                return False
-
-            # Update state
-            self.current_song = song
-            self.is_playing = True
-            self.is_paused = False
-            return True
+            # ✅ 3. Create and play audio source
+            return await self._start_playback(song)
 
         except Exception as e:
-            logger.error(f"Error playing {song.display_name}: {e}")
-
-            # Retry on network errors
-            if retry_count < ServiceConstants.PLAYBACK_RETRY_MAX_ATTEMPTS - 1:
-                await asyncio.sleep(ServiceConstants.PLAYBACK_RETRY_DELAY)
-                return await self.play_song(song, retry_count + 1)
-
+            logger.error(f"❌ Error playing {song.display_name}: {e}")
             return False
 
+    async def _wait_for_song_ready(self, song: Song) -> bool:
+        """Wait for song processing to complete"""
+        if song.is_ready:
+            return True
+
+        if song.status.value != "processing":
+            logger.error(f"❌ Cannot play unready song: {song.display_name}")
+            return False
+
+        # Wait up to 10 seconds for processing
+        for _ in range(10):
+            if song.is_ready:
+                return True
+            if song.status.value == "failed":
+                logger.error(f"❌ Song processing failed: {song.display_name}")
+                return False
+            await asyncio.sleep(1)
+
+        logger.error(f"⏱️ Timeout waiting for: {song.display_name}")
+        return False
+
+    async def _ensure_valid_stream_url(self, song: Song) -> bool:
+        """Ensure stream URL is valid and fresh"""
+        from ..services.stream_refresh import stream_refresh_service
+
+        # Check if URL needs refresh
+        if await stream_refresh_service.should_refresh_url(song):
+            if not await stream_refresh_service.refresh_stream_url(song):
+                logger.error(f"❌ Failed to refresh URL for: {song.display_name}")
+                return False
+
+        # Validate URL
+        if not song.stream_url or not song.stream_url.startswith(
+            ("http://", "https://")
+        ):
+            logger.error(f"❌ Invalid stream URL: {song.display_name}")
+            return False
+
+        return True
+
+    async def _start_playback(self, song: Song) -> bool:
+        """Start playing the audio"""
+        # Create audio source
+        audio_source = self._create_audio_source(song.stream_url)
+        if not audio_source:
+            logger.error(f"❌ Failed to create audio source for: {song.display_name}")
+            return False
+
+        # Check voice connection
+        if not self.voice_client.is_connected():
+            logger.error(f"❌ Voice client not connected in guild {self.guild_id}")
+            return False
+
+        # Stop current playback
+        if self.voice_client.is_playing() or self.voice_client.is_paused():
+            self.voice_client.stop()
+            await asyncio.sleep(0.3)
+
+        # ✅ Play with auto-next callback
+        self.voice_client.play(
+            audio_source, after=lambda error: self._after_playback(error, song)
+        )
+
+        # Verify playback started
+        await asyncio.sleep(0.1)
+        if not self.voice_client.is_playing():
+            logger.error(f"❌ Playback failed to start for: {song.display_name}")
+            return False
+
+        # Update state
+        self.current_song = song
+        self.is_playing = True
+        self.is_paused = False
+
+        logger.info(f"▶️ Now playing: {song.display_name}")
+        return True
+
+    def _after_playback(self, error, song: Song):
+        """
+        ✅ Callback after song finishes - AUTO-PLAY NEXT
+        This is called by FFmpeg in a different thread
+        """
+        if error:
+            logger.error(f"❌ Playback error for {song.display_name}: {error}")
+
+        # Reset state
+        self.is_playing = False
+        self.is_paused = False
+        self.current_song = None
+
+        if self._is_disconnected:
+            logger.debug(f"Skipping auto-play: guild {self.guild_id} is disconnecting")
+            return
+
+        asyncio.run_coroutine_threadsafe(self._play_next_song(), self._loop)
+
+    async def _play_next_song(self):
+        """Auto-play next song in queue (including loop)"""
+        try:
+            # Check voice connection
+            if not self.voice_client or not self.voice_client.is_connected():
+                logger.debug(
+                    f"Skipping auto-play: voice client not connected in guild {self.guild_id}"
+                )
+                return
+            if self._is_disconnected:
+                logger.debug(
+                    f"Skipping auto-play: guild {self.guild_id} is disconnecting"
+                )
+                return
+
+            # Get next song (handles loop automatically)
+            next_song = await self.queue_manager.next_song()
+
+            if next_song:
+                logger.info(f"🔄 Auto-playing next: {next_song.display_name}")
+                success = await self.play_song(next_song)
+
+                if not success:
+                    if not self.voice_client.is_connected() or self._is_disconnected:
+                        logger.debug(f"Skipping retry: disconnecting or not connected")
+                        return
+
+                    logger.warning(f"⚠️ Failed to play next song, trying again...")
+                    # Try one more time
+                    if self.voice_client.is_connected() and not self._is_disconnected:
+                        await self.play_song(next_song)
+            else:
+                logger.info(f"📭 Queue finished for guild {self.guild_id}")
+
+        except Exception as e:
+            logger.error(f"❌ Error in auto-play next: {e}")
+
     def pause(self) -> bool:
-        """Pause current playback"""
+        """Pause playback"""
         if not self.voice_client.is_playing():
             return False
         self.voice_client.pause()
@@ -140,7 +196,7 @@ class AudioPlayer:
         return True
 
     def resume(self) -> bool:
-        """Resume paused playback"""
+        """Resume playback"""
         if not self.voice_client.is_paused():
             return False
         self.voice_client.resume()
@@ -148,19 +204,21 @@ class AudioPlayer:
         return True
 
     def stop(self) -> bool:
-        """Stop current playback"""
+        """Stop playback"""
         if self.voice_client.is_playing() or self.voice_client.is_paused():
+            self._is_disconnected = True
             self.voice_client.stop()
-            self._reset_state()
+            self.current_song = None
+            self.is_playing = False
+            self.is_paused = False
             return True
         return False
 
     def set_volume(self, volume: float) -> bool:
-        """Set playback volume (0.0 to 1.0)"""
+        """Set volume (0.0 to 1.0)"""
         volume = max(0.0, min(1.0, volume))
         self.volume = volume
 
-        # Update volume if currently playing
         if self.voice_client.is_playing() and isinstance(
             self.voice_client.source, PCMVolumeTransformer
         ):
@@ -168,66 +226,40 @@ class AudioPlayer:
         return True
 
     def _create_audio_source(self, stream_url: str) -> Optional[discord.AudioSource]:
-        """Create Discord audio source from stream URL"""
+        """Create optimized FFmpeg audio source"""
         try:
+            # Detect platform
             arch = platform.machine()
+            is_low_power = arch in ["aarch64", "arm64", "armv7l"]
 
-            # Get system info
+            # Get system resources
             try:
                 import psutil
 
-                cpu_count = psutil.cpu_count(logical=False) or 1
                 memory_mb = psutil.virtual_memory().total // (1024 * 1024)
             except ImportError:
-                cpu_count = os.cpu_count() or 1
                 memory_mb = 1024
 
-            # Base configuration
-            base_before_options = (
-                "-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
-                "-multiple_requests 1 -loglevel error"
-            )
-            base_options = "-vn -avoid_negative_ts make_zero"
-
-            # Platform-aware optimization
-            if arch in ["aarch64", "arm64", "armv7l"] or memory_mb < 2048:
-                threads, buffer_size, max_rate, timeout = 1, "32k", "96k", "20000000"
+            # ✅ Simple, optimized FFmpeg options
+            if is_low_power or memory_mb < 2048:
+                # Low-power devices
+                before_opts = (
+                    "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+                )
+                opts = "-vn -bufsize 32k -maxrate 96k"
             else:
-                threads, buffer_size, max_rate, timeout = 2, "64k", "128k", "30000000"
-
-            before_options = f"{base_before_options} -timeout {timeout}"
-            options = f"{base_options} -bufsize {buffer_size} -maxrate {max_rate} -threads {threads}"
+                # Normal devices
+                before_opts = (
+                    "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+                )
+                opts = "-vn -bufsize 64k -maxrate 128k"
 
             audio_source = FFmpegPCMAudio(
-                stream_url, before_options=before_options, options=options
+                stream_url, before_options=before_opts, options=opts
             )
 
             return PCMVolumeTransformer(audio_source, volume=self.volume)
 
-        except FileNotFoundError:
-            logger.error("FFmpeg not found! Please install FFmpeg")
-            return None
-        except subprocess.TimeoutExpired:
-            logger.error("Timeout testing stream URL")
-            return None
         except Exception as e:
-            logger.error(f"Error creating audio source: {e}")
+            logger.error(f"❌ Error creating audio source: {e}")
             return None
-
-    def _on_playback_finished(self, error, song: Song):
-        """Called when playback finishes"""
-        if error:
-            logger.error(f"Playback error for {song.display_name}: {error}")
-            if self.on_error and self._loop:
-                asyncio.run_coroutine_threadsafe(self.on_error(error, song), self._loop)
-
-        self._reset_state()
-
-        if self.on_song_finished and self._loop:
-            asyncio.run_coroutine_threadsafe(self.on_song_finished(song), self._loop)
-
-    def _reset_state(self):
-        """Reset playback state"""
-        self.current_song = None
-        self.is_playing = False
-        self.is_paused = False

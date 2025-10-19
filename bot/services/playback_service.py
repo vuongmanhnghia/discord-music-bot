@@ -148,7 +148,9 @@ class PlaybackService:
             if self.audio_service.is_playing(guild_id):
                 return
 
-            if not self.audio_service.is_connected(guild_id):
+            # Check if bot is connected to voice channel
+            voice_client = self.audio_service.get_voice_client(guild_id)
+            if not voice_client or not voice_client.is_connected():
                 return
 
             queue_manager = self.audio_service.get_queue_manager(guild_id)

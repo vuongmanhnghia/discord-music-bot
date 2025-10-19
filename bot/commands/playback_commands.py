@@ -60,23 +60,44 @@ class PlaybackCommandHandler(BaseCommandHandler):
             query="URL hoặc từ khóa tìm kiếm (để trống để phát từ playlist hiện tại)"
         )
         @app_commands.checks.cooldown(1, 3.0, key=lambda i: (i.guild_id, i.user.id))
-        @handle_command_errors
-        @require_voice_connection(bot_must_be_connected=False)
         async def play_music(
             interaction: discord.Interaction, query: Optional[str] = None
         ):
             """▶️ Play music from URL/search query or from active playlist"""
-            # Validate
-            if query:
-                query = Validator.sanitize_query(query)
-                is_valid, error_msg = Validator.validate_query_length(query)
-                if not is_valid:
-                    await interaction.response.send_message(error_msg, ephemeral=True)
+            try:
+                # Check if in guild
+                if not interaction.guild:
+                    embed = self.create_error_embed(
+                        "Server Only", "This command can only be used in a server."
+                    )
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
                     return
 
-                await self._handle_play_with_query(interaction, query)
-            else:
-                await self._handle_play_from_playlist(interaction)
+                # Check if user is in voice channel
+                if not interaction.user.voice:
+                    embed = self.create_error_embed(
+                        "Not in Voice Channel",
+                        "You must be in a voice channel to use this command.",
+                    )
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                    return
+
+                # Validate
+                if query:
+                    query = Validator.sanitize_query(query)
+                    is_valid, error_msg = Validator.validate_query_length(query)
+                    if not is_valid:
+                        await interaction.response.send_message(
+                            error_msg, ephemeral=True
+                        )
+                        return
+
+                    await self._handle_play_with_query(interaction, query)
+                else:
+                    await self._handle_play_from_playlist(interaction)
+
+            except Exception as e:
+                await self.handle_command_error(interaction, e, "play")
 
         @self.bot.tree.command(name="skip", description="Bỏ qua bài hiện tại")
         async def skip_song(interaction: discord.Interaction):
@@ -328,30 +349,32 @@ class PlaybackCommandHandler(BaseCommandHandler):
             except Exception as e:
                 await self.handle_command_error(interaction, e, "shuffle")
 
+    async def process_youtube_playlist(
+        self, interaction: discord.Interaction, query: str
+    ):
+        success, video_urls, message = (
+            await self.youtube_handler.extract_playlist_videos(query)
+        )
+
+        if not success or not video_urls:
+            return self.create_error_embed("Lỗi Playlist", message)
+
+        return await self.playlist_processor.process_playlist_videos(
+            video_urls,
+            message,
+            interaction.guild.id,
+            str(interaction.user),
+        )
+
     async def _handle_play_with_query(
         self, interaction: discord.Interaction, query: str
     ):
-        """Handle play command with query parameter"""
+        # Check if YouTube playlist URL
         if self.youtube_handler.is_playlist_url(query):
-
-            async def process_youtube_playlist():
-                success, video_urls, message = (
-                    await self.youtube_handler.extract_playlist_videos(query)
-                )
-
-                if not success or not video_urls:
-                    return self.create_error_embed("Lỗi Playlist", message)
-
-                return await self.playlist_processor.process_playlist_videos(
-                    video_urls,
-                    message,
-                    interaction.guild.id,
-                    str(interaction.user),
-                )
 
             await self.bot.interaction_manager.handle_long_operation(
                 interaction,
-                process_youtube_playlist,
+                self.process_youtube_playlist(interaction, query),
                 "Đang xử lý YouTube Playlist...",
             )
             return
