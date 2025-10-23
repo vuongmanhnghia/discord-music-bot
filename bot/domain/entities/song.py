@@ -1,10 +1,12 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TYPE_CHECKING
 import uuid
-from ...utils.events import song_event_bus, SongUpdateEvent
 import asyncio
+
+if TYPE_CHECKING:
+    from ...utils.events import song_event_bus, SongUpdateEvent
 
 from ..valueobjects.source_type import SourceType
 from ..valueobjects.song_status import SongStatus

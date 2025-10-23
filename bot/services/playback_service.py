@@ -1,13 +1,13 @@
 import asyncio
 from typing import Optional
 
-from ..domain.entities.song import Song
 from ..domain.entities.input import InputAnalyzer
 from ..config.performance import performance_config
 from ..config.service_constants import ErrorMessages, ServiceConstants
 
 from ..pkg.logger import logger
 from .processing import SongProcessingService
+from ..domain.entities.song import Song
 from .youtube_service import youtube_service
 from ..services.audio_service import AudioService
 from ..utils.async_processor import (
@@ -316,7 +316,7 @@ class PlaybackService:
                 return (False, ErrorMessages.no_current_song())
 
             # Skip to next
-            success = await self.audio_service.skip_to_next(guild_id)
+            success = await self.audio_service.skip_current_song(guild_id)
 
             if success:
                 next_song = queue_manager.current_song

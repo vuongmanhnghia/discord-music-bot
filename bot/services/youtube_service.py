@@ -2,10 +2,11 @@
 
 import asyncio
 import time
-from typing import Optional, Tuple, Dict, Any
+from typing import Tuple, TYPE_CHECKING
 import yt_dlp
 
 from ..utils.cache import SmartCache
+
 from ..domain.entities.song import Song
 from ..domain.valueobjects.source_type import SourceType
 from ..domain.valueobjects.song_metadata import SongMetadata

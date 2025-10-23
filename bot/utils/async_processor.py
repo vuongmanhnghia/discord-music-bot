@@ -14,7 +14,7 @@ Features:
 """
 
 import asyncio
-from typing import Dict, List, Optional, Callable, Any
+from typing import Dict, List, Optional, Callable, Any, TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime

@@ -7,9 +7,9 @@ import asyncio
 import time
 from typing import Dict, Tuple
 
-from ..utils.youtube import YouTubePlaylistHandler
+from ..utils.youtube import YouTubeHandler
+
 from ..domain.entities.song import Song
-from ..config.constants import STREAM_URL_MAX_AGE
 from ..config.service_constants import ServiceConstants
 from ..pkg.logger import logger
 
@@ -24,12 +24,13 @@ class StreamRefreshService:
         self.url_cache: Dict[str, Tuple[str, float]] = (
             {}
         )  # original_input -> (stream_url, timestamp)
-        self.youtube_handler = YouTubePlaylistHandler()
+        self.youtube_handler = YouTubeHandler()
         self.URL_MAX_AGE = 5 * 3600  # 5 hours in seconds
 
     async def should_refresh_url(self, song: Song) -> bool:
         """Check if stream URL needs refresh"""
         if not song.stream_url:
+            logger.info(f"🆕 No stream URL for {song.display_name}, needs refresh")
             return True
 
         # Check age of URL
@@ -55,13 +56,10 @@ class StreamRefreshService:
                 return False
 
             # Update song with new URL
-            old_url = song.stream_url
             song.stream_url = info["url"]
-            song.stream_url_timestamp = time.time()  # ✅ Track timestamp
+            song.stream_url_timestamp = time.time()  # Track timestamp
 
             logger.info(f"✅ URL refreshed for: {song.display_name}")
-            logger.debug(f"Old URL: {old_url[:100]}...")
-            logger.debug(f"New URL: {song.stream_url[:100]}...")
 
             return True
 
@@ -69,13 +67,7 @@ class StreamRefreshService:
             logger.error(f"❌ Error refreshing URL for {song.display_name}: {e}")
             return False
 
-    async def refresh_current_song_if_needed(self, song: Song) -> bool:
-        """Refresh current playing song if needed"""
-        if await self.should_refresh_url(song):
-            return await self.refresh_stream_url(song)
-        return False
-
-    async def preemptive_refresh_queue(self, queue_songs: list) -> int:
+    async def refresh_queue(self, queue_songs: list) -> int:
         """Preemptively refresh URLs in queue that will expire soon"""
         refreshed_count = 0
 
@@ -88,19 +80,3 @@ class StreamRefreshService:
                     await asyncio.sleep(ServiceConstants.STREAM_REFRESH_DELAY)
 
         return refreshed_count
-
-    def enable_refresh(self):
-        """Enable stream URL refresh"""
-        self.enabled = True
-
-    def disable_refresh(self):
-        """Disable stream URL refresh"""
-        self.enabled = False
-
-    def clear_cache(self):
-        """Clear URL cache"""
-        self.url_cache.clear()
-
-
-# Global service instance
-stream_refresh_service = StreamRefreshService()

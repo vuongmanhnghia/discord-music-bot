@@ -6,18 +6,17 @@ Clean separation of concerns with proper error handling
 import asyncio
 import json
 import re
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TYPE_CHECKING
 import time
 
 
 from ..domain.valueobjects.source_type import SourceType
-from ..domain.entities.song import Song, SongMetadata
 from ..domain.valueobjects.song_processor import SongProcessor
-from ..utils.youtube import youtube_error_handler
 from ..config.service_constants import ServiceConstants
-from .auto_recovery import auto_recovery_service
 from .retry_strategy import RetryStrategy
 from ..pkg.logger import logger
+
+from ..domain.entities.song import Song, SongMetadata
 
 
 class SpotifyService(SongProcessor):
@@ -172,7 +171,7 @@ class YouTubeService(SongProcessor):
 
     async def process(self, song: Song) -> bool:
         """Process YouTube URL or search query"""
-        logger.info(f"Processing YouTube/search: {song.original_input}")
+        logger.info(f"⏳ Processing YouTube/search: {song.original_input}")
 
         try:
             song.mark_processing()
@@ -372,9 +371,9 @@ class YouTubeService(SongProcessor):
             error_msg = stderr.decode()
 
             # Try auto-recovery on 403 errors (only on first attempt)
-            if youtube_error_handler.is_403_error(error_msg):
-                await auto_recovery_service.check_and_recover_if_needed(error_msg)
-                await asyncio.sleep(ServiceConstants.STREAM_REFRESH_RETRY_DELAY)
+            # if youtube_error_handler.is_403_error(error_msg):
+            #     await auto_recovery_service.check_and_recover_if_needed(error_msg)
+            #     await asyncio.sleep(ServiceConstants.STREAM_REFRESH_RETRY_DELAY)
 
             raise Exception(f"Stream URL extraction failed: {error_msg}")
 
@@ -450,11 +449,13 @@ class YouTubeService(SongProcessor):
 
             try:
                 stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), 
-                    timeout=ServiceConstants.BASIC_INFO_TIMEOUT  # Use config constant (30s)
+                    process.communicate(),
+                    timeout=ServiceConstants.BASIC_INFO_TIMEOUT,  # Use config constant (30s)
                 )
             except asyncio.TimeoutError:
-                logger.error(f"Basic info extraction timeout after {ServiceConstants.BASIC_INFO_TIMEOUT}s for {query}")
+                logger.error(
+                    f"Basic info extraction timeout after {ServiceConstants.BASIC_INFO_TIMEOUT}s for {query}"
+                )
                 process.kill()
                 raise
 

@@ -102,7 +102,7 @@ class AdvancedCommandHandler(BaseCommandHandler):
                 async def process_async_playlist():
                     # Extract playlist videos
                     success, video_urls, message = (
-                        await self.youtube_handler.extract_playlist_videos(url)
+                        await self.youtube_handler.extract_playlist(url)
                     )
 
                     if not success or not video_urls:

@@ -627,7 +627,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
         # Extract playlist videos
         success_playlist, video_urls, message = (
-            await self.youtube_handler.extract_playlist_videos(song_input)
+            await self.youtube_handler.extract_playlist(song_input)
         )
 
         if success_playlist and video_urls:
@@ -741,7 +741,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
 
         # Extract playlist videos
         success_extract, video_urls, message = (
-            await self.youtube_handler.extract_playlist_videos(playlist_url)
+            await self.youtube_handler.extract_playlist(playlist_url)
         )
 
         if not success_extract or not video_urls:

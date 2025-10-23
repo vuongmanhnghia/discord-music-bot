@@ -11,8 +11,11 @@ import discord
 from discord.ext import commands
 
 from .config.config import config
-from .config.time_constants import TimeIntervals
 from .pkg.logger import logger
+
+from .domain.entities.queue import QueueManager
+
+from .services.stream_refresh import StreamRefreshService
 from .services.playlist_service import PlaylistService
 from .services.audio_service import AudioService
 from .services.playback_service import PlaybackService
@@ -32,7 +35,7 @@ from .commands.advanced_commands import AdvancedCommandHandler
 
 # Import utils
 from .utils.playlist_processors import PlaylistProcessor
-from .utils.youtube import YouTubePlaylistHandler
+from .utils.youtube import YouTubeHandler
 
 
 class MusicBot(commands.Bot):
@@ -54,13 +57,16 @@ class MusicBot(commands.Bot):
         # Initialize services
         self.library_manager = LibraryManager()
         self.playlist_service = PlaylistService(self.library_manager)
-        self.audio_service = AudioService()
+
+        self.stream_refresh_service = StreamRefreshService()
+        self.audio_service = AudioService(self.stream_refresh_service)
+
         self.playback_service = PlaybackService(self.audio_service)
         self.interaction_manager = InteractionManager()
 
         # Initialize utils
         self.playlist_processor = PlaylistProcessor()
-        self.youtube_handler = YouTubePlaylistHandler()
+        self.youtube_handler = YouTubeHandler()
 
         # State
         self.active_playlists: dict[int, str] = {}
@@ -82,12 +88,12 @@ class MusicBot(commands.Bot):
             logger.info("✅ Message update manager initialized")
 
             # Start unified health monitoring & auto-recovery
-            asyncio.create_task(self._health_and_recovery_loop())
-            logger.info("💓 Health monitoring & auto-recovery started")
+            # asyncio.create_task(self._health_and_recovery_loop())
+            # logger.info("💓 Health monitoring & auto-recovery started")
 
             # Start scheduled maintenance
-            asyncio.create_task(self._maintenance_loop())
-            logger.info("🔧 Scheduled maintenance started")
+            # asyncio.create_task(self._maintenance_loop())
+            # logger.info("🔧 Scheduled maintenance started")
 
             # Sync slash commands
             await self._sync_commands()
@@ -96,131 +102,76 @@ class MusicBot(commands.Bot):
             logger.error(f"❌ Failed to initialize bot: {e}")
             raise
 
-    async def _health_and_recovery_loop(self):
-        """Unified health monitoring and auto-recovery system"""
-        await self.wait_until_ready()
+    # async def _health_and_recovery_loop(self):
+    #     """Unified health monitoring and auto-recovery system"""
+    #     await self.wait_until_ready()
 
-        while not self.is_closed():
-            try:
-                await asyncio.sleep(TimeIntervals.HEALTH_CHECK_INTERVAL)
+    #     while not self.is_closed():
+    #         try:
+    #             await asyncio.sleep(TimeIntervals.HEALTH_CHECK_INTERVAL)
 
-                # Check all voice clients
-                for voice_client in self.voice_clients:
-                    guild_id = voice_client.guild.id
+    #             # Check all voice clients
+    #             for voice_client in self.voice_clients:
+    #                 guild_id = voice_client.guild.id
 
-                    # 1. Connection health check
-                    if not voice_client.is_connected():
-                        logger.warning(
-                            f"💔 Disconnected voice client detected: guild {guild_id}"
-                        )
+    #                 # 1. Connection health check
+    #                 if not voice_client.is_connected():
+    #                     logger.warning(
+    #                         f"💔 Disconnected voice client detected: guild {guild_id}"
+    #                     )
 
-                        # 2. Auto-recovery attempt
-                        try:
-                            logger.info(
-                                f"🔄 Attempting auto-recovery for guild {guild_id}"
-                            )
-                            await self.audio_service.ensure_voice_connection(guild_id)
+    #                     # 2. Auto-recovery attempt
+    #                     try:
+    #                         logger.info(
+    #                             f"🔄 Attempting auto-recovery for guild {guild_id}"
+    #                         )
+    #                         await self.audio_service.ensure_voice_connection(guild_id)
 
-                            # 3. Resume playback if there was a current song
-                            queue_manager = self.audio_service.get_queue_manager(
-                                guild_id
-                            )
-                            if queue_manager and queue_manager.current_song:
-                                logger.info(f"▶️ Resuming playback for guild {guild_id}")
-                                await self.audio_service.play_next_song(guild_id)
+    #                         # 3. Resume playback if there was a current song
+    #                         if self.audio_service._queue_managers[
+    #                             guild_id
+    #                         ].current_song:
+    #                             logger.info(f"▶️ Resuming playback for guild {guild_id}")
+    #                             await self.audio_service.play_next_song(guild_id)
 
-                            logger.info(
-                                f"✅ Auto-recovery successful for guild {guild_id}"
-                            )
+    #                         logger.info(
+    #                             f"✅ Auto-recovery successful for guild {guild_id}"
+    #                         )
 
-                        except Exception as recovery_error:
-                            logger.error(
-                                f"❌ Auto-recovery failed for guild {guild_id}: {recovery_error}"
-                            )
+    #                     except Exception as recovery_error:
+    #                         logger.error(
+    #                             f"❌ Auto-recovery failed for guild {guild_id}: {recovery_error}"
+    #                         )
 
-                    # 4. Playback health check (for connected clients)
-                    elif voice_client.is_connected():
-                        audio_player = self.audio_service._audio_players.get(guild_id)
-                        queue_manager = self.audio_service.get_queue_manager(guild_id)
+    #                 # 4. Playback health check (for connected clients)
+    #                 elif voice_client.is_connected():
+    #                     audio_player = self.audio_service._audio_players.get(guild_id)
 
-                        # Check for stuck playback
-                        if (
-                            queue_manager
-                            and queue_manager.current_song
-                            and audio_player
-                            and not audio_player.is_playing
-                        ):
+    #                     # Check for stuck playback
+    #                     if (
+    #                         self.audio_service._queue_managers[guild_id]
+    #                         and self.audio_service._queue_managers[
+    #                             guild_id
+    #                         ].current_song
+    #                         and audio_player
+    #                         and not audio_player.is_playing
+    #                     ):
 
-                            logger.warning(
-                                f"⚠️ Playback stuck detected for guild {guild_id}"
-                            )
+    #                         logger.warning(
+    #                             f"⚠️ Playback stuck detected for guild {guild_id}"
+    #                         )
 
-                            try:
-                                await self.audio_service.play_next_song(guild_id)
-                                logger.info(
-                                    f"✅ Playback recovered for guild {guild_id}"
-                                )
-                            except Exception as e:
-                                logger.error(f"Failed to recover playback: {e}")
+    #                         try:
+    #                             await self.audio_service.play_next_song(guild_id)
+    #                             logger.info(
+    #                                 f"✅ Playback recovered for guild {guild_id}"
+    #                             )
+    #                         except Exception as e:
+    #                             logger.error(f"Failed to recover playback: {e}")
 
-            except Exception as e:
-                logger.error(f"Error in health & recovery loop: {e}")
-                await asyncio.sleep(TimeIntervals.HEALTH_CHECK_INTERVAL)
-
-    async def _maintenance_loop(self):
-        """Scheduled maintenance tasks"""
-        await self.wait_until_ready()
-
-        # Initial delay before first maintenance
-        await asyncio.sleep(TimeIntervals.MAINTENANCE_INITIAL_DELAY)
-
-        while not self.is_closed():
-            try:
-                logger.info("🔧 Running scheduled maintenance...")
-
-                # 1. Cleanup expired cache
-                try:
-                    from .utils.maintenance import CacheManager
-
-                    await CacheManager.perform_cache_maintenance(self.playback_service)
-                except Exception as e:
-                    logger.error(f"  ✗ Cache maintenance failed: {e}")
-
-                # 2. Cleanup idle connections
-                try:
-                    cleaned = await self.audio_service.force_cleanup_idle_connections()
-                    logger.info(f"  ✓ Cleaned {cleaned} idle connections")
-                except Exception as e:
-                    logger.error(f"  ✗ Connection cleanup failed: {e}")
-
-                # 3. Refresh stream URLs in queues
-                try:
-                    from .utils.maintenance import StreamURLRefreshManager
-
-                    await StreamURLRefreshManager.refresh_queue_urls(
-                        self.guilds, self.audio_service
-                    )
-                except Exception as e:
-                    logger.error(f"  ✗ Stream URL refresh failed: {e}")
-
-                # 4. Log statistics
-                try:
-                    stats = self.audio_service.get_resource_stats()
-                    logger.info(f"  📊 Resource stats: {stats}")
-                except Exception as e:
-                    logger.error(f"  ✗ Stats logging failed: {e}")
-
-                logger.info("✅ Scheduled maintenance complete")
-
-                # Wait before next maintenance
-                await asyncio.sleep(TimeIntervals.MAINTENANCE_INTERVAL)
-
-            except asyncio.CancelledError:
-                logger.info("🔧 Maintenance loop cancelled")
-                break
-            except Exception as e:
-                logger.error(f"Error in maintenance loop: {e}")
-                await asyncio.sleep(TimeIntervals.MAINTENANCE_INTERVAL)
+    #         except Exception as e:
+    #             logger.error(f"Error in health & recovery loop: {e}")
+    #             await asyncio.sleep(TimeIntervals.HEALTH_CHECK_INTERVAL)
 
     async def _sync_commands(self):
         """Sync slash commands with rate limit handling"""

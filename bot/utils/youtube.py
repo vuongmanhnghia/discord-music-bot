@@ -1,16 +1,43 @@
 """YouTube utilities - Playlist handling and error management"""
 
 import re
-import time
 import logging
+import yt_dlp
 from typing import List, Optional, Tuple, Dict, Any
 from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
 
 
-class YouTubePlaylistHandler:
+class YouTubeHandler:
     """YouTube playlist URL processing and extraction"""
+
+    @staticmethod
+    def extract_info(url: str) -> Optional[Dict[str, Any]]:
+        """
+        Input: YouTube playlist URL
+        Extract playlist information and video URLs
+        Output: (id, title, entries,...)
+        """
+        try:
+            ydl_opts = {
+                "format": "bestaudio/best",
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "default_search": "auto",
+                # "source_address": "0.0.0.0",  # Cẩn thận khi sử dụng, chỉ dùng khi gặp lỗi 403
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                return info
+        except ImportError:
+            logger.error("yt-dlp not available for YouTube extraction")
+            return None
+        except Exception as e:
+            logger.error(f"Error extracting info from {url}: {e}")
+            return None
 
     @staticmethod
     def is_playlist_url(url: str) -> bool:
@@ -24,18 +51,18 @@ class YouTubePlaylistHandler:
             re.search(pattern, url, re.IGNORECASE) for pattern in playlist_patterns
         )
 
-    @staticmethod
-    def is_single_video_with_playlist(url: str) -> bool:
-        if not url or not isinstance(url, str):
-            return False
-        single_video_patterns = [
-            r"youtube\.com/watch\?.*v=.*&.*list=",
-            r"youtube\.com/watch\?.*list=.*&.*v=",
-            r"youtu\.be/.*\?.*list=",
-        ]
-        return any(
-            re.search(pattern, url, re.IGNORECASE) for pattern in single_video_patterns
-        )
+    # @staticmethod
+    # def is_single_video_with_playlist(url: str) -> bool:
+    #     if not url or not isinstance(url, str):
+    #         return False
+    #     single_video_patterns = [
+    #         r"youtube\.com/watch\?.*v=.*&.*list=",
+    #         r"youtube\.com/watch\?.*list=.*&.*v=",
+    #         r"youtu\.be/.*\?.*list=",
+    #     ]
+    #     return any(
+    #         re.search(pattern, url, re.IGNORECASE) for pattern in single_video_patterns
+    #     )
 
     @staticmethod
     def extract_playlist_id(url: str) -> Optional[str]:
@@ -56,17 +83,17 @@ class YouTubePlaylistHandler:
             return None
 
     @staticmethod
-    async def extract_playlist_videos(url: str) -> Tuple[bool, List[str], str]:
+    async def extract_playlist(url: str) -> Tuple[bool, List[str], str]:
         try:
-            import yt_dlp
-
-            playlist_id = YouTubePlaylistHandler.extract_playlist_id(url)
+            playlist_id = YouTubeHandler.extract_playlist_id(url)
             if not playlist_id:
                 return False, [], "Invalid playlist URL"
 
             ydl_opts = {
+                "format": "bestaudio/best",
                 "quiet": True,
                 "no_warnings": True,
+                "skip_download": True,
                 "extract_flat": True,
                 "playlist_items": "1-100",
             }
@@ -74,6 +101,11 @@ class YouTubePlaylistHandler:
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 try:
+                    """
+                    Input: YouTube playlist URL
+                    Extract playlist information and video URLs
+                    Output: (id, title, entries,...)
+                    """
                     playlist_info = ydl.extract_info(url, download=False)
                     if not playlist_info:
                         return False, [], "Could not extract playlist information"
@@ -85,10 +117,10 @@ class YouTubePlaylistHandler:
                         return (
                             False,
                             [],
-                            f"Playlist '{playlist_title}' is empty or private",
+                            f"Playlist '{playlist_title}' is empty",
                         )
 
-                    for entry in entries[:100]:
+                    for entry in entries[:]:
                         if entry and entry.get("id"):
                             video_urls.append(
                                 f"https://www.youtube.com/watch?v={entry['id']}"
@@ -133,18 +165,18 @@ class YouTubePlaylistHandler:
             logger.error(f"Unexpected error processing playlist {url}: {e}")
             return False, [], f"Unexpected error: {str(e)}"
 
-    @staticmethod
-    def format_playlist_message(
-        video_count: int, playlist_title: str, processing_type: str = "added"
-    ) -> str:
-        if video_count == 0:
-            return f"❌ No videos found in playlist '{playlist_title}'"
-        elif video_count == 1:
-            return (
-                f"✅ {processing_type.title()} 1 video from playlist '{playlist_title}'"
-            )
-        else:
-            return f"✅ {processing_type.title()} {video_count} videos from playlist '{playlist_title}'"
+    # @staticmethod
+    # def format_playlist_message(
+    #     video_count: int, playlist_title: str, processing_type: str = "added"
+    # ) -> str:
+    #     if video_count == 0:
+    #         return f"❌ No videos found in playlist '{playlist_title}'"
+    #     elif video_count == 1:
+    #         return (
+    #             f"✅ {processing_type.title()} 1 video from playlist '{playlist_title}'"
+    #         )
+    #     else:
+    #         return f"✅ {processing_type.title()} {video_count} videos from playlist '{playlist_title}'"
 
 
 class YouTubeErrorHandler:
@@ -164,55 +196,52 @@ class YouTubeErrorHandler:
         ]
         return any(indicator in error_msg for indicator in error_indicators)
 
-    def should_retry_403(self, url: str, attempt: int) -> bool:
-        current_time = time.time()
-        last_403 = self._last_403_time.get(url, 0)
+    # def should_retry_403(self, url: str, attempt: int) -> bool:
+    #     current_time = time.time()
+    #     last_403 = self._last_403_time.get(url, 0)
 
-        if current_time - last_403 < 300:
-            return False
+    #     if current_time - last_403 < 300:
+    #         return False
 
-        self._last_403_time[url] = current_time
-        return attempt < 3
+    #     self._last_403_time[url] = current_time
+    #     return attempt < 3
 
-    async def get_retry_delay(self, attempt: int) -> int:
-        return (
-            self._retry_delays[attempt]
-            if attempt < len(self._retry_delays)
-            else self._retry_delays[-1]
-        )
+    # async def get_retry_delay(self, attempt: int) -> int:
+    #     return (
+    #         self._retry_delays[attempt]
+    #         if attempt < len(self._retry_delays)
+    #         else self._retry_delays[-1]
+    #     )
 
-    def get_alternative_format(self, attempt: int) -> str:
-        formats = [
-            "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
-            "worst[ext=webm]/worst[ext=m4a]/worst/best",
-            "bestaudio[protocol^=http]/best[protocol^=http]",
-            "worst",
-        ]
-        return formats[attempt] if attempt < len(formats) else formats[-1]
+    # def get_alternative_format(self, attempt: int) -> str:
+    #     formats = [
+    #         "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
+    #         "worst[ext=webm]/worst[ext=m4a]/worst/best",
+    #         "bestaudio[protocol^=http]/best[protocol^=http]",
+    #         "worst",
+    #     ]
+    #     return formats[attempt] if attempt < len(formats) else formats[-1]
 
-    def get_alternative_extractor_args(self, attempt: int) -> Dict[str, Any]:
-        configs = [
-            {"youtube": {"skip": ["hls", "dash"], "player_client": ["android", "web"]}},
-            {"youtube": {"skip": ["hls"], "player_client": ["web"]}},
-            {"youtube": {"skip": ["dash"], "player_client": ["android"]}},
-            {"youtube": {"player_client": ["web"]}},
-        ]
-        return configs[attempt] if attempt < len(configs) else configs[-1]
+    # def get_alternative_extractor_args(self, attempt: int) -> Dict[str, Any]:
+    #     configs = [
+    #         {"youtube": {"skip": ["hls", "dash"], "player_client": ["android", "web"]}},
+    #         {"youtube": {"skip": ["hls"], "player_client": ["web"]}},
+    #         {"youtube": {"skip": ["dash"], "player_client": ["android"]}},
+    #         {"youtube": {"player_client": ["web"]}},
+    #     ]
+    #     return configs[attempt] if attempt < len(configs) else configs[-1]
 
-    def clean_old_403_records(self, max_age_hours: int = 24):
-        current_time = time.time()
-        cutoff_time = current_time - (max_age_hours * 3600)
-        urls_to_remove = [
-            url
-            for url, timestamp in self._last_403_time.items()
-            if timestamp < cutoff_time
-        ]
+    # def clean_old_403_records(self, max_age_hours: int = 24):
+    #     current_time = time.time()
+    #     cutoff_time = current_time - (max_age_hours * 3600)
+    #     urls_to_remove = [
+    #         url
+    #         for url, timestamp in self._last_403_time.items()
+    #         if timestamp < cutoff_time
+    #     ]
 
-        for url in urls_to_remove:
-            del self._last_403_time[url]
+    #     for url in urls_to_remove:
+    #         del self._last_403_time[url]
 
-        if urls_to_remove:
-            logger.debug(f"Cleaned up {len(urls_to_remove)} old 403 records")
-
-
-youtube_error_handler = YouTubeErrorHandler()
+    #     if urls_to_remove:
+    #         logger.debug(f"Cleaned up {len(urls_to_remove)} old 403 records")

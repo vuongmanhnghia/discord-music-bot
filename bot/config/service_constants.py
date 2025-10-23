@@ -57,6 +57,9 @@ class ServiceConstants:
     TASK_CANCELLATION_TIMEOUT = 3.0  # timeout for task cancellation
     ASYNC_TASK_SUBMIT_DELAY = 0.1  # delay between async task submissions
 
+    # Stream Refresh
+    STREAM_REFRESH_DELAY = 2  # delay between stream URL refresh attempts
+
 
 class ErrorMessages:
     """Centralized error messages (bilingual)"""

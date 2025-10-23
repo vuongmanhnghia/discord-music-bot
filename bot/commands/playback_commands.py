@@ -11,12 +11,6 @@ from . import BaseCommandHandler
 from ..pkg.logger import logger
 from ..utils.core import Validator
 from ..utils.events import message_update_manager
-from ..utils.decorators import (
-    handle_command_errors,
-    require_voice_connection,
-    require_same_voice_channel,
-    defer_response,
-)
 from ..utils.discord_ui import (
     create_pause_embed,
     create_resume_embed,
@@ -104,14 +98,6 @@ class PlaybackCommandHandler(BaseCommandHandler):
             """⏭️ Skip current song"""
             try:
                 if not await self.ensure_same_voice_channel(interaction):
-                    return
-
-                queue_manager = self.get_queue_manager(interaction.guild.id)
-                current_song = queue_manager.current_song
-                if not current_song:
-                    await interaction.response.send_message(
-                        "Không có bài nào đang phát", ephemeral=True
-                    )
                     return
 
                 # Skip current song
@@ -352,8 +338,8 @@ class PlaybackCommandHandler(BaseCommandHandler):
     async def process_youtube_playlist(
         self, interaction: discord.Interaction, query: str
     ):
-        success, video_urls, message = (
-            await self.youtube_handler.extract_playlist_videos(query)
+        success, video_urls, message = await self.youtube_handler.extract_playlist(
+            query
         )
 
         if not success or not video_urls:
@@ -437,8 +423,6 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 ERROR_MESSAGES["no_active_playlist"], ephemeral=True
             )
             return
-
-        queue_manager = self.get_queue_manager(guild_id)
 
         # Try to resume if paused
         voice_client = interaction.guild.voice_client
