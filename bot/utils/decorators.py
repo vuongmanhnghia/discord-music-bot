@@ -49,9 +49,7 @@ def handle_command_errors(func: Callable) -> Callable:
 
         except asyncio.TimeoutError:
             logger.error(f"Timeout in {func.__name__}")
-            embed = ErrorEmbedFactory.create_error_embed(
-                "Timeout", "The operation took too long. Please try again."
-            )
+            embed = ErrorEmbedFactory.create_error_embed("Timeout", "The operation took too long. Please try again.")
 
             try:
                 if interaction.response.is_done():
@@ -109,9 +107,7 @@ def require_voice_connection(bot_must_be_connected: bool = False):
         async def wrapper(self, interaction: discord.Interaction, *args, **kwargs):
             # Check if in guild
             if not interaction.guild:
-                embed = ErrorEmbedFactory.create_error_embed(
-                    "Server Only", "This command can only be used in a server."
-                )
+                embed = ErrorEmbedFactory.create_error_embed("Server Only", "This command can only be used in a server.")
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
 
@@ -153,9 +149,7 @@ def require_same_voice_channel(func: Callable) -> Callable:
     @functools.wraps(func)
     async def wrapper(self, interaction: discord.Interaction, *args, **kwargs):
         if not interaction.guild:
-            embed = ErrorEmbedFactory.create_error_embed(
-                "Server Only", "This command can only be used in a server."
-            )
+            embed = ErrorEmbedFactory.create_error_embed("Server Only", "This command can only be used in a server.")
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
@@ -173,9 +167,7 @@ def require_same_voice_channel(func: Callable) -> Callable:
         # Get bot's voice channel
         voice_client = interaction.guild.voice_client
         if not voice_client or not voice_client.is_connected():
-            embed = ErrorEmbedFactory.create_error_embed(
-                "Bot Not Connected", "The bot is not currently in a voice channel."
-            )
+            embed = ErrorEmbedFactory.create_error_embed("Bot Not Connected", "The bot is not currently in a voice channel.")
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
@@ -208,9 +200,7 @@ def log_command_usage(func: Callable) -> Callable:
         command_name = func.__name__
 
         logger.info(
-            f"Command: /{command_name} | "
-            f"User: {user.name} ({user.id}) | "
-            f"Guild: {guild.name if guild else 'DM'} ({guild.id if guild else 'N/A'})"
+            f"Command: /{command_name} | " f"User: {user.name} ({user.id}) | " f"Guild: {guild.name if guild else 'DM'} ({guild.id if guild else 'N/A'})"
         )
 
         # Execute command

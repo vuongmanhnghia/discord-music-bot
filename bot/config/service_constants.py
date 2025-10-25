@@ -35,18 +35,14 @@ class ServiceConstants:
     SWITCH_CLEANUP_DELAY = 0.5  # delay for cleanup after stopping playback
 
     # YouTube Processing
-    YOUTUBE_EXTRACT_TIMEOUT_BASE = (
-        45  # base timeout for YouTube extraction (increased from 30)
-    )
+    YOUTUBE_EXTRACT_TIMEOUT_BASE = 45  # base timeout for YouTube extraction (increased from 30)
     YOUTUBE_EXTRACT_TIMEOUT_INCREMENT = 15  # additional timeout per retry
     YOUTUBE_RETRY_MAX_ATTEMPTS = 3  # max retry attempts for YouTube
     YOUTUBE_STREAM_TIMEOUT = 60  # timeout for stream URL extraction (increased from 45)
     YOUTUBE_RETRY_DELAYS = [2, 5, 10]  # exponential backoff delays (increased)
 
     # Metadata Extraction
-    METADATA_EXTRACTION_TIMEOUT = (
-        45  # timeout for metadata extraction (increased from 30)
-    )
+    METADATA_EXTRACTION_TIMEOUT = 45  # timeout for metadata extraction (increased from 30)
     BASIC_INFO_TIMEOUT = 30  # timeout for basic info fallback (increased from 20)
 
     # Connection
@@ -156,21 +152,6 @@ class ErrorMessages:
     def no_current_song() -> str:
         """Message when no song is currently playing"""
         return "Không có bài hát nào đang phát"
-
-    @staticmethod
-    def skipped_to_song(song_name: str) -> str:
-        """Message when skipped to a song"""
-        return f"Đã chuyển sang: **{song_name}**"
-
-    @staticmethod
-    def skipped_no_more_songs() -> str:
-        """Message when skipped but queue is empty"""
-        return "Đã bỏ qua. Không còn bài hát trong hàng đợi."
-
-    @staticmethod
-    def cannot_skip() -> str:
-        """Message when cannot skip song"""
-        return "Không thể bỏ qua bài hát"
 
     @staticmethod
     def already_paused() -> str:

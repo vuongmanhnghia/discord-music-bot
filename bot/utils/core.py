@@ -43,9 +43,7 @@ class Validator:
         return query
 
     @staticmethod
-    def validate_query_length(
-        query: str, max_length: int = 200
-    ) -> Tuple[bool, Optional[str]]:
+    def validate_query_length(query: str, max_length: int = 200) -> Tuple[bool, Optional[str]]:
         if len(query) > max_length:
             return False, f"❌ Query quá dài! Giới hạn {max_length} ký tự."
         return True, None
@@ -116,11 +114,9 @@ class VoiceStateHelper:
         return len(human_members) == 0
 
     @staticmethod
-    async def handle_auto_disconnect(
-        voice_client: discord.VoiceClient, guild_id: int, delay: int = 60
-    ) -> bool:
+    async def handle_auto_disconnect(voice_client: discord.VoiceClient, guild_id: int, delay: int = 60) -> bool:
         """Handle auto-disconnect after delay if still alone"""
-        from ..services.audio_service import audio_service
+        from ..services.audio.audio_service import audio_service
 
         logger.info(f"Bot alone in channel, waiting {delay}s before disconnect")
         await asyncio.sleep(delay)
@@ -206,9 +202,7 @@ class RateLimitMonitor:
     """Monitor and track rate limits"""
 
     def __init__(self):
-        self._command_usage: dict[int, dict[str, list[datetime]]] = defaultdict(
-            lambda: defaultdict(list)
-        )
+        self._command_usage: dict[int, dict[str, list[datetime]]] = defaultdict(lambda: defaultdict(list))
         self._global_rate_limits: dict[str, datetime] = {}
 
     def check_rate_limit(
@@ -235,9 +229,7 @@ class RateLimitMonitor:
         current_usage = len(self._command_usage[guild_id][command_name])
         if current_usage >= max_uses:
             oldest = min(self._command_usage[guild_id][command_name])
-            retry_after = (
-                oldest + timedelta(seconds=window_seconds) - now
-            ).total_seconds()
+            retry_after = (oldest + timedelta(seconds=window_seconds) - now).total_seconds()
             return False, retry_after
 
         # Record usage
@@ -246,9 +238,7 @@ class RateLimitMonitor:
 
     def set_global_rate_limit(self, key: str, duration_seconds: float):
         """Set a global rate limit"""
-        self._global_rate_limits[key] = datetime.now() + timedelta(
-            seconds=duration_seconds
-        )
+        self._global_rate_limits[key] = datetime.now() + timedelta(seconds=duration_seconds)
 
     def check_global_rate_limit(self, key: str) -> tuple[bool, Optional[float]]:
         """Check if globally rate limited"""

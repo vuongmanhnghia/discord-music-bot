@@ -6,7 +6,7 @@ from collections import deque
 from .song import Song
 
 
-class QueueManager:
+class Queue:
     """
     Thread-safe queue manager with rich functionality
     Optimized with deque for O(1) operations

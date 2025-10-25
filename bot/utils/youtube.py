@@ -47,9 +47,7 @@ class YouTubeHandler:
             r"youtube\.com/playlist\?list=",
             r"music\.youtube\.com/playlist\?list=",
         ]
-        return any(
-            re.search(pattern, url, re.IGNORECASE) for pattern in playlist_patterns
-        )
+        return any(re.search(pattern, url, re.IGNORECASE) for pattern in playlist_patterns)
 
     # @staticmethod
     # def is_single_video_with_playlist(url: str) -> bool:
@@ -122,9 +120,7 @@ class YouTubeHandler:
 
                     for entry in entries[:]:
                         if entry and entry.get("id"):
-                            video_urls.append(
-                                f"https://www.youtube.com/watch?v={entry['id']}"
-                            )
+                            video_urls.append(f"https://www.youtube.com/watch?v={entry['id']}")
 
                     if not video_urls:
                         return (
@@ -133,14 +129,8 @@ class YouTubeHandler:
                             f"No accessible videos found in playlist '{playlist_title}'",
                         )
 
-                    logger.info(
-                        f"Extracted {len(video_urls)} videos from playlist: {playlist_title}"
-                    )
-                    return (
-                        True,
-                        video_urls,
-                        f"Found {len(video_urls)} videos in '{playlist_title}'",
-                    )
+                    logger.info(f"Extracted {len(video_urls)} videos from playlist: {playlist_title}")
+                    return (True, video_urls, f"Found {len(video_urls)} videos in '{playlist_title}'")
 
                 except yt_dlp.DownloadError as e:
                     error_msg = str(e)
@@ -156,11 +146,7 @@ class YouTubeHandler:
 
         except ImportError:
             logger.error("yt-dlp not available for playlist processing")
-            return (
-                False,
-                [],
-                "YouTube playlist processing not available (yt-dlp required)",
-            )
+            return (False, [], "YouTube playlist processing not available (yt-dlp required)")
         except Exception as e:
             logger.error(f"Unexpected error processing playlist {url}: {e}")
             return False, [], f"Unexpected error: {str(e)}"

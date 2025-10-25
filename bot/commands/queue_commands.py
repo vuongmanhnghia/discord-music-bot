@@ -32,29 +32,25 @@ class QueueCommandHandler(BaseCommandHandler):
             try:
                 if not interaction.guild:
                     logger.error("Queue command invoked outside of a guild")
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["guild_only"], ephemeral=True
-                    )
+                    await interaction.response.send_message(ERROR_MESSAGES["guild_only"], ephemeral=True)
                     return
 
-                queue_manager = self.get_queue_manager(interaction.guild.id)
+                queue = self.get_queue(interaction.guild.id)
 
                 # Get queue info
-                current_song = queue_manager.current_song
-                all_songs = queue_manager.get_all_songs()
+                current_song = queue.current_song
+                all_songs = queue.get_all_songs()
 
                 if not current_song and not all_songs:
                     logger.info(f"Queue is empty in guild {interaction.guild.id}")
 
                     # Use modern empty queue embed
                     empty_embed = create_empty_queue_embed()
-                    await interaction.response.send_message(
-                        embed=empty_embed, ephemeral=True
-                    )
+                    await interaction.response.send_message(embed=empty_embed, ephemeral=True)
                     return
 
                 # Get queue position first
-                current_pos, total_songs = queue_manager.position
+                current_pos, total_songs = queue.position
 
                 # Convert songs to dict format for pagination
                 # Only show songs AFTER current song (upcoming songs)
@@ -71,12 +67,7 @@ class QueueCommandHandler(BaseCommandHandler):
                     if song.metadata and song.metadata.title:
                         title = song.metadata.display_name
 
-                    song_dicts.append(
-                        {
-                            "title": title,
-                            "status": song.status.value,
-                        }
-                    )
+                    song_dicts.append({"title": title, "status": song.status.value})
 
                 queue_position = (current_pos, total_songs)
 
@@ -88,16 +79,11 @@ class QueueCommandHandler(BaseCommandHandler):
                     if current_song.metadata and current_song.metadata.title:
                         title = current_song.metadata.display_name
 
-                    current_song_dict = {
-                        "title": title,
-                        "status": current_song.status.value,
-                    }
+                    current_song_dict = {"title": title, "status": current_song.status.value}
 
                 # Create paginated pages
                 items_per_page = 10
-                total_pages = max(
-                    1, (len(song_dicts) + items_per_page - 1) // items_per_page
-                )
+                total_pages = max(1, (len(song_dicts) + items_per_page - 1) // items_per_page)
                 pages = []
 
                 for page_num in range(1, total_pages + 1):

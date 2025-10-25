@@ -31,10 +31,7 @@ class BasicCommandHandler(BaseCommandHandler):
             """🏓 Ping command"""
             try:
                 latency = round(self.bot.latency * 1000)
-                embed = EmbedFactory.success(
-                    "Pong!",
-                    f"> Latency: **{latency}ms**",
-                )
+                embed = EmbedFactory.success("Pong!", f"> Latency: **{latency}ms**")
                 await interaction.response.send_message(embed=embed, ephemeral=True)
             except Exception as e:
                 await self.handle_command_error(interaction, e, "ping")
@@ -45,9 +42,7 @@ class BasicCommandHandler(BaseCommandHandler):
             try:
                 # Check guild context
                 if not interaction.guild:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["guild_only"], ephemeral=True
-                    )
+                    await interaction.response.send_message(ERROR_MESSAGES["guild_only"], ephemeral=True)
                     return
 
                 # Check if user is in voice channel
@@ -71,9 +66,7 @@ class BasicCommandHandler(BaseCommandHandler):
                         return
                     else:
                         # Move to user's channel
-                        logger.info(
-                            f"Moving bot from {voice_client.channel.name} to {user_channel.name}"
-                        )
+                        logger.info(f"Moving bot from {voice_client.channel.name} to {user_channel.name}")
 
                 # Connect to voice channel
                 success = await self.audio_service.connect_to_channel(user_channel)
@@ -82,7 +75,7 @@ class BasicCommandHandler(BaseCommandHandler):
                     embed = EmbedFactory.success(
                         "🔊 Joined Voice Channel",
                         f"Connected to **{user_channel.name}**",
-                        details={"Channel": user_channel.name, "Status": "Connected"},
+                        details={"Status": "> Connected"},
                         footer="Ready to play music! Use /play to start",
                     )
                     await interaction.response.send_message(embed=embed)
@@ -103,9 +96,7 @@ class BasicCommandHandler(BaseCommandHandler):
             try:
                 # Check guild context
                 if not interaction.guild:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["guild_only"], ephemeral=True
-                    )
+                    await interaction.response.send_message(ERROR_MESSAGES["guild_only"], ephemeral=True)
                     return
 
                 # Check if bot is connected
@@ -122,29 +113,22 @@ class BasicCommandHandler(BaseCommandHandler):
                 channel_name = voice_client.channel.name
 
                 # Disconnect from voice channel
-                success = await self.audio_service.disconnect_from_guild(
-                    interaction.guild.id
-                )
+                success = await self.audio_service.disconnect_from_guild(interaction.guild.id)
 
                 if success:
                     embed = EmbedFactory.success(
-                        "👋 Disconnected",
+                        "👋 Leaved Voice Channel",
                         f"Left **{channel_name}**",
-                        details={"Status": "Disconnected", "Queue": "Cleared"},
+                        details={"Status": "> Disconnected"},
                         footer="Use /join to reconnect",
                     )
                     await interaction.response.send_message(embed=embed)
                 else:
-                    embed = EmbedFactory.warning(
-                        "⚠️ Disconnect Warning",
-                        "Bot disconnected but some cleanup may have failed",
-                    )
+                    embed = EmbedFactory.warning("⚠️ Disconnect Warning", "Bot disconnected but some cleanup may have failed")
                     await interaction.response.send_message(embed=embed, ephemeral=True)
 
             except Exception as e:
-                await self.handle_command_error(
-                    interaction, e, "leave"
-                ) @ self.bot.tree.command(name="stats", description="Xem thống kê bot")
+                await self.handle_command_error(interaction, e, "leave") @ self.bot.tree.command(name="stats", description="Xem thống kê bot")
 
         async def stats(interaction: discord.Interaction):
             """📊 Bot statistics"""

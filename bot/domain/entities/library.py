@@ -7,7 +7,7 @@ from ..valueobjects.source_type import SourceType
 from ...pkg.logger import logger
 
 
-class LibraryManager:
+class Library:
     """Manages the music library with persistent storage"""
 
     def __init__(self, base_path: str = "playlist"):

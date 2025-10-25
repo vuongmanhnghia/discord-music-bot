@@ -5,8 +5,13 @@ import discord
 from discord.ui import Button, View
 from typing import List, Dict, Optional, Callable, Any
 from datetime import datetime
+from ..services.audio import audio_service
 from ..pkg.logger import logger
 from ..utils.async_processor import ProcessingTask, ProcessingStatus
+from ..utils.events import EventBusManager
+
+audio_service = audio_service
+event_bus_manager = EventBusManager(audio_service)
 
 
 class EmbedFactory:
@@ -24,7 +29,7 @@ class EmbedFactory:
         if suggestions:
             embed.add_field(
                 name="Gợi ý",
-                value="\n".join([f"▸ {s}" for s in suggestions]),
+                value="\n".join([f"> {s}" for s in suggestions]),
                 inline=False,
             )
         embed.set_footer(text=footer)
@@ -57,13 +62,11 @@ class EmbedFactory:
     ) -> discord.Embed:
         embed = discord.Embed(title=title, description=description, color=color)
         if error_details:
-            embed.add_field(
-                name="Chi tiết lỗi", value=f"```{error_details}```", inline=False
-            )
+            embed.add_field(name="Chi tiết lỗi", value=f"```{error_details}```", inline=False)
         if suggestions:
             embed.add_field(
                 name="Cách khắc phục",
-                value="\n".join([f"▸ {s}" for s in suggestions]),
+                value="\n".join([f"> - {s}" for s in suggestions]),
                 inline=False,
             )
         embed.set_footer(text=footer)
@@ -100,7 +103,7 @@ class EmbedFactory:
         if suggestions:
             embed.add_field(
                 name="Khuyến nghị",
-                value="\n".join([f"▸ {s}" for s in suggestions]),
+                value="\n".join([f"> - {s}" for s in suggestions]),
                 inline=False,
             )
         if footer:
@@ -133,9 +136,7 @@ class EmbedFactory:
 class PaginationView(View):
     """Interactive pagination with navigation buttons"""
 
-    def __init__(
-        self, pages: List[discord.Embed], author_id: int, timeout: float = 180.0
-    ):
+    def __init__(self, pages: List[discord.Embed], author_id: int, timeout: float = 180.0):
         super().__init__(timeout=timeout)
         self.pages = pages
         self.author_id = author_id
@@ -151,9 +152,7 @@ class PaginationView(View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message(
-                "Chỉ người dùng lệnh mới có thể điều khiển!", ephemeral=True
-            )
+            await interaction.response.send_message("Chỉ người dùng lệnh mới có thể điều khiển!", ephemeral=True)
             return False
         return True
 
@@ -161,17 +160,13 @@ class PaginationView(View):
     async def first_page(self, interaction: discord.Interaction, button: Button):
         self.current_page = 0
         self._update_buttons()
-        await interaction.response.edit_message(
-            embed=self.pages[self.current_page], view=self
-        )
+        await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
 
     @discord.ui.button(emoji="◀️", style=discord.ButtonStyle.primary)
     async def previous_page(self, interaction: discord.Interaction, button: Button):
         self.current_page = max(0, self.current_page - 1)
         self._update_buttons()
-        await interaction.response.edit_message(
-            embed=self.pages[self.current_page], view=self
-        )
+        await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
 
     @discord.ui.button(emoji="✖", style=discord.ButtonStyle.danger)
     async def delete_message(self, interaction: discord.Interaction, button: Button):
@@ -186,17 +181,13 @@ class PaginationView(View):
     async def next_page(self, interaction: discord.Interaction, button: Button):
         self.current_page = min(len(self.pages) - 1, self.current_page + 1)
         self._update_buttons()
-        await interaction.response.edit_message(
-            embed=self.pages[self.current_page], view=self
-        )
+        await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
 
     @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.primary)
     async def last_page(self, interaction: discord.Interaction, button: Button):
         self.current_page = len(self.pages) - 1
         self._update_buttons()
-        await interaction.response.edit_message(
-            embed=self.pages[self.current_page], view=self
-        )
+        await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
 
     async def on_timeout(self):
         for child in self.children:
@@ -284,9 +275,7 @@ class Paginator:
                 inline=False,
             )
 
-        embed.set_footer(
-            text=f"Trang {page_num}/{total_pages} • Tổng {queue_position[1]} bài"
-        )
+        embed.set_footer(text=f"Trang {page_num}/{total_pages} • Tổng {queue_position[1]} bài")
         return embed
 
     @staticmethod
@@ -297,9 +286,7 @@ class Paginator:
         playlist_name: str,
         total_songs: int,
     ) -> discord.Embed:
-        embed = discord.Embed(
-            title=f"Playlist: {playlist_name}", color=discord.Color.green()
-        )
+        embed = discord.Embed(title=f"Playlist: {playlist_name}", color=discord.Color.green())
 
         if songs:
             songs_text = ""
@@ -315,9 +302,7 @@ class Paginator:
 
             embed.add_field(name="Nội dung", value=songs_text or "Trống", inline=False)
 
-        embed.set_footer(
-            text=f"Page {page_num}/{total_pages} • Tổng số {total_songs} bài"
-        )
+        embed.set_footer(text=f"Page {page_num}/{total_pages} • Tổng số {total_songs} bài")
         return embed
 
 
@@ -328,9 +313,7 @@ async def send_paginated_embed(
 ) -> Optional[discord.Message]:
     """Send paginated embed with navigation"""
     if not pages:
-        await interaction.response.send_message(
-            "Không có dữ liệu để hiển thị", ephemeral=True
-        )
+        await interaction.response.send_message("Không có dữ liệu để hiển thị", ephemeral=True)
         return None
 
     if len(pages) == 1:
@@ -338,9 +321,7 @@ async def send_paginated_embed(
         return None
 
     view = PaginationView(pages=pages, author_id=interaction.user.id)
-    await interaction.response.send_message(
-        embed=pages[0], view=view, ephemeral=ephemeral
-    )
+    await interaction.response.send_message(embed=pages[0], view=view, ephemeral=ephemeral)
     message = await interaction.original_response()
     view.message = message
     return message
@@ -349,9 +330,10 @@ async def send_paginated_embed(
 class ProgressTracker:
     """Real-time progress updates for async processing"""
 
-    def __init__(self):
+    def __init__(self, event_bus_manager: EventBusManager):
         self.active_messages: Dict[str, discord.Message] = {}
         self.update_lock = asyncio.Lock()
+        self.event_bus_manager = event_bus_manager
 
     async def create_initial_progress(
         self,
@@ -371,11 +353,7 @@ class ProgressTracker:
             self.active_messages[task.id] = message
 
             if message and task.song and task.song.id and guild_id:
-                from ..utils.events import message_update_manager
-
-                await message_update_manager.track_message(
-                    message, task.song.id, guild_id, "processing"
-                )
+                await self.event_bus_manager.track_message(message, task.song.id, guild_id, "processing")
 
             return message
         except Exception as e:
@@ -467,10 +445,7 @@ class ProgressTracker:
                 inline=False,
             )
 
-        if (
-            task.status == ProcessingStatus.FAILED
-            and task.retry_count >= task.max_retries
-        ):
+        if task.status == ProcessingStatus.FAILED and task.retry_count >= task.max_retries:
             embed.add_field(
                 name="💀 Final Error",
                 value=task.error_message or "Unknown error",
@@ -514,12 +489,10 @@ class ProgressTracker:
             return "✅ Complete!"
 
 
-progress_tracker = ProgressTracker()
+progress_tracker = ProgressTracker(event_bus_manager)
 
 
-async def create_initial_progress_message(
-    interaction: discord.Interaction, task: ProcessingTask
-) -> Optional[discord.Message]:
+async def create_initial_progress_message(interaction: discord.Interaction, task: ProcessingTask) -> Optional[discord.Message]:
     return await progress_tracker.create_initial_progress(interaction, task)
 
 
@@ -540,19 +513,14 @@ class EnhancedProgressCallback:
     async def __call__(self, task: ProcessingTask):
         try:
             if not self.progress_message and task.progress <= 10:
-                self.progress_message = await create_initial_progress_message(
-                    self.interaction, task
-                )
+                self.progress_message = await create_initial_progress_message(self.interaction, task)
 
             if self.progress_message:
                 await progress_tracker.update_progress(task)
 
             if task.status == ProcessingStatus.COMPLETED:
                 await self._send_completion_notification(task)
-            elif (
-                task.status == ProcessingStatus.FAILED
-                and task.retry_count >= task.max_retries
-            ):
+            elif task.status == ProcessingStatus.FAILED and task.retry_count >= task.max_retries:
                 await self._send_failure_notification(task)
         except Exception as e:
             logger.error(f"Error in enhanced progress callback: {e}")
@@ -576,9 +544,7 @@ class EnhancedProgressCallback:
                 color=discord.Color.red(),
             )
             if task.error_message:
-                embed.add_field(
-                    name="Error Details", value=task.error_message, inline=False
-                )
+                embed.add_field(name="Error Details", value=task.error_message, inline=False)
             await self.interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
             logger.error(f"Error sending failure notification: {e}")
@@ -598,9 +564,7 @@ class InteractionManager:
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer()
-                logger.debug(
-                    f"Deferred interaction for {interaction.command.name if interaction.command else 'unknown'}"
-                )
+                logger.debug(f"Deferred interaction for {interaction.command.name if interaction.command else 'unknown'}")
 
             result = await operation_func(*args, **kwargs)
 
@@ -622,9 +586,7 @@ class InteractionManager:
                 else:
                     await interaction.response.send_message(error_msg, ephemeral=True)
             except discord.HTTPException:
-                logger.error(
-                    "Failed to send error message - interaction may be expired"
-                )
+                logger.error("Failed to send error message - interaction may be expired")
 
             raise
 
@@ -637,13 +599,9 @@ class InteractionManager:
     ):
         try:
             if interaction.response.is_done():
-                await interaction.followup.send(
-                    content=content, embed=embed, ephemeral=ephemeral
-                )
+                await interaction.followup.send(content=content, embed=embed, ephemeral=ephemeral)
             else:
-                await interaction.response.send_message(
-                    content=content, embed=embed, ephemeral=ephemeral
-                )
+                await interaction.response.send_message(content=content, embed=embed, ephemeral=ephemeral)
         except discord.HTTPException as e:
             logger.error(f"Failed to send response: {e}")
 
@@ -653,7 +611,7 @@ def create_pause_embed() -> discord.Embed:
     return EmbedFactory.info(
         "Tạm dừng",
         "Đã tạm dừng phát nhạc.",
-        info_fields={"Điều khiển": "▸ `/resume` - Tiếp tục phát\n▸ `/stop` - Dừng hẳn"},
+        info_fields={"Điều khiển": "> `/resume` - Tiếp tục phát\n> `/stop` - Dừng hẳn"},
         footer="Nhạc sẽ được giữ nguyên cho đến khi bạn resume hoặc stop",
     )
 
@@ -662,7 +620,7 @@ def create_resume_embed() -> discord.Embed:
     return EmbedFactory.success(
         "Tiếp tục phát",
         "Đã tiếp tục phát nhạc.",
-        details={"Điều khiển": "▸ `/pause` - Tạm dừng\n▸ `/skip` - Bỏ qua bài"},
+        details={"Điều khiển": "> `/pause` - Tạm dừng\n> `/skip` - Bỏ qua bài"},
         footer="Đang phát nhạc...",
     )
 
@@ -671,19 +629,28 @@ def create_stop_embed() -> discord.Embed:
     return EmbedFactory.info(
         "Đã dừng phát nhạc",
         "Hàng đợi đã được xóa.",
-        info_fields={
-            "Gợi ý": "▸ `/play [bài hát]` - Phát nhạc mới\n▸ `/playlist load [tên]` - Tải playlist"
-        },
+        info_fields={"Gợi ý": "> `/play [bài hát]` - Phát nhạc mới\n> `/use [playlist]` - Kích hoạt playlist"},
         footer="Dùng /play để bắt đầu lại",
     )
 
 
 def create_skip_embed(song_title: str) -> discord.Embed:
     return EmbedFactory.success(
-        "Đã bỏ qua bài hát",
-        f"**{song_title}**",
-        details={"Tiếp theo": "Đang chuyển sang bài tiếp theo..."},
+        "Skipped Song",
+        f"Skip to **{song_title}**",
         footer="Dùng /now để xem bài đang phát",
+    )
+
+
+def create_skip_failed_embed(reason: str) -> discord.Embed:
+    return EmbedFactory.error(
+        "Không thể bỏ qua bài hát",
+        reason,
+        suggestions=[
+            "Kiểm tra xem có bài nào trong hàng đợi không",
+            "Dùng `/stop` để dừng phát nhạc",
+        ],
+        footer="Cần có bài tiếp theo trong hàng đợi để skip",
     )
 
 
@@ -743,9 +710,7 @@ def create_already_paused_embed() -> discord.Embed:
     return EmbedFactory.info(
         "Nhạc đã tạm dừng rồi",
         "Nhạc hiện đang trong trạng thái tạm dừng.",
-        info_fields={
-            "Gợi ý": "▸ `/resume` - Tiếp tục phát\n▸ `/stop` - Dừng hẳn và xóa queue"
-        },
+        info_fields={"Gợi ý": "> `/resume` - Tiếp tục phát\n> `/stop` - Dừng hẳn và xóa queue"},
         footer="Dùng /resume để tiếp tục",
     )
 
@@ -754,9 +719,7 @@ def create_already_playing_embed() -> discord.Embed:
     return EmbedFactory.info(
         "Nhạc đang phát rồi",
         "Nhạc hiện đang được phát.",
-        info_fields={
-            "Gợi ý": "▸ `/pause` - Tạm dừng\n▸ `/skip` - Bỏ qua bài\n▸ `/now` - Xem thông tin bài hát"
-        },
+        info_fields={"Gợi ý": "> `/pause` - Tạm dừng\n> `/skip` - Bỏ qua bài\n> `/now` - Xem thông tin bài hát"},
         footer="Nhạc đang phát...",
     )
 
@@ -790,9 +753,9 @@ def create_empty_queue_embed() -> discord.Embed:
         "Hàng đợi trống",
         "Hiện tại chưa có bài hát nào trong hàng đợi.",
         [
-            "Sử dụng `/play [tên bài/URL]` để thêm bài hát",
-            "Tải playlist với `/playlist load [tên]`",
-            "Xem playlist có sẵn với `/playlist list`",
+            "`/play [tên bài/URL]` - Thêm bài hát",
+            "`/use [playlist name]` - Kích hoạt playlist",
+            "`/playlist [playlist name]` - Xem playlist có sẵn",
         ],
         "Bắt đầu phát nhạc ngay!",
     )
@@ -820,9 +783,7 @@ def create_list_embed(
 
     if items:
         items_text = "\n".join([f"{item}" for item in items])
-        fields[f"Tổng: {len(items)} Playlist"] = items_text[
-            :1024
-        ]  # Discord field value limit
+        fields[f"Tổng: {len(items)} Playlist"] = items_text[:1024]  # Discord field value limit
     else:
         fields["Danh sách trống"] = "Không có mục nào"
 
@@ -840,24 +801,20 @@ def create_playlist_created_embed(playlist_name: str) -> discord.Embed:
     return EmbedFactory.success(
         "Create playlist",
         f"Playlist **{playlist_name}** đã được tạo thành công!",
-        details={
-            "Tiếp theo": f"▸ Thêm bài hát bằng `/add {playlist_name} [URL]`\n▸ Sử dụng playlist bằng `/use {playlist_name}`"
-        },
+        details={"Tiếp theo": f"> Thêm bài hát bằng `/add {playlist_name} [URL]`\n> Sử dụng playlist bằng `/use {playlist_name}`"},
         footer="Playlist trống, hãy thêm bài hát vào!",
     )
 
 
 def create_playlist_deleted_embed(playlist_name: str, song_count: int) -> discord.Embed:
     return EmbedFactory.success(
-        "Delete playlist",
-        f"Playlist **{playlist_name}** ({song_count} bài) đã được xóa.",
-        footer="Playlist đã được xóa vĩnh viễn",
+        "Deleted playlist",
+        f"Đã xóa playlist **{playlist_name}** thành công!",
+        footer=f"Tổng {song_count} bài",
     )
 
 
-def create_song_added_to_playlist_embed(
-    playlist_name: str, song_title: str, total_songs: int
-) -> discord.Embed:
+def create_song_added_to_playlist_embed(playlist_name: str, song_title: str, total_songs: int) -> discord.Embed:
     return EmbedFactory.success(
         "Đã thêm vào playlist",
         f"**{song_title}**",
@@ -866,9 +823,7 @@ def create_song_added_to_playlist_embed(
     )
 
 
-def create_song_removed_from_playlist_embed(
-    playlist_name: str, song_title: str, remaining: int
-) -> discord.Embed:
+def create_song_removed_from_playlist_embed(playlist_name: str, song_title: str, remaining: int) -> discord.Embed:
     return EmbedFactory.success(
         "Đã xóa khỏi playlist",
         f"**{song_title}**",
@@ -877,9 +832,7 @@ def create_song_removed_from_playlist_embed(
     )
 
 
-def create_playlist_loaded_embed(
-    playlist_name: str, song_count: int, success_count: int, failed_count: int
-) -> discord.Embed:
+def create_playlist_loaded_embed(playlist_name: str, song_count: int, success_count: int, failed_count: int) -> discord.Embed:
     description = f"Đã thêm **{success_count}/{song_count}** bài hát vào hàng đợi"
     details = {"Playlist": playlist_name, "Thành công": str(success_count)}
     if failed_count > 0:
@@ -959,14 +912,28 @@ def create_youtube_playlist_loading_embed(playlist_url: str) -> discord.Embed:
     )
 
 
-def create_youtube_playlist_complete_embed(
-    video_count: int, playlist_title: str
-) -> discord.Embed:
+def create_youtube_playlist_complete_embed(video_count: int, playlist_title: str) -> discord.Embed:
     return EmbedFactory.success(
         "YouTube Playlist đã tải",
         f"Đã thêm **{video_count}** video từ playlist **{playlist_title}**",
         details={"Tổng video": str(video_count)},
         footer="Các video đang được xử lý...",
+    )
+
+
+def create_now_playing_embed(song: dict) -> discord.Embed:
+    title = song.display_name
+    source = song.source_type.value.title()
+    duration = song.duration_formatted
+
+    return EmbedFactory.music(
+        title="🎶 Now Playing",
+        description=f"**{title}**",
+        song_info={
+            "Nguồn": source,
+            "Thời lượng": duration,
+        },
+        footer="Dùng /queue để xem hàng đợi",
     )
 
 
@@ -1006,9 +973,7 @@ def create_join_success_embed(channel_name: str) -> discord.Embed:
     return EmbedFactory.success(
         title="Đã kết nối voice",
         description=f"Bot đã tham gia kênh **{channel_name}**",
-        details={
-            "Gợi ý": "▸ Dùng `/play` để phát nhạc\n▸ Dùng `/queue` để xem hàng đợi"
-        },
+        details={"Gợi ý": "> Dùng `/play` để phát nhạc\n> Dùng `/queue` để xem hàng đợi"},
         footer="Bot sẵn sàng phát nhạc!",
     )
 
@@ -1018,9 +983,7 @@ def create_already_in_channel_embed(channel_name: str) -> discord.Embed:
     return EmbedFactory.info(
         title="Đã ở trong kênh voice",
         description=f"Bot đang ở trong kênh **{channel_name}**",
-        info_fields={
-            "Gợi ý": "▸ Dùng `/play` để phát nhạc\n▸ Dùng `/leave` để bot rời khỏi kênh"
-        },
+        info_fields={"Gợi ý": "> Dùng `/play` để phát nhạc\n> Dùng `/leave` để bot rời khỏi kênh"},
         footer="Bot đang sẵn sàng",
     )
 
@@ -1039,9 +1002,7 @@ def create_leave_success_embed() -> discord.Embed:
     return EmbedFactory.info(
         title="Đã rời khỏi voice",
         description="Bot đã ngắt kết nối khỏi kênh voice.",
-        info_fields={
-            "Gợi ý": "▸ Dùng `/join` để bot quay lại\n▸ Dùng `/play` để phát nhạc và tự động join"
-        },
+        info_fields={"Gợi ý": "> Dùng `/join` để bot quay lại\n> Dùng `/play` để phát nhạc và tự động join"},
         footer="Hẹn gặp lại!",
     )
 

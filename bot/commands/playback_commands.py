@@ -10,7 +10,6 @@ from typing import Optional
 from . import BaseCommandHandler
 from ..pkg.logger import logger
 from ..utils.core import Validator
-from ..utils.events import message_update_manager
 from ..utils.discord_ui import (
     create_pause_embed,
     create_resume_embed,
@@ -21,6 +20,9 @@ from ..utils.discord_ui import (
     create_already_playing_embed,
     create_shuffle_embed,
     create_shuffle_failed_embed,
+    create_skip_embed,
+    create_skip_failed_embed,
+    create_now_playing_embed,
 )
 
 from ..config.constants import ERROR_MESSAGES
@@ -38,6 +40,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
         super().__init__(bot)
         self.audio_service = bot.audio_service
         self.playback_service = bot.playback_service
+        self.event_bus_manager = bot.event_bus_manager
 
         # Utils
         self.playlist_processor = bot.playlist_processor
@@ -50,20 +53,14 @@ class PlaybackCommandHandler(BaseCommandHandler):
             name="play",
             description="Phát nhạc từ URL/tìm kiếm hoặc từ playlist hiện tại",
         )
-        @app_commands.describe(
-            query="URL hoặc từ khóa tìm kiếm (để trống để phát từ playlist hiện tại)"
-        )
+        @app_commands.describe(query="URL hoặc từ khóa tìm kiếm (để trống để phát từ playlist hiện tại)")
         @app_commands.checks.cooldown(1, 3.0, key=lambda i: (i.guild_id, i.user.id))
-        async def play_music(
-            interaction: discord.Interaction, query: Optional[str] = None
-        ):
+        async def play_music(interaction: discord.Interaction, query: Optional[str] = None):
             """▶️ Play music from URL/search query or from active playlist"""
             try:
                 # Check if in guild
                 if not interaction.guild:
-                    embed = self.create_error_embed(
-                        "Server Only", "This command can only be used in a server."
-                    )
+                    embed = self.create_error_embed("Server Only", "This command can only be used in a server.")
                     await interaction.response.send_message(embed=embed, ephemeral=True)
                     return
 
@@ -81,9 +78,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     query = Validator.sanitize_query(query)
                     is_valid, error_msg = Validator.validate_query_length(query)
                     if not is_valid:
-                        await interaction.response.send_message(
-                            error_msg, ephemeral=True
-                        )
+                        await interaction.response.send_message(error_msg, ephemeral=True)
                         return
 
                     await self._handle_play_with_query(interaction, query)
@@ -95,21 +90,19 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
         @self.bot.tree.command(name="skip", description="Bỏ qua bài hiện tại")
         async def skip_song(interaction: discord.Interaction):
-            """⏭️ Skip current song"""
             try:
                 if not await self.ensure_same_voice_channel(interaction):
                     return
 
                 # Skip current song
-                success, message = await self.playback_service.skip_current_song(
-                    interaction.guild.id
-                )
+                success, song_title = await self.playback_service.skip_current_song(interaction.guild.id)
 
                 if success:
-                    embed = self.create_success_embed("Đã bỏ qua bài hát", message)
+                    embed = create_skip_embed(song_title)
                     await interaction.response.send_message(embed=embed)
                 else:
-                    await interaction.response.send_message(message, ephemeral=True)
+                    embed = create_skip_failed_embed("")
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "skip")
@@ -167,17 +160,13 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 if not await self.ensure_same_voice_channel(interaction):
                     return
 
-                success = await self.playback_service.stop_playback(
-                    interaction.guild.id
-                )
+                success = await self.playback_service.stop_playback(interaction.guild.id)
 
                 if success:
                     embed = create_stop_embed()
                     await interaction.response.send_message(embed=embed)
                 else:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["no_song_playing"], ephemeral=True
-                    )
+                    await interaction.response.send_message(ERROR_MESSAGES["no_song_playing"], ephemeral=True)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "stop")
@@ -199,18 +188,13 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 # Convert volume from 0-100 to 0.0-1.0 for audio player
                 volume_float = volume / 100.0
 
-                success, message = await self.playback_service.set_volume(
-                    interaction.guild.id, volume_float
-                )
+                success, message = await self.playback_service.set_volume(interaction.guild.id, volume_float)
 
                 if success:
                     embed = create_volume_embed(volume)
                     await interaction.response.send_message(embed=embed)
                 else:
-                    await interaction.response.send_message(
-                        f"{ERROR_MESSAGES['cannot_set_volume']}\n{message}",
-                        ephemeral=True,
-                    )
+                    await interaction.response.send_message(f"{ERROR_MESSAGES['cannot_set_volume']}\n{message}", ephemeral=True)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "volume")
@@ -220,28 +204,22 @@ class PlaybackCommandHandler(BaseCommandHandler):
             """🎵 Show currently playing song"""
             try:
                 if not interaction.guild:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["guild_only"], ephemeral=True
-                    )
+                    await interaction.response.send_message(ERROR_MESSAGES["guild_only"], ephemeral=True)
                     return
 
-                queue_manager = self.get_queue_manager(interaction.guild.id)
-                current_song = queue_manager.current_song
+                queue = self.get_queue(interaction.guild.id)
+                current_song = queue.current_song
                 if not current_song:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["no_song_playing"], ephemeral=True
-                    )
+                    await interaction.response.send_message(ERROR_MESSAGES["no_song_playing"], ephemeral=True)
                     return
 
-                embed = await self._create_now_playing_embed(
-                    current_song, interaction.guild.id
-                )
+                embed = create_now_playing_embed(current_song)
                 await interaction.response.send_message(embed=embed)
 
                 # Track message for real-time updates
                 response_msg = await interaction.original_response()
                 if response_msg and current_song.id:
-                    await message_update_manager.track_message(
+                    await self.event_bus_manager.track_message(
                         response_msg,
                         current_song.id,
                         interaction.guild.id,
@@ -252,9 +230,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 await self.handle_command_error(interaction, e, "now")
 
         @self.bot.tree.command(name="repeat", description="Set repeat mode")
-        @app_commands.describe(
-            mode="off: Tắt lặp, track: Lặp bài hiện tại, queue: Lặp hàng đợi"
-        )
+        @app_commands.describe(mode="off: Tắt lặp, track: Lặp bài hiện tại, queue: Lặp hàng đợi")
         @app_commands.choices(
             mode=[
                 app_commands.Choice(name="off", value="off"),
@@ -266,22 +242,16 @@ class PlaybackCommandHandler(BaseCommandHandler):
             """Set repeat mode"""
             try:
                 if not interaction.guild:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["guild_only"], ephemeral=True
-                    )
+                    await interaction.response.send_message(ERROR_MESSAGES["guild_only"], ephemeral=True)
                     return
 
-                success = await self.playback_service.set_repeat_mode(
-                    interaction.guild.id, mode
-                )
+                success = await self.playback_service.set_repeat_mode(interaction.guild.id, mode)
 
                 if success:
                     embed = create_repeat_mode_embed(mode)
                     await interaction.response.send_message(embed=embed)
                 else:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["cannot_set_repeat"], ephemeral=True
-                    )
+                    await interaction.response.send_message(ERROR_MESSAGES["cannot_set_repeat"], ephemeral=True)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "repeat")
@@ -291,43 +261,35 @@ class PlaybackCommandHandler(BaseCommandHandler):
             """🔀 Shuffle the current queue"""
             try:
                 if not interaction.guild:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["guild_only"], ephemeral=True
-                    )
+                    await interaction.response.send_message(ERROR_MESSAGES["guild_only"], ephemeral=True)
                     return
 
                 if not await self.ensure_same_voice_channel(interaction):
                     return
 
-                queue_manager = self.get_queue_manager(interaction.guild.id)
+                queue = self.get_queue(interaction.guild.id)
 
                 # Check if there are enough songs to shuffle
-                total_songs = queue_manager.queue_size
-                upcoming_songs = len(queue_manager.get_upcoming(limit=1000))
+                total_songs = queue.queue_size
+                upcoming_songs = len(queue.get_upcoming(limit=1000))
 
                 if total_songs <= 1:
-                    embed = create_shuffle_failed_embed(
-                        "Queue chỉ có 1 bài hoặc rỗng, không thể shuffle"
-                    )
+                    embed = create_shuffle_failed_embed("Queue chỉ có 1 bài hoặc rỗng, không thể shuffle")
                     await interaction.response.send_message(embed=embed, ephemeral=True)
                     return
 
                 if upcoming_songs == 0:
-                    embed = create_shuffle_failed_embed(
-                        "Không có bài nào tiếp theo để shuffle (chỉ còn bài đang phát)"
-                    )
+                    embed = create_shuffle_failed_embed("Không có bài nào tiếp theo để shuffle (chỉ còn bài đang phát)")
                     await interaction.response.send_message(embed=embed, ephemeral=True)
                     return
 
                 # Perform shuffle
-                success = await queue_manager.shuffle()
+                success = await queue.shuffle()
 
                 if success:
                     embed = create_shuffle_embed(upcoming_songs)
                     await interaction.response.send_message(embed=embed)
-                    logger.info(
-                        f"Shuffled queue in guild {interaction.guild.id} - {upcoming_songs} songs"
-                    )
+                    logger.info(f"Shuffled queue in guild {interaction.guild.id} - {upcoming_songs} songs")
                 else:
                     embed = create_shuffle_failed_embed("Không thể shuffle queue")
                     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -335,12 +297,8 @@ class PlaybackCommandHandler(BaseCommandHandler):
             except Exception as e:
                 await self.handle_command_error(interaction, e, "shuffle")
 
-    async def process_youtube_playlist(
-        self, interaction: discord.Interaction, query: str
-    ):
-        success, video_urls, message = await self.youtube_handler.extract_playlist(
-            query
-        )
+    async def process_youtube_playlist(self, interaction: discord.Interaction, query: str):
+        success, video_urls, message = await self.youtube_handler.extract_playlist(query)
 
         if not success or not video_urls:
             return self.create_error_embed("Lỗi Playlist", message)
@@ -352,9 +310,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
             str(interaction.user),
         )
 
-    async def _handle_play_with_query(
-        self, interaction: discord.Interaction, query: str
-    ):
+    async def _handle_play_with_query(self, interaction: discord.Interaction, query: str):
         # Check if YouTube playlist URL
         if self.youtube_handler.is_playlist_url(query):
 
@@ -369,17 +325,12 @@ class PlaybackCommandHandler(BaseCommandHandler):
             await interaction.response.defer()
 
             # Send initial thinking message
-            await interaction.followup.send(
-                f"**Đang xử lý:** {query[:50]}{'...' if len(query) > 50 else ''}"
-            )
+            await interaction.followup.send(f"**Đang xử lý:** {query[:50]}{'...' if len(query) > 50 else ''}")
 
         try:
             # Check if safe to add (not during playlist switch)
             if interaction.guild.id in self.bot._switching_playlists:
-                error_embed = self.create_error_embed(
-                    "⚠️ Đang xử lý",
-                    "Bot đang chuyển playlist, vui lòng đợi...",
-                )
+                error_embed = self.create_error_embed("⚠️ Đang xử lý", "Bot đang chuyển playlist, vui lòng đợi...")
                 await interaction.followup.send(embed=error_embed)
                 return
 
@@ -398,9 +349,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
                 # Track message for real-time title updates
                 if response_msg and song.id:
-                    await message_update_manager.track_message(
-                        response_msg, song.id, interaction.guild.id, "queue_add"
-                    )
+                    await self.event_bus_manager.track_message(response_msg, song.id, interaction.guild.id, "queue_add")
             else:
                 # Show error
                 error_embed = self.create_error_embed("Lỗi phát nhạc", message)
@@ -408,9 +357,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
         except Exception as e:
             logger.error(f"Error in play command: {e}")
-            error_embed = self.create_error_embed(
-                ERROR_MESSAGES["unexpected_error"], f"Đã xảy ra lỗi: {str(e)}"
-            )
+            error_embed = self.create_error_embed(ERROR_MESSAGES["unexpected_error"], f"Đã xảy ra lỗi: {str(e)}")
             await interaction.followup.send(embed=error_embed)
 
     async def _handle_play_from_playlist(self, interaction: discord.Interaction):
@@ -419,18 +366,14 @@ class PlaybackCommandHandler(BaseCommandHandler):
         active_playlist = getattr(self.bot, "active_playlists", {}).get(guild_id)
 
         if not active_playlist:
-            await interaction.response.send_message(
-                ERROR_MESSAGES["no_active_playlist"], ephemeral=True
-            )
+            await interaction.response.send_message(ERROR_MESSAGES["no_active_playlist"], ephemeral=True)
             return
 
         # Try to resume if paused
         voice_client = interaction.guild.voice_client
         if voice_client and voice_client.is_paused():
             voice_client.resume()
-            await interaction.response.send_message(
-                f"**Tiếp tục phát từ playlist:** `{active_playlist}`"
-            )
+            await interaction.response.send_message(f"**Tiếp tục phát từ playlist:** `{active_playlist}`")
             return
 
         # Respond immediately to avoid timeout
@@ -442,15 +385,11 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
         # Start playback from active playlist (async, don't wait)
         try:
-            success = await self.playback_service.start_playlist_playback(
-                guild_id, active_playlist
-            )
+            success = await self.playback_service.start_playlist_playback(guild_id, active_playlist)
 
             # Update the message with result
             if success:
-                updated_embed = self.create_success_embed(
-                    "Đã bắt đầu phát nhạc từ playlist", f"**{active_playlist}**"
-                )
+                updated_embed = self.create_success_embed("Đã bắt đầu phát nhạc từ playlist", f"**{active_playlist}**")
             else:
                 updated_embed = self.create_error_embed(
                     ERROR_MESSAGES["playlist_playback_error"],
@@ -461,9 +400,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
         except Exception as e:
             logger.error(f"Error in playlist playback: {e}")
-            error_embed = self.create_error_embed(
-                ERROR_MESSAGES["playlist_playback_error"], f"Đã xảy ra lỗi: {str(e)}"
-            )
+            error_embed = self.create_error_embed(ERROR_MESSAGES["playlist_playback_error"], f"Đã xảy ra lỗi: {str(e)}")
             await interaction.edit_original_response(embed=error_embed)
 
     def _create_play_success_embed(self, song, message: str) -> discord.Embed:
@@ -475,29 +412,6 @@ class PlaybackCommandHandler(BaseCommandHandler):
         embed.add_field(name="Trạng thái", value=song.status.value.title(), inline=True)
 
         if song.metadata and hasattr(song, "duration_formatted"):
-            embed.add_field(
-                name="Thời lượng", value=song.duration_formatted, inline=True
-            )
-
-        return embed
-
-    async def _create_now_playing_embed(self, song, guild_id: int) -> discord.Embed:
-        """Create embed for now playing display"""
-        embed = self.create_info_embed("🎵 Đang phát", song.display_name)
-
-        # Add song details
-        embed.add_field(name="Nguồn", value=song.source_type.value.title(), inline=True)
-
-        if song.metadata and hasattr(song, "duration_formatted"):
-            embed.add_field(
-                name="Thời lượng", value=song.duration_formatted, inline=True
-            )
-
-        # Add queue info
-        queue_manager = self.get_queue_manager(guild_id)
-        if queue_manager:
-            queue_size = queue_manager.queue_size
-            if queue_size > 0:
-                embed.add_field(name="Hàng đợi", value=f"{queue_size} bài", inline=True)
+            embed.add_field(name="Thời lượng", value=song.duration_formatted, inline=True)
 
         return embed

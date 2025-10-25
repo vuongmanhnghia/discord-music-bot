@@ -2,7 +2,7 @@ from ..valueobjects.source_type import SourceType
 from .song import Song
 
 
-class InputAnalyzer:
+class Input:
     """Analyzes user input to determine source type"""
 
     SPOTIFY_PATTERNS = ["open.spotify.com", "spotify.com", "spotify:"]

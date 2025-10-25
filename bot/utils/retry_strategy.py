@@ -75,9 +75,7 @@ class RetryStrategy:
                     delay = self._calculate_delay(attempt)
                     await asyncio.sleep(delay)
                 else:
-                    logger.error(
-                        f"{operation_name} failed after {self.max_attempts} timeout attempts"
-                    )
+                    logger.error(f"{operation_name} failed after {self.max_attempts} timeout attempts")
 
             except Exception as e:
                 last_exception = e
@@ -85,17 +83,6 @@ class RetryStrategy:
                     delay = self._calculate_delay(attempt)
                     await asyncio.sleep(delay)
                 else:
-                    logger.error(
-                        f"{operation_name} failed after {self.max_attempts} attempts: {e}"
-                    )
+                    logger.error(f"{operation_name} failed after {self.max_attempts} attempts: {e}")
 
         return None
-
-
-# Global default retry strategy instance
-default_retry_strategy = RetryStrategy(
-    max_attempts=3,
-    base_delay=1.0,
-    backoff_factor=2.0,
-    timeout=30,
-)

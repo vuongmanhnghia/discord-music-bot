@@ -39,25 +39,19 @@ class AdvancedCommandHandler(BaseCommandHandler):
         async def show_help(interaction: discord.Interaction):
             """❓ Show help information"""
             try:
-                embed = create_help_embed(
-                    bot_name=config.BOT_NAME, version=config.VERSION
-                )
+                embed = create_help_embed(bot_name=config.BOT_NAME, version=config.VERSION)
                 await interaction.response.send_message(embed=embed)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "help")
 
-        @self.bot.tree.command(
-            name="sync", description="[Admin] Đồng bộ slash commands với Discord"
-        )
+        @self.bot.tree.command(name="sync", description="[Admin] Đồng bộ slash commands với Discord")
         async def sync_commands(interaction: discord.Interaction):
             """🔄 Sync slash commands (Owner only)"""
             try:
                 # Check if user is bot owner
                 if interaction.user.id != self.bot.application.owner.id:
-                    embed = self.create_error_embed(
-                        "Permission Denied", "Only the bot owner can use this command."
-                    )
+                    embed = self.create_error_embed("Permission Denied", "Only the bot owner can use this command.")
                     await interaction.response.send_message(embed=embed, ephemeral=True)
                     return
 
@@ -75,17 +69,13 @@ class AdvancedCommandHandler(BaseCommandHandler):
             except Exception as e:
                 await self.handle_command_error(interaction, e, "sync")
 
-        @self.bot.tree.command(
-            name="aplay", description="Phát toàn bộ playlist YouTube (Async Processing)"
-        )
+        @self.bot.tree.command(name="aplay", description="Phát toàn bộ playlist YouTube (Async Processing)")
         @app_commands.describe(url="URL playlist YouTube")
         async def async_play_playlist(interaction: discord.Interaction, url: str):
             """🚀 Async play entire YouTube playlist"""
             try:
                 if not interaction.guild:
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["guild_only"], ephemeral=True
-                    )
+                    await interaction.response.send_message(ERROR_MESSAGES["guild_only"], ephemeral=True)
                     return
 
                 if not await self.ensure_user_in_voice(interaction):
@@ -93,22 +83,16 @@ class AdvancedCommandHandler(BaseCommandHandler):
 
                 # Check if it's a valid playlist URL
                 if not self.youtube_handler.is_playlist_url(url):
-                    await interaction.response.send_message(
-                        ERROR_MESSAGES["invalid_playlist_url"], ephemeral=True
-                    )
+                    await interaction.response.send_message(ERROR_MESSAGES["invalid_playlist_url"], ephemeral=True)
                     return
 
                 # Handle async playlist processing
                 async def process_async_playlist():
                     # Extract playlist videos
-                    success, video_urls, message = (
-                        await self.youtube_handler.extract_playlist(url)
-                    )
+                    success, video_urls, message = await self.youtube_handler.extract_playlist(url)
 
                     if not success or not video_urls:
-                        return self.create_error_embed(
-                            ERROR_MESSAGES["playlist_extraction_error"], message
-                        )
+                        return self.create_error_embed(ERROR_MESSAGES["playlist_extraction_error"], message)
 
                     return await self.playlist_processor.process_playlist_videos(
                         video_urls,

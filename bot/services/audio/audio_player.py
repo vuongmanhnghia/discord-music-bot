@@ -4,11 +4,11 @@ import asyncio
 from typing import Optional
 import discord
 from discord import FFmpegPCMAudio, PCMVolumeTransformer
-from ..services.stream_refresh import StreamRefreshService
-from ..domain.entities.song import Song
-from ..domain.entities.queue import QueueManager
+from ..stream_refresh import StreamRefreshService
+from ...domain.entities.song import Song
+from ...domain.entities.queue import Queue
 
-from ..pkg.logger import logger
+from ...pkg.logger import logger
 
 
 class AudioPlayer:
@@ -22,11 +22,11 @@ class AudioPlayer:
         stream_refresh_service: StreamRefreshService,
         guild_id: int,
         voice_client: discord.VoiceClient,
-        queue_manager: QueueManager,
+        queue: Queue,
         loop: asyncio.AbstractEventLoop,
     ):
         self.voice_client = voice_client
-        self.queue_manager = queue_manager
+        self.queue = queue
         self._loop = loop
         self.guild_id = guild_id
 
@@ -109,12 +109,10 @@ class AudioPlayer:
             await asyncio.sleep(0.3)
 
         # ✅ Play with auto-next callback
-        self.voice_client.play(
-            audio_source, after=lambda error: self._after_playback(error, song)
-        )
+        self.voice_client.play(audio_source, after=lambda error: self._after_playback(error, song))
 
         # Verify playback started
-        await asyncio.sleep(0.1)
+        # await asyncio.sleep(0.1)
         if not self.voice_client.is_playing():
             logger.error(f"❌ Playback failed to start for: {song.display_name}")
             return False
@@ -134,19 +132,12 @@ class AudioPlayer:
         """
         if error:
             error_str = str(error).lower()
-            is_stream_error = any(
-                keyword in error_str
-                for keyword in ["403", "404", "expired", "unavailable", "http error"]
-            )
+            is_stream_error = any(keyword in error_str for keyword in ["403", "404", "expired", "unavailable", "http error"])
 
             if is_stream_error:
-                logger.warning(
-                    f"⚠️ Stream error detected for {song.display_name}: {error}"
-                )
+                logger.warning(f"⚠️ Stream error detected for {song.display_name}: {error}")
                 # Schedule retry with fresh URL
-                asyncio.run_coroutine_threadsafe(
-                    self._retry_with_fresh_url(song), self._loop
-                )
+                asyncio.run_coroutine_threadsafe(self._retry_with_fresh_url(song), self._loop)
                 return
             else:
                 logger.error(f"❌ Playback error for {song.display_name}: {error}")
@@ -190,7 +181,7 @@ class AudioPlayer:
         """Auto-play next song in queue (including loop)"""
         try:
             # Get next song (handles loop automatically)
-            next_song = await self.queue_manager.next_song()
+            next_song = await self.queue.next_song()
 
             if next_song:
                 logger.info(f"🔄 Auto-playing next: {next_song.display_name}")
@@ -238,9 +229,7 @@ class AudioPlayer:
         volume = max(0.0, min(1.0, volume))
         self.volume = volume
 
-        if self.voice_client.is_playing() and isinstance(
-            self.voice_client.source, PCMVolumeTransformer
-        ):
+        if self.voice_client.is_playing() and isinstance(self.voice_client.source, PCMVolumeTransformer):
             self.voice_client.source.volume = volume
         return True
 
@@ -258,17 +247,9 @@ class AudioPlayer:
                 memory_mb = psutil.virtual_memory().total // (1024 * 1024)
             except ImportError:
                 memory_mb = 1024
-                logger.warning(
-                    "⚠️ psutil not installed, assuming low memory for audio optimization"
-                )
+                logger.warning("⚠️ psutil not installed, assuming low memory for audio optimization")
 
-            before_opts = (
-                "-reconnect 1 "
-                "-reconnect_streamed 1 "
-                "-reconnect_delay_max 5 "
-                "-reconnect_on_network_error 1 "
-                "-reconnect_on_http_error 4xx,5xx"
-            )
+            before_opts = "-reconnect 1 " "-reconnect_streamed 1 " "-reconnect_delay_max 5 " "-reconnect_on_network_error 1 " "-reconnect_on_http_error 4xx,5xx"
 
             if is_low_power or memory_mb < 2048:
                 opts = "-vn -bufsize 32k -maxrate 96k"

@@ -1,21 +1,30 @@
 import asyncio
 from typing import Optional
 
-from ..domain.entities.input import InputAnalyzer
-from ..config.performance import performance_config
-from ..config.service_constants import ErrorMessages, ServiceConstants
+from ..domain.entities.input import Input
+from ..config.performance import (
+    performance_config,
+)
+from ..config.service_constants import (
+    ErrorMessages,
+    ServiceConstants,
+)
 
 from ..pkg.logger import logger
-from .processing import SongProcessingService
+from .processing_service import ProcessingService
 from ..domain.entities.song import Song
-from .youtube_service import youtube_service
-from ..services.audio_service import AudioService
+from .youtube_service import YouTubeService
+from .audio.audio_service import AudioService
 from ..utils.async_processor import (
     AsyncSongProcessor,
     ProcessingPriority,
     initialize_async_processor,
     get_async_processor,
 )
+from ..utils.discord_ui import EnhancedProgressCallback
+
+from .playlist_service import PlaylistService
+from ..domain.entities.library import Library
 
 
 class PlaybackService:
@@ -29,19 +38,27 @@ class PlaybackService:
     5. Start playback loop if not already playing
     """
 
-    def __init__(self, audio_service: AudioService):
+    def __init__(
+        self,
+        audio_service: AudioService,
+        library: Library,
+        playlist_service: PlaylistService,
+        processing_service: ProcessingService,
+        youtube_service: YouTubeService,
+    ):
         # Load performance configuration
         self.config = performance_config
         self.config.log_config()  # Log current configuration
+        self.library: Library = library
 
-        self.processing_service = SongProcessingService()
-        self.async_processor: Optional[AsyncSongProcessor] = (
-            None  # Will be initialized later
-        )
+        self.async_processor: Optional[AsyncSongProcessor] = None  # Will be initialized later
         self._processing_tasks: dict[int, set[asyncio.Task]] = {}
 
         # Service
         self.audio_service: AudioService = audio_service
+        self.processing_service: ProcessingService = processing_service
+        self.playlist_service: PlaylistService = playlist_service
+        self.youtube_service: YouTubeService = youtube_service
 
     async def _add_to_queue(self, song: Song, guild_id: int) -> int:
         """
@@ -50,8 +67,8 @@ class PlaybackService:
         Returns:
             Position in queue (1-indexed)
         """
-        queue_manager = self.audio_service.get_queue_manager(guild_id)
-        position = await queue_manager.add_song(song)
+        queue = self.audio_service.get_queue(guild_id)
+        position = await queue.add_song(song)
         logger.info(f"Added song to queue at position {position}: {song.display_name}")
         return position
 
@@ -65,48 +82,45 @@ class PlaybackService:
     # ===============================
 
     async def play_request(
-        self, user_input: str, guild_id: int, requested_by: str, auto_play: bool = True
+        self,
+        user_input: str,
+        guild_id: int,
+        requested_by: str,
+        auto_play: bool = True,
     ) -> tuple[bool, str, Optional[Song]]:
         """
         Handle a play request from user
-
         Returns:
             (success, message, song) tuple
         """
         try:
             # Analyze user input and create song
-            song = InputAnalyzer.create_song(
-                user_input=user_input, requested_by=requested_by, guild_id=guild_id
-            )
+            song = Input.create_song(user_input=user_input, requested_by=requested_by, guild_id=guild_id)
 
             # Process song (wait for completion)
             success = await self.processing_service.process_song(song)
 
             if not success:
-                return (
-                    False,
-                    ErrorMessages.failed_to_process_song(song.error_message),
-                    None,
-                )
+                return (False, ErrorMessages.failed_to_process_song(song.error_message), None)
 
             # Add to queue after processing is complete
             position = await self._add_to_queue(song, guild_id)
 
-            # Start playbsack if auto_play is enabled
+            # Start playback if auto_play is enabled
             await self._handle_auto_play(guild_id, auto_play)
 
-            return (
-                True,
-                ErrorMessages.song_added(song.display_name, position, cached=False),
-                song,
-            )
+            return (True, ErrorMessages.song_added(song.display_name, position, cached=False), song)
 
         except Exception as e:
             logger.error(f"play_request failed for '{user_input}': {e}")
             return (False, f"Failed to process request: {str(e)}", None)
 
     async def play_request_cached(
-        self, user_input: str, guild_id: int, requested_by: str, auto_play: bool = True
+        self,
+        user_input: str,
+        guild_id: int,
+        requested_by: str,
+        auto_play: bool = True,
     ) -> tuple[bool, str, Optional[Song]]:
         """
         Handle a play request using smart caching for faster responses
@@ -116,9 +130,7 @@ class PlaybackService:
         """
         try:
             # Process with smart caching via YouTubeService
-            song, was_cached = await youtube_service.create_song(
-                user_input, requested_by, guild_id
-            )
+            song, was_cached = await self.youtube_service.create_song(user_input, requested_by, guild_id)
 
             # Add to queue
             position = await self._add_to_queue(song, guild_id)
@@ -126,20 +138,12 @@ class PlaybackService:
             # Start playback if auto_play is enabled
             await self._handle_auto_play(guild_id, auto_play)
 
-            return (
-                True,
-                ErrorMessages.song_added(
-                    song.display_name, position, cached=was_cached
-                ),
-                song,
-            )
+            return (True, ErrorMessages.song_added(song.display_name, position, cached=was_cached), song)
 
         except Exception as e:
             logger.error(f"play_request_cached failed for '{user_input}': {e}")
             # Fallback to original processing method
-            return await self.play_request(
-                user_input, guild_id, requested_by, auto_play
-            )
+            return await self.play_request(user_input, guild_id, requested_by, auto_play)
 
     async def _try_start_playback(self, guild_id: int):
         """Try to start playback if conditions are met"""
@@ -153,8 +157,8 @@ class PlaybackService:
             if not voice_client or not voice_client.is_connected():
                 return
 
-            queue_manager = self.audio_service.get_queue_manager(guild_id)
-            current_song = queue_manager.current_song
+            queue = self.audio_service.get_queue(guild_id)
+            current_song = queue.current_song
             if not current_song or not current_song.is_ready:
                 return
 
@@ -188,7 +192,7 @@ class PlaybackService:
                 self.async_processor = await get_async_processor()
 
             # Analyze input and create song
-            song = InputAnalyzer.create_song(user_input, requested_by, guild_id)
+            song = Input.create_song(user_input, requested_by, guild_id)
 
             if not song:
                 return (False, "Invalid input", None, None)
@@ -196,22 +200,13 @@ class PlaybackService:
             # Submit for async processing with callback
             callback = None
             if interaction:
-                from ..utils.discord_ui import EnhancedProgressCallback
-
                 callback = EnhancedProgressCallback(interaction)
             else:
                 callback = self._create_async_callback_with_queue(guild_id, auto_play)
 
-            task_id = await self.async_processor.submit_task(
-                song=song, priority=priority, callback=callback
-            )
+            task_id = await self.async_processor.submit_task(song=song, priority=priority, callback=callback)
 
-            return (
-                True,
-                ErrorMessages.processing_song(),
-                song,
-                task_id,
-            )
+            return (True, ErrorMessages.processing_song(), song, task_id)
 
         except Exception as e:
             logger.error(f"play_request_async failed for '{user_input}': {e}")
@@ -230,9 +225,7 @@ class PlaybackService:
                         await self._handle_auto_play(guild_id, auto_play)
 
                 elif task.status.value == "failed":
-                    logger.error(
-                        f"Async processing failed for task {task.id}: {task.error_message}"
-                    )
+                    logger.error(f"Async processing failed for task {task.id}: {task.error_message}")
 
             except Exception as e:
                 logger.error(f"Error in async callback: {e}")
@@ -295,13 +288,9 @@ class PlaybackService:
                 return True
 
             self.async_processor = await initialize_async_processor(
-                bot_instance,
-                worker_count=self.config.async_workers,
-                max_queue_size=self.config.processing_queue_size,
+                bot_instance, worker_count=self.config.async_workers, max_queue_size=self.config.processing_queue_size
             )
-            logger.info(
-                f"🚀 Async processing system initialized with {self.config.async_workers} workers"
-            )
+            logger.info(f"🚀 Async processing system initialized with {self.config.async_workers} workers")
             return True
         except Exception as e:
             logger.error(f"Failed to initialize async processing: {e}")
@@ -310,8 +299,8 @@ class PlaybackService:
     async def skip_current_song(self, guild_id: int) -> tuple[bool, str]:
         """Skip current song"""
         try:
-            queue_manager = self.audio_service.get_queue_manager(guild_id)
-            current_song = queue_manager.current_song
+            queue = self.audio_service.get_queue(guild_id)
+            current_song = queue.current_song
             if not current_song:
                 return (False, ErrorMessages.no_current_song())
 
@@ -319,13 +308,10 @@ class PlaybackService:
             success = await self.audio_service.skip_current_song(guild_id)
 
             if success:
-                next_song = queue_manager.current_song
-                if next_song:
-                    return (True, ErrorMessages.skipped_to_song(next_song.display_name))
-                else:
-                    return (True, ErrorMessages.skipped_no_more_songs())
+                next_song = queue.current_song
+                return (True, next_song.display_name)
             else:
-                return (False, ErrorMessages.cannot_skip())
+                return (False, None)
 
         except Exception as e:
             logger.error(f"Error skipping song in guild {guild_id}: {e}")
@@ -343,11 +329,7 @@ class PlaybackService:
 
             success = audio_player.pause()
             if success:
-                song_name = (
-                    audio_player.current_song.display_name
-                    if audio_player.current_song
-                    else "Unknown"
-                )
+                song_name = audio_player.current_song.display_name if audio_player.current_song else "Unknown"
                 return (True, ErrorMessages.paused_song(song_name))
             else:
                 return (False, ErrorMessages.cannot_pause())
@@ -368,11 +350,7 @@ class PlaybackService:
 
             success = audio_player.resume()
             if success:
-                song_name = (
-                    audio_player.current_song.display_name
-                    if audio_player.current_song
-                    else "Unknown"
-                )
+                song_name = audio_player.current_song.display_name if audio_player.current_song else "Unknown"
                 return (True, ErrorMessages.resumed_song(song_name))
             else:
                 return (False, ErrorMessages.cannot_resume())
@@ -390,9 +368,9 @@ class PlaybackService:
                 audio_player.stop()
 
             # Clear queue
-            queue_manager = self.audio_service.get_queue_manager(guild_id)
-            if queue_manager:
-                await queue_manager.clear()
+            queue = self.audio_service.get_queue(guild_id)
+            if queue:
+                await queue.clear()
 
             # Cancel processing tasks
             if guild_id in self._processing_tasks:
@@ -410,23 +388,23 @@ class PlaybackService:
     async def get_queue_status(self, guild_id: int) -> Optional[dict]:
         """Get current queue status"""
         try:
-            queue_manager = self.audio_service.get_queue_manager(guild_id)
+            queue = self.audio_service.get_queue(guild_id)
             audio_player = self.audio_service.get_audio_player(guild_id)
 
-            if not queue_manager:
+            if not queue:
                 return None
 
-            current_song = queue_manager.current_song
-            upcoming_songs = queue_manager.get_upcoming(5)
-            position = queue_manager.position
+            current_song = queue.current_song
+            upcoming_songs = queue.get_upcoming(5)
+            position = queue.position
 
             return {
                 "current_song": current_song,
                 "upcoming_songs": upcoming_songs,
                 "position": position,
-                "is_playing": audio_player.is_playing if audio_player else False,
-                "is_paused": audio_player.is_paused if audio_player else False,
-                "volume": audio_player.volume if audio_player else 0.5,
+                "is_playing": (audio_player.is_playing if audio_player else False),
+                "is_paused": (audio_player.is_paused if audio_player else False),
+                "volume": (audio_player.volume if audio_player else 0.5),
             }
 
         except Exception as e:
@@ -461,13 +439,16 @@ class PlaybackService:
 
         except Exception as e:
             logger.error(f"Error setting volume in guild {guild_id}: {e}")
-            return (False, f"Lỗi âm lượng: {str(e)}")
+            return (
+                False,
+                f"Lỗi âm lượng: {str(e)}",
+            )
 
     async def set_repeat_mode(self, guild_id: int, mode: str) -> bool:
         """Set repeat mode for queue"""
         try:
-            queue_manager = self.audio_service.get_queue_manager(guild_id)
-            return queue_manager.set_repeat_mode(mode)
+            queue = self.audio_service.get_queue(guild_id)
+            return queue.set_repeat_mode(mode)
 
         except Exception as e:
             logger.error(f"Error setting repeat mode in guild {guild_id}: {e}")
@@ -479,15 +460,15 @@ class PlaybackService:
 
     async def get_cache_performance(self) -> dict:
         """Get cache performance statistics"""
-        return youtube_service.get_stats()
+        return self.youtube_service.get_stats()
 
     async def cleanup_cache(self) -> int:
         """Clean up expired cache entries"""
-        return await youtube_service.cleanup()
+        return await self.youtube_service.cleanup()
 
     async def shutdown_cache_system(self):
         """Clean shutdown of caching system"""
-        await youtube_service.shutdown()
+        await self.youtube_service.shutdown()
 
     async def start_playlist_playback(self, guild_id: int, playlist_name: str) -> bool:
         """
@@ -501,130 +482,82 @@ class PlaybackService:
             bool: Success status
         """
         try:
-            # Import playlist service (lazy import to avoid circular dependency)
-            from .playlist_service import PlaylistService
-            from ..domain.entities.library import LibraryManager
-
-            # Create library manager instance for reading playlists
-            library_manager = LibraryManager()
-            playlist_service = PlaylistService(library_manager)
-
             # Get playlist content
-            success, playlist_songs = playlist_service.get_playlist_content(
-                playlist_name
-            )
+            success, playlist_songs = self.playlist_service.get_playlist_content(playlist_name)
             if not success:
                 logger.error(f"Failed to load playlist '{playlist_name}'")
                 return False
 
             # Empty playlist is OK - just set as active without loading songs
             if not playlist_songs:
-                logger.info(
-                    f"Playlist '{playlist_name}' is empty - will be populated with /add commands"
-                )
+                logger.info(f"Playlist '{playlist_name}' is empty - will be populated with /add commands")
                 return True  # Success even if empty
 
             # Get queue manager
-            queue_manager = self.audio_service.get_queue_manager(guild_id)
+            queue = self.audio_service.get_queue(guild_id)
 
             # Clear existing queue only if not empty (safe approach)
-            existing_songs = queue_manager.get_all_songs()
+            existing_songs = queue.get_all_songs()
             if existing_songs:
                 logger.info(f"Clearing {len(existing_songs)} existing songs from queue")
-                await queue_manager.clear()
+                await queue.clear()
 
             # Check async processor capacity
-            async_songs_count = (
-                len(playlist_songs) - ServiceConstants.IMMEDIATE_PROCESS_COUNT
-            )
+            async_songs_count = len(playlist_songs) - ServiceConstants.IMMEDIATE_PROCESS_COUNT
             if async_songs_count > 0 and self.async_processor:
                 available_capacity = self.async_processor.get_available_capacity()
                 if available_capacity < async_songs_count:
-                    logger.warning(
-                        f"⚠️ Processing queue has limited capacity: {available_capacity}/{async_songs_count} slots available"
-                    )
-                    logger.info(
-                        "Songs will be queued with retry logic as queue space becomes available"
-                    )
+                    logger.warning(f"⚠️ Processing queue has limited capacity: {available_capacity}/{async_songs_count} slots available")
+                    logger.info("Songs will be queued with retry logic as queue space becomes available")
 
             # Add songs from playlist to queue with smart processing
             processed_count = 0  # Songs processed immediately (in queue)
-            queued_for_processing = (
-                0  # Songs queued for async processing (not in queue yet)
-            )
-            immediate_process_count = min(
-                ServiceConstants.IMMEDIATE_PROCESS_COUNT, len(playlist_songs)
-            )
+            queued_for_processing = 0  # Songs queued for async processing (not in queue yet)
+            immediate_process_count = min(ServiceConstants.IMMEDIATE_PROCESS_COUNT, len(playlist_songs))
 
-            logger.info(
-                f"Processing {immediate_process_count} songs immediately, {len(playlist_songs) - immediate_process_count} async"
-            )
+            logger.info(f"Processing {immediate_process_count} songs immediately, {len(playlist_songs) - immediate_process_count} async")
 
             for idx, song_info in enumerate(playlist_songs):
                 try:
                     if idx < immediate_process_count:
                         # Process first few songs immediately for instant playback
-                        logger.info(
-                            f"🔄 Processing song {idx+1}/{len(playlist_songs)} immediately: {song_info['original_input'][:50]}..."
-                        )
+                        logger.info(f"🔄 Processing song {idx+1}/{len(playlist_songs)} immediately: {song_info['original_input'][:50]}...")
 
                         # Add delay between immediate processing to avoid rate limits (except first song)
                         if idx > 0:
                             await asyncio.sleep(3)  # 3 second delay between songs
 
-                        success, _, song = await self.play_request(
-                            song_info["original_input"],
-                            guild_id,
-                            "Playlist",
-                            auto_play=(idx == 0),  # Only auto-play the first song
-                        )
+                        success, _, song = await self.play_request(song_info["original_input"], guild_id, "Playlist", auto_play=(idx == 0))
                         if success:
                             processed_count += 1
-                            logger.info(
-                                f"✅ Song {idx+1} ready for playback: {song.display_name if song else 'Unknown'}"
-                            )
+                            logger.info(f"✅ Song {idx+1} ready for playback: {song.display_name if song else 'Unknown'}")
                         else:
-                            logger.warning(
-                                f"⚠️ Failed to process song {idx+1} immediately"
-                            )
+                            logger.warning(f"⚠️ Failed to process song {idx+1} immediately")
                     else:
                         # Process remaining songs asynchronously in background
-                        logger.info(
-                            f"📋 Queuing song {idx+1}/{len(playlist_songs)} for async processing: {song_info['original_input'][:50]}..."
-                        )
+                        logger.info(f"📋 Queuing song {idx+1}/{len(playlist_songs)} for async processing: {song_info['original_input'][:50]}...")
 
                         # Retry logic for queue full scenarios with exponential backoff
                         max_queue_retries = 5  # Increased from 3
                         base_retry_delay = 2  # seconds
 
                         for retry in range(max_queue_retries):
-                            success_async, _, song_async, task_id = (
-                                await self.play_request_async(
-                                    song_info["original_input"],
-                                    guild_id,
-                                    "Playlist",
-                                    auto_play=False,  # Don't auto-play async songs
-                                )
+                            (success_async, _, song_async, task_id) = await self.play_request_async(
+                                song_info["original_input"], guild_id, "Playlist", auto_play=False
                             )
 
                             if success_async:
                                 queued_for_processing += 1
-                                logger.info(
-                                    f"📝 Song {idx+1} submitted for processing with task ID: {task_id}"
-                                )
+                                logger.info(f"📝 Song {idx+1} submitted for processing with task ID: {task_id}")
                                 break  # Success, exit retry loop
                             else:
                                 if retry < max_queue_retries - 1:
                                     # Exponential backoff: 2s, 4s, 8s, 16s
                                     retry_delay = base_retry_delay * (2**retry)
-                                    logger.warning(
-                                        f"⚠️ Queue full, retrying song {idx+1} in {retry_delay}s (attempt {retry+1}/{max_queue_retries})"
-                                    )
+                                    logger.warning(f"⚠️ Queue full, retrying song {idx+1} in {retry_delay}s (attempt {retry+1}/{max_queue_retries})")
                                     await asyncio.sleep(retry_delay)
                                 else:
-                                    logger.error(
-                                        f"❌ Failed to submit song {idx+1} after {max_queue_retries} attempts - queue persistently full"
-                                    )
+                                    logger.error(f"❌ Failed to submit song {idx+1} after {max_queue_retries} attempts - queue persistently full")
 
                 except Exception as e:
                     logger.error(f"Error adding song {idx+1} to playlist playback: {e}")
@@ -634,14 +567,11 @@ class PlaybackService:
             total_handled = processed_count + queued_for_processing
             if total_handled > 0:
                 logger.info(
-                    f"✅ Started playlist playback: {processed_count} songs ready, "
-                    f"{queued_for_processing} processing in background from '{playlist_name}'"
+                    f"✅ Started playlist playback: {processed_count} songs ready, " f"{queued_for_processing} processing in background from '{playlist_name}'"
                 )
                 return True
             else:
-                logger.error(
-                    f"❌ Failed to start any songs from playlist '{playlist_name}'"
-                )
+                logger.error(f"❌ Failed to start any songs from playlist '{playlist_name}'")
                 return False
 
         except Exception as e:

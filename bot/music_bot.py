@@ -13,16 +13,17 @@ from discord.ext import commands
 from .config.config import config
 from .pkg.logger import logger
 
-from .domain.entities.queue import QueueManager
-
+from .services.processing_service import ProcessingService
 from .services.stream_refresh import StreamRefreshService
 from .services.playlist_service import PlaylistService
-from .services.audio_service import AudioService
+from .services.audio.audio_service import AudioService
+from .services.youtube_service import YouTubeService
 from .services.playback_service import PlaybackService
 
-from .domain.entities.library import LibraryManager
+
+from .domain.entities.library import Library
 from .utils.discord_ui import InteractionManager
-from .utils.events import message_update_manager
+from .utils.events import EventBusManager
 from .utils.core import VoiceStateHelper, ErrorEmbedFactory
 
 # Import command handlers
@@ -55,13 +56,15 @@ class MusicBot(commands.Bot):
         )
 
         # Initialize services
-        self.library_manager = LibraryManager()
-        self.playlist_service = PlaylistService(self.library_manager)
+        self.library = Library()
+        self.playlist_service = PlaylistService(self.library)
+        self.processing_service = ProcessingService()
 
         self.stream_refresh_service = StreamRefreshService()
         self.audio_service = AudioService(self.stream_refresh_service)
+        self.youtube_service = YouTubeService()
 
-        self.playback_service = PlaybackService(self.audio_service)
+        self.playback_service = PlaybackService(self.audio_service, self.library, self.playlist_service, self.processing_service, self.youtube_service)
         self.interaction_manager = InteractionManager()
 
         # Initialize utils
@@ -71,6 +74,7 @@ class MusicBot(commands.Bot):
         # State
         self.active_playlists: dict[int, str] = {}
         self._switching_playlists: set[int] = set()
+        self.event_bus_manager = EventBusManager(self.audio_service)
 
         # Setup commands
         self._setup_commands()
@@ -83,13 +87,13 @@ class MusicBot(commands.Bot):
             # Initialize async processing
             await self.playback_service.initialize_async_processing(self)
 
-            # Initialize message update manager
-            await message_update_manager.initialize()
-            logger.info("✅ Message update manager initialized")
+            # Initialize event bus manager
+            await self.event_bus_manager.initialize()
+            logger.info("✅ Event bus manager initialized")
 
             # Start unified health monitoring & auto-recovery
-            # asyncio.create_task(self._health_and_recovery_loop())
-            # logger.info("💓 Health monitoring & auto-recovery started")
+            asyncio.create_task(self._health_and_recovery_loop())
+            logger.info("💓 Health monitoring & auto-recovery started")
 
             # Start scheduled maintenance
             # asyncio.create_task(self._maintenance_loop())
@@ -102,76 +106,61 @@ class MusicBot(commands.Bot):
             logger.error(f"❌ Failed to initialize bot: {e}")
             raise
 
-    # async def _health_and_recovery_loop(self):
-    #     """Unified health monitoring and auto-recovery system"""
-    #     await self.wait_until_ready()
+    async def _health_and_recovery_loop(self):
+        """Unified health monitoring and auto-recovery system"""
+        await self.wait_until_ready()
 
-    #     while not self.is_closed():
-    #         try:
-    #             await asyncio.sleep(TimeIntervals.HEALTH_CHECK_INTERVAL)
+        while not self.is_closed():
+            try:
+                await asyncio.sleep(60)  # Initial delay before checks
 
-    #             # Check all voice clients
-    #             for voice_client in self.voice_clients:
-    #                 guild_id = voice_client.guild.id
+                # Check all voice clients
+                for voice_client in self.voice_clients:
+                    guild_id = voice_client.guild.id
 
-    #                 # 1. Connection health check
-    #                 if not voice_client.is_connected():
-    #                     logger.warning(
-    #                         f"💔 Disconnected voice client detected: guild {guild_id}"
-    #                     )
+                    # 1. Connection health check
+                    if voice_client is None or not voice_client.is_connected():
+                        logger.warning(f"💔 Disconnected voice client detected: guild {guild_id}")
 
-    #                     # 2. Auto-recovery attempt
-    #                     try:
-    #                         logger.info(
-    #                             f"🔄 Attempting auto-recovery for guild {guild_id}"
-    #                         )
-    #                         await self.audio_service.ensure_voice_connection(guild_id)
+                        # 2. Auto-recovery attempt
+                        try:
+                            logger.info(f"🔄 Attempting auto-recovery for guild {guild_id}")
+                            await self.audio_service.ensure_voice_connection(guild_id)
 
-    #                         # 3. Resume playback if there was a current song
-    #                         if self.audio_service._queue_managers[
-    #                             guild_id
-    #                         ].current_song:
-    #                             logger.info(f"▶️ Resuming playback for guild {guild_id}")
-    #                             await self.audio_service.play_next_song(guild_id)
+                            # 3. Resume playback if there was a current song
+                            if self.audio_service._queues[guild_id].current_song:
+                                logger.info(f"▶️ Resuming playback for guild {guild_id}")
+                                await self.audio_service.play_next_song(guild_id)
 
-    #                         logger.info(
-    #                             f"✅ Auto-recovery successful for guild {guild_id}"
-    #                         )
+                            logger.info(f"✅ Auto-recovery successful for guild {guild_id}")
 
-    #                     except Exception as recovery_error:
-    #                         logger.error(
-    #                             f"❌ Auto-recovery failed for guild {guild_id}: {recovery_error}"
-    #                         )
+                        except Exception as recovery_error:
+                            logger.error(f"❌ Auto-recovery failed for guild {guild_id}: {recovery_error}")
+                        continue
 
-    #                 # 4. Playback health check (for connected clients)
-    #                 elif voice_client.is_connected():
-    #                     audio_player = self.audio_service._audio_players.get(guild_id)
+                    # 4. Playback health check (for connected clients)
+                    elif voice_client.is_connected():
+                        audio_player = self.audio_service._audio_players.get(guild_id)
 
-    #                     # Check for stuck playback
-    #                     if (
-    #                         self.audio_service._queue_managers[guild_id]
-    #                         and self.audio_service._queue_managers[
-    #                             guild_id
-    #                         ].current_song
-    #                         and audio_player
-    #                         and not audio_player.is_playing
-    #                     ):
+                        # Check for stuck playback
+                        if (
+                            self.audio_service._queues[guild_id]
+                            and self.audio_service._queues[guild_id].current_song
+                            and audio_player
+                            and not audio_player.is_playing
+                        ):
 
-    #                         logger.warning(
-    #                             f"⚠️ Playback stuck detected for guild {guild_id}"
-    #                         )
+                            logger.warning(f"⚠️ Playback stuck detected for guild {guild_id}")
 
-    #                         try:
-    #                             await self.audio_service.play_next_song(guild_id)
-    #                             logger.info(
-    #                                 f"✅ Playback recovered for guild {guild_id}"
-    #                             )
-    #                         except Exception as e:
-    #                             logger.error(f"Failed to recover playback: {e}")
+                            try:
+                                await self.audio_service.play_next_song(guild_id)
+                                logger.info(f"✅ Playback recovered for guild {guild_id}")
+                            except Exception as e:
+                                logger.error(f"Failed to recover playback: {e}")
 
-    #         except Exception as e:
-    #             logger.error(f"Error in health & recovery loop: {e}")
-    #             await asyncio.sleep(TimeIntervals.HEALTH_CHECK_INTERVAL)
+            except Exception as e:
+                logger.error(f"Error in health & recovery loop: {e}")
+                await asyncio.sleep(60 * 2)  # Wait longer before next check on error
 
     async def _sync_commands(self):
         """Sync slash commands with rate limit handling"""
@@ -243,9 +232,7 @@ class MusicBot(commands.Bot):
         elif isinstance(error, commands.CommandOnCooldown):
             embed = ErrorEmbedFactory.create_cooldown_embed(error.retry_after)
         elif isinstance(error, discord.HTTPException) and error.status == 429:
-            retry_after = getattr(
-                error, "retry_after", None
-            ) or error.response.headers.get("Retry-After", "60")
+            retry_after = getattr(error, "retry_after", None) or error.response.headers.get("Retry-After", "60")
             embed = ErrorEmbedFactory.create_rate_limit_embed(float(retry_after))
         else:
             embed = ErrorEmbedFactory.create_error_embed(
@@ -285,16 +272,12 @@ class MusicBot(commands.Bot):
 
         # Handle based on 24/7 mode
         if config.STAY_CONNECTED_24_7:
-            logger.info(
-                f"Bot alone in {member.guild.name}, staying connected (24/7 mode)"
-            )
+            logger.info(f"Bot alone in {member.guild.name}, staying connected (24/7 mode)")
             return
 
         # Auto-disconnect after delay
         logger.info(f"Bot alone in {member.guild.name}, will disconnect")
-        await VoiceStateHelper.handle_auto_disconnect(
-            voice_client, member.guild.id, delay=60
-        )
+        await VoiceStateHelper.handle_auto_disconnect(voice_client, member.guild.id, delay=60)
 
     async def on_error(self, event_method: str, *args, **kwargs):
         """Handle errors in event listeners"""
@@ -303,9 +286,7 @@ class MusicBot(commands.Bot):
 
         # Log the error
         logger.error(f"Error in {event_method}: {exc_value}")
-        logger.error(
-            f"Traceback: {''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))}"
-        )
+        logger.error(f"Traceback: {''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))}")
 
     def _setup_commands(self):
         """Setup all bot slash commands using command registry"""

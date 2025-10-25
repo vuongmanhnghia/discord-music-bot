@@ -56,28 +56,25 @@ class EventBus:
                     logger.error(f"Error in event handler for {event_type}: {e}")
 
     def has_subscribers(self, event_type: str) -> bool:
-        return (
-            event_type in self._subscribers and len(self._subscribers[event_type]) > 0
-        )
+        return event_type in self._subscribers and len(self._subscribers[event_type]) > 0
 
 
-event_bus = EventBus()
-song_event_bus = event_bus  # Alias for backward compatibility
-
-
-class MessageUpdateManager:
+class EventBusManager:
     """Real-time Discord message updates when song metadata changes"""
 
-    def __init__(self):
+    def __init__(self, audio_service):
         self._tracked_messages: Dict[str, list] = {}
         self._lock = asyncio.Lock()
         self._subscribed = False
+        self.event_bus = EventBus()
+
+        self.audio_service = audio_service
 
     async def initialize(self):
         if not self._subscribed:
-            await event_bus.subscribe("song_metadata_updated", self._handle_song_update)
+            await self.event_bus.subscribe("song_metadata_updated", self._handle_song_update)
             self._subscribed = True
-            logger.info("✅ MessageUpdateManager subscribed to song events")
+            logger.info("✅ EventBusManager subscribed to song events")
 
     async def track_message(
         self,
@@ -90,12 +87,8 @@ class MessageUpdateManager:
             if song_id not in self._tracked_messages:
                 self._tracked_messages[song_id] = []
 
-            self._tracked_messages[song_id].append(
-                {"message": message, "guild_id": guild_id, "type": message_type}
-            )
-            logger.debug(
-                f"Tracking message {message.id} for song {song_id} (type: {message_type})"
-            )
+            self._tracked_messages[song_id].append({"message": message, "guild_id": guild_id, "type": message_type})
+            logger.debug(f"Tracking message {message.id} for song {song_id} (type: {message_type})")
 
     async def _handle_song_update(self, event: SongUpdateEvent):
         try:
@@ -107,15 +100,27 @@ class MessageUpdateManager:
                     return
 
                 messages = self._tracked_messages[song_id]
-                logger.info(
-                    f"📝 Song {song_id} updated, refreshing {len(messages)} messages"
-                )
+                logger.info(f"📝 Song {song_id} updated, refreshing {len(messages)} messages")
 
                 for msg_info in messages:
                     if msg_info["guild_id"] == guild_id:
                         await self._update_message(msg_info, song_id)
-
                 del self._tracked_messages[song_id]
+
+            # Copy and remove tracked messages under lock, then process them outside the lock
+            async with self._lock:
+                if song_id not in self._tracked_messages:
+                    return
+                messages = self._tracked_messages.pop(song_id, [])
+                logger.info(f"📝 Song {song_id} updated, refreshing {len(messages)} messages")
+
+            # Process updates outside the lock to avoid blocking other operations
+            for msg_info in messages:
+                if msg_info["guild_id"] == guild_id:
+                    try:
+                        await self._update_message(msg_info, song_id)
+                    except Exception as e:
+                        logger.error(f"Error updating tracked message for song {song_id}: {e}")
 
         except Exception as e:
             logger.error(f"Error handling song update event: {e}")
@@ -126,14 +131,13 @@ class MessageUpdateManager:
             message_type = msg_info["type"]
 
             guild_id = msg_info["guild_id"]
-            audio_service = playback_service.audio_service
-            queue_manager = audio_service.get_queue_manager(guild_id)
+            queue = self.audio_service.get_queue(guild_id)
 
-            if not queue_manager:
+            if not queue:
                 return
 
             song = None
-            for s in queue_manager.get_all_songs():
+            for s in queue.get_all_songs():
                 if s.id == song_id:
                     song = s
                     break
@@ -143,7 +147,7 @@ class MessageUpdateManager:
                 return
 
             if message_type == "queue_add":
-                await self._update_queue_add_message(message, song, queue_manager)
+                await self._update_queue_add_message(message, song, queue)
             elif message_type == "now_playing":
                 await self._update_now_playing_message(message, song)
             elif message_type == "processing":
@@ -156,11 +160,9 @@ class MessageUpdateManager:
         except Exception as e:
             logger.error(f"Error updating message: {e}")
 
-    async def _update_queue_add_message(
-        self, message: discord.Message, song, queue_manager
-    ):
+    async def _update_queue_add_message(self, message: discord.Message, song, queue):
         try:
-            all_songs = queue_manager.get_all_songs()
+            all_songs = queue.get_all_songs()
             position = None
             for i, s in enumerate(all_songs, 1):
                 if s.id == song.id:
@@ -211,11 +213,9 @@ class MessageUpdateManager:
 
     async def shutdown(self):
         if self._subscribed:
-            await event_bus.unsubscribe(
-                "song_metadata_updated", self._handle_song_update
-            )
+            await self.event_bus.unsubscribe("song_metadata_updated", self._handle_song_update)
             self._subscribed = False
-            logger.info("MessageUpdateManager unsubscribed from events")
+            logger.info("EventBusManager unsubscribed from events")
 
 
-message_update_manager = MessageUpdateManager()
+song_event_bus = EventBus()

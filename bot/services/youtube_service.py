@@ -29,21 +29,16 @@ class YouTubeService:
         )
 
         self.yt_dlp_opts = self.config.get_ytdl_opts()
-
-        # Simplified stats
         self._stats = {"hits": 0, "misses": 0, "total": 0}
 
     async def get_song_info(self, url: str) -> Tuple[dict, bool]:
         """
         Get song info with caching
-
         Returns:
             (song_data, was_cached) tuple
         """
         try:
-            song_data, was_cached = await self.cache.get_or_process(
-                url, self._extract_info
-            )
+            song_data, was_cached = await self.cache.get_or_process(url, self._extract_info)
 
             # Update stats
             self._stats["total"] += 1
@@ -115,9 +110,7 @@ class YouTubeService:
             return SourceType.SOUNDCLOUD.value
         return SourceType.UNKNOWN.value
 
-    async def create_song(
-        self, url: str, requested_by: str, guild_id: int
-    ) -> Tuple[Song, bool]:
+    async def create_song(self, url: str, requested_by: str, guild_id: int) -> Tuple[Song, bool]:
         """
         Create Song object from URL with caching
 

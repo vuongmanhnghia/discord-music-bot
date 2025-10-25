@@ -31,27 +31,27 @@ COMMAND_DESCRIPTIONS = {
 
 # Error messages
 ERROR_MESSAGES = {
-    "guild_only": "⛔ Lệnh này chỉ có thể sử dụng trong server!",
+    "guild_only": "> Lệnh này chỉ có thể sử dụng trong server!",
     "voice_required": "Hãy tham gia voice channel trước!",
-    "not_connected": "⛔ Bot chưa kết nối voice!",
+    "not_connected": "> Bot chưa kết nối voice!",
     "cannot_connect_voice": "Không thể kết nối voice channel",
-    "same_channel_required": "❌ Bạn phải ở cùng voice channel với bot!",
+    "same_channel_required": "> Bạn phải ở cùng voice channel với bot!",
     # queue
-    "no_queue": "❌ Không có hàng đợi nào!",
-    "cannot_init_queue": "❌ Không thể khởi tạo hàng đợi!",
-    "no_song_playing": "❌ Không có bài nào đang phát!",
+    "no_queue": "> Không có hàng đợi nào!",
+    "cannot_init_queue": "> Không thể khởi tạo hàng đợi!",
+    "no_song_playing": "> Nothing is playing!",
     # playlist
-    "playlist_playback_error": "❌ Lỗi khi phát playlist!",
-    "no_active_playlist": "❌ Chưa có playlist nào được chọn! Sử dụng `/use <playlist>` trước.",
-    "playlist_service_unavailable": "❌ Playlist service không khả dụng!",
-    "invalid_volume": "❌ Âm lượng phải từ 0 đến 100!",
-    "cannot_set_volume": "❌ Không thể đặt âm lượng!",
-    "invalid_playlist_url": "❌ Đây không phải URL playlist YouTube hợp lệ!",
-    "playlist_extraction_error": "❌ Lỗi trích xuất playlist",
-    "cannot_set_repeat": "❌ Không thể đặt chế độ lặp!",
-    "invalid_repeat_mode": "❌ Chế độ lặp không hợp lệ! Sử dụng: off, track, queue",
-    "command_error": "❌ Lỗi trong lệnh",
-    "unexpected_error": "❌ Lỗi không mong đợi",
+    "playlist_playback_error": "> Lỗi khi phát playlist!",
+    "no_active_playlist": "> Chưa có playlist nào được chọn! Sử dụng `/use <playlist>` trước.",
+    "playlist_service_unavailable": "> Playlist service không khả dụng!",
+    "invalid_volume": "> Âm lượng phải từ 0 đến 100!",
+    "cannot_set_volume": "> Không thể đặt âm lượng!",
+    "invalid_playlist_url": "> Đây không phải URL playlist YouTube hợp lệ!",
+    "playlist_extraction_error": "> Lỗi trích xuất playlist",
+    "cannot_set_repeat": "> Không thể đặt chế độ lặp!",
+    "invalid_repeat_mode": "> Chế độ lặp không hợp lệ! Sử dụng: off, track, queue",
+    "command_error": "> Lỗi trong lệnh",
+    "unexpected_error": "> Lỗi không mong đợi",
 }
 
 # Success messages

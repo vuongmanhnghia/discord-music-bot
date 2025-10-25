@@ -44,11 +44,7 @@ class PlaylistProcessor:
         # Return result embed
         return discord.Embed(
             title="✅ YouTube Playlist Processed",
-            description=(
-                f"📋 **{playlist_message}**\n"
-                f"✅ Successfully added: {added_count} videos\n"
-                f"❌ Failed: {failed_count} videos"
-            ),
+            description=(f"📋 **{playlist_message}**\n" f"✅ Successfully added: {added_count} videos\n" f"❌ Failed: {failed_count} videos"),
             color=discord.Color.green() if added_count > 0 else discord.Color.red(),
         )
 

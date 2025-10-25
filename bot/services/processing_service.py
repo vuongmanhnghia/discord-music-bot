@@ -6,17 +6,30 @@ Clean separation of concerns with proper error handling
 import asyncio
 import json
 import re
-from typing import Optional, Dict, Any, TYPE_CHECKING
+from typing import Optional, Dict, Any
 import time
-
+from abc import ABC, abstractmethod
 
 from ..domain.valueobjects.source_type import SourceType
-from ..domain.valueobjects.song_processor import SongProcessor
 from ..config.service_constants import ServiceConstants
-from .retry_strategy import RetryStrategy
+from ..utils.retry_strategy import RetryStrategy
 from ..pkg.logger import logger
 
 from ..domain.entities.song import Song, SongMetadata
+
+
+class SongProcessor(ABC):
+    """Abstract base for song processors"""
+
+    @abstractmethod
+    async def can_process(self, song: Song) -> bool:
+        """Check if this processor can handle the song"""
+        pass
+
+    @abstractmethod
+    async def process(self, song: Song) -> bool:
+        """Process the song and update its state"""
+        pass
 
 
 class SpotifyService(SongProcessor):
@@ -113,9 +126,7 @@ class SpotifyService(SongProcessor):
                 spotify_url,
             ]
 
-            process = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
+            process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
 
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
 
@@ -255,9 +266,7 @@ class YouTubeService(SongProcessor):
             song.mark_failed(f"YouTube search error: {str(e)}")
             return False
 
-    async def _extract_youtube_data(
-        self, query: str, max_retries: int = 3
-    ) -> Optional[tuple[SongMetadata, str]]:
+    async def _extract_youtube_data(self, query: str, max_retries: int = 3) -> Optional[tuple[SongMetadata, str]]:
         """Extract both metadata and stream URL from YouTube with retries"""
 
         async def _extract() -> tuple[SongMetadata, str]:
@@ -293,9 +302,7 @@ class YouTubeService(SongProcessor):
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(), timeout=timeout
-            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
 
             if process.returncode != 0 or not stdout.strip():
                 raise Exception(f"Extraction failed: {stderr.decode()}")
@@ -311,12 +318,7 @@ class YouTubeService(SongProcessor):
 
             return (metadata, stream_url)
 
-        retry_strategy = RetryStrategy(
-            max_attempts=max_retries,
-            base_delay=1.0,
-            backoff_factor=2.0,
-            timeout=ServiceConstants.YOUTUBE_EXTRACT_TIMEOUT_BASE,
-        )
+        retry_strategy = RetryStrategy(max_attempts=max_retries, base_delay=1.0, backoff_factor=2.0, timeout=ServiceConstants.YOUTUBE_EXTRACT_TIMEOUT_BASE)
 
         try:
             return await retry_strategy.execute(_extract, "Extract YouTube data")
@@ -360,10 +362,7 @@ class YouTubeService(SongProcessor):
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=ServiceConstants.YOUTUBE_STREAM_TIMEOUT,
-            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=ServiceConstants.YOUTUBE_STREAM_TIMEOUT)
 
             if process.returncode == 0 and stdout.strip():
                 return stdout.decode().strip()
@@ -410,9 +409,7 @@ class YouTubeService(SongProcessor):
                     artist = parts[0].strip()
                     title = parts[1].strip()
 
-            return SongMetadata(
-                title=title, artist=artist, duration=duration, thumbnail_url=thumbnail
-            )
+            return SongMetadata(title=title, artist=artist, duration=duration, thumbnail_url=thumbnail)
 
         except Exception as e:
             logger.error(f"Error parsing YouTube metadata: {e}")
@@ -453,9 +450,7 @@ class YouTubeService(SongProcessor):
                     timeout=ServiceConstants.BASIC_INFO_TIMEOUT,  # Use config constant (30s)
                 )
             except asyncio.TimeoutError:
-                logger.error(
-                    f"Basic info extraction timeout after {ServiceConstants.BASIC_INFO_TIMEOUT}s for {query}"
-                )
+                logger.error(f"Basic info extraction timeout after {ServiceConstants.BASIC_INFO_TIMEOUT}s for {query}")
                 process.kill()
                 raise
 
@@ -471,9 +466,7 @@ class YouTubeService(SongProcessor):
                     if metadata:
                         return metadata
                 except json.JSONDecodeError as je:
-                    logger.error(
-                        f"JSON decode error: {je}. Output: {stdout.decode()[:200]}"
-                    )
+                    logger.error(f"JSON decode error: {je}. Output: {stdout.decode()[:200]}")
 
             # Ultimate fallback: create basic metadata from URL
             logger.warning(f"Creating basic metadata from URL: {query}")
@@ -518,7 +511,7 @@ class YouTubeService(SongProcessor):
             )
 
 
-class SongProcessingService:
+class ProcessingService:
     """
     Main service for processing songs
     Orchestrates different processors based on song type
@@ -547,11 +540,7 @@ class SongProcessingService:
             success = await processor.process(song)
 
             # Spotify songs need YouTube stream URL
-            if (
-                success
-                and song.source_type == SourceType.SPOTIFY
-                and not song.stream_url
-            ):
+            if success and song.source_type == SourceType.SPOTIFY and not song.stream_url:
                 return await self.youtube_service.search_for_spotify_song(song)
 
             return success

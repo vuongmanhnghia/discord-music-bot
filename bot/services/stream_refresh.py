@@ -21,9 +21,7 @@ class StreamRefreshService:
         self.enabled = True
         self.refresh_count = 0
         self.last_refresh_time = 0
-        self.url_cache: Dict[str, Tuple[str, float]] = (
-            {}
-        )  # original_input -> (stream_url, timestamp)
+        self.url_cache: Dict[str, Tuple[str, float]] = {}  # original_input -> (stream_url, timestamp)
         self.youtube_handler = YouTubeHandler()
         self.URL_MAX_AGE = 5 * 3600  # 5 hours in seconds
 
@@ -37,9 +35,7 @@ class StreamRefreshService:
         if hasattr(song, "stream_url_timestamp"):
             age = time.time() - song.stream_url_timestamp
             if age > self.URL_MAX_AGE:
-                logger.info(
-                    f"🕐 URL expired for {song.display_name} (age: {age//60}min)"
-                )
+                logger.info(f"🕐 URL expired for {song.display_name} (age: {age//60}min)")
                 return True
 
         return False

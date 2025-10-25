@@ -6,13 +6,13 @@ Handles voice connections, audio players, and queue management
 import asyncio
 import discord
 from typing import Dict, Optional, Union
-from ..pkg.logger import logger
+from ...pkg.logger import logger
 
-from ..services.stream_refresh import StreamRefreshService
+from ..stream_refresh import StreamRefreshService
 
-from ..domain.entities.queue import QueueManager
-from ..services.audio_player import AudioPlayer
-from ..config.performance import performance_config
+from ...domain.entities.queue import Queue
+from .audio_player import AudioPlayer
+from ...config.performance import performance_config
 
 
 class AudioService:
@@ -25,7 +25,7 @@ class AudioService:
         self._voice_clients: Dict[int, discord.VoiceClient] = {}
         self._audio_players: Dict[int, AudioPlayer] = {}
 
-        self._queue_managers: Dict[int, QueueManager] = {}
+        self._queues: Dict[int, Queue] = {}
         self._stream_refresh_service = stream_refresh_service
 
         # Thread-safe lock for voice operations
@@ -99,10 +99,10 @@ class AudioService:
                     del self._audio_players[guild_id]
 
                 # Clear queue
-                if guild_id in self._queue_managers:
-                    queue_size = self._queue_managers[guild_id].queue_size
-                    await self._queue_managers[guild_id].clear()
-                    del self._queue_managers[guild_id]
+                if guild_id in self._queues:
+                    queue_size = self._queues[guild_id].queue_size
+                    await self._queues[guild_id].clear()
+                    del self._queues[guild_id]
                     logger.debug(
                         f"🗑️ Cleared queue ({queue_size} songs) for guild {guild_id}"
                     )
@@ -181,14 +181,14 @@ class AudioService:
         """Initialize audio player and queue manager for guild"""
         try:
             # Create queue manager if not exists
-            if guild_id not in self._queue_managers:
-                self._queue_managers[guild_id] = QueueManager(guild_id)
+            if guild_id not in self._queues:
+                self._queues[guild_id] = Queue(guild_id)
 
             self._audio_players[guild_id] = AudioPlayer(
                 stream_refresh_service=self._stream_refresh_service,
                 voice_client=voice_client,
                 guild_id=guild_id,
-                queue_manager=self._queue_managers[guild_id],
+                queue=self._queues[guild_id],
                 loop=asyncio.get_event_loop(),
             )
 
@@ -206,12 +206,12 @@ class AudioService:
         """Get audio player for guild"""
         return self._audio_players.get(guild_id)
 
-    def get_queue_manager(self, guild_id: int) -> QueueManager:
+    def get_queue(self, guild_id: int) -> Queue:
         """Get or create queue manager for guild"""
-        if guild_id not in self._queue_managers:
-            self._queue_managers[guild_id] = QueueManager(guild_id)
+        if guild_id not in self._queues:
+            self._queues[guild_id] = Queue(guild_id)
             logger.debug(f"📋 Created new queue manager for guild {guild_id}")
-        return self._queue_managers[guild_id]
+        return self._queues[guild_id]
 
     def get_voice_client(self, guild_id: int) -> Optional[discord.VoiceClient]:
         """Get voice client for guild"""
@@ -229,15 +229,12 @@ class AudioService:
                 logger.warning(f"⚠️ No audio player found for guild {guild_id}")
                 return False
 
-            if (
-                not self._queue_managers[guild_id]
-                or self._queue_managers[guild_id].queue_size == 0
-            ):
+            if not self._queues[guild_id] or self._queues[guild_id].queue_size == 0:
                 logger.info(f"📭 Queue is empty for guild {guild_id}")
                 return False
 
             # Get next song
-            next_song = self._queue_managers[guild_id].current_song
+            next_song = self._queues[guild_id].current_song
             if not next_song:
                 logger.warning(f"⚠️ No next song available for guild {guild_id}")
                 return False
@@ -304,8 +301,8 @@ class AudioService:
                 logger.debug(f"🛑 Stopped playback in guild {guild_id}")
 
             # Clear queue
-            if self._queue_managers[guild_id]:
-                cleared = self._queue_managers[guild_id].clear()
+            if self._queues[guild_id]:
+                cleared = self._queues[guild_id].clear()
                 logger.debug(
                     f"🗑️ Cleared {cleared} songs from queue in guild {guild_id}"
                 )
@@ -336,10 +333,8 @@ class AudioService:
             "voice_connections": len(self._voice_clients),
             "audio_players": len(self._audio_players),
             "active_players": active_players,
-            "queue_managers": len(self._queue_managers),
-            "total_queued_songs": sum(
-                qm.queue_size for qm in self._queue_managers.values()
-            ),
+            "queue_managers": len(self._queues),
+            "total_queued_songs": sum(qm.queue_size for qm in self._queues.values()),
         }
 
     async def cleanup_all(self):
@@ -373,9 +368,9 @@ class AudioService:
                     audio_player and getattr(audio_player, "is_playing", False)
                 )
                 queue_empty = True
-                if self._queue_managers[guild_id]:
+                if self._queues[guild_id]:
                     # queue_size is a sync property
-                    queue_empty = self._queue_managers[guild_id].queue_size == 0
+                    queue_empty = self._queues[guild_id].queue_size == 0
 
                 # If not playing and queue empty -> consider idle
                 if not is_playing and queue_empty:

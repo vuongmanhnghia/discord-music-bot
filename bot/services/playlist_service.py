@@ -1,34 +1,32 @@
 from __future__ import annotations
 from typing import List, Optional
 
-from ..domain.entities.library import LibraryManager
-from ..domain.valueobjects.source_type import SourceType
+from ..domain.entities.library import Library
+from ..domain.valueobjects.source_type import (
+    SourceType,
+)
 from ..pkg.logger import logger
-from ..config.service_constants import ErrorMessages
+from ..config.service_constants import (
+    ErrorMessages,
+)
 
 
 class PlaylistService:
     """Service for managing playlists and queue integration"""
 
-    def __init__(self, library_manager: LibraryManager):
-        self.library = library_manager
+    def __init__(self, library: Library):
+        self.library = library
 
     def load_playlist(self, playlist_name: str) -> tuple[bool, str]:
         """Simple playlist loading for activation (non-queue loading)"""
         playlist = self.library.get_playlist(playlist_name)
         if not playlist:
-            return False, f"Playlist '{playlist_name}' not found"
+            return (False, f"Playlist '{playlist_name}' not found")
 
         if playlist.total_songs == 0:
-            return (
-                True,
-                f"Playlist **{playlist_name}** is empty. Use `/add <song>` to add songs.",
-            )
+            return (True, f"Playlist **{playlist_name}** is empty. Use `/add <song>` to add songs.")
 
-        return (
-            True,
-            f"Playlist **{playlist_name}** loaded with {playlist.total_songs} songs.",
-        )
+        return (True, f"Playlist **{playlist_name}** loaded with {playlist.total_songs} songs.")
 
     def get_playlist_content(self, playlist_name: str) -> tuple[bool, List[dict]]:
         """Get playlist content for display"""
@@ -53,7 +51,7 @@ class PlaylistService:
         """Create a new playlist"""
         if self.library.create_playlist(name):
             return (True, ErrorMessages.playlist_created(name))
-        return False, f"Playlist '{name}' already exists or failed to create"
+        return (False, f"Playlist '{name}' already exists or failed to create")
 
     def add_to_playlist(
         self,
@@ -65,83 +63,45 @@ class PlaylistService:
         """Add song to playlist with input validation"""
         # Validate input is not empty
         if not original_input or not original_input.strip():
-            logger.error(
-                f"Validation failed: Empty input for playlist '{playlist_name}'"
-            )
+            logger.error(f"Validation failed: Empty input for playlist '{playlist_name}'")
             return False, "Input cannot be empty"
 
         # Validate source type
         if not isinstance(source_type, SourceType):
-            logger.error(
-                f"Validation failed: Invalid source type '{source_type}' for playlist '{playlist_name}'"
-            )
+            logger.error(f"Validation failed: Invalid source type '{source_type}' for playlist '{playlist_name}'")
             return False, "Invalid source type"
 
         # Validate playlist exists
         playlist = self.library.get_playlist(playlist_name)
         if not playlist:
-            logger.error(
-                f"Validation failed: Playlist '{playlist_name}' not found when adding '{original_input}'"
-            )
-            return False, f"Playlist '{playlist_name}' not found"
+            logger.error(f"Validation failed: Playlist '{playlist_name}' not found when adding '{original_input}'")
+            return (False, f"Playlist '{playlist_name}' not found")
 
         # Sanitize and validate input based on source type
         original_input = original_input.strip()
 
         # URL validation for URL-based sources
-        if source_type in [
-            SourceType.YOUTUBE,
-            SourceType.SPOTIFY,
-            SourceType.SOUNDCLOUD,
-        ]:
-            if not (
-                original_input.startswith("http://")
-                or original_input.startswith("https://")
-            ):
-                logger.error(
-                    f"Validation failed: Invalid URL '{original_input}' for {source_type.value} in playlist '{playlist_name}'"
-                )
-                return False, f"Invalid URL for {source_type.value}"
+        if source_type in [SourceType.YOUTUBE, SourceType.SPOTIFY, SourceType.SOUNDCLOUD]:
+            if not (original_input.startswith("http://") or original_input.startswith("https://")):
+                logger.error(f"Validation failed: Invalid URL '{original_input}' for {source_type.value} in playlist '{playlist_name}'")
+                return (False, f"Invalid URL for {source_type.value}")
 
         # Try to add to playlist
         try:
-            success, is_duplicate = self.library.add_to_playlist(
-                playlist_name, original_input, source_type, title
-            )
+            success, is_duplicate = self.library.add_to_playlist(playlist_name, original_input, source_type, title)
 
             if success and is_duplicate:
-                logger.info(
-                    f"Duplicate '{title or original_input}' skipped for playlist '{playlist_name}'"
-                )
-                return (
-                    True,
-                    ErrorMessages.song_exists_in_playlist(
-                        title or original_input, playlist_name
-                    ),
-                )
+                logger.info(f"Duplicate '{title or original_input}' skipped for playlist '{playlist_name}'")
+                return (True, ErrorMessages.song_exists_in_playlist(title or original_input, playlist_name))
             elif success:
-                logger.info(
-                    f"Successfully added '{title or original_input}' to playlist '{playlist_name}'"
-                )
-                return (
-                    True,
-                    ErrorMessages.song_added_to_playlist(
-                        title or original_input, playlist_name
-                    ),
-                )
+                logger.info(f"Successfully added '{title or original_input}' to playlist '{playlist_name}'")
+                return (True, ErrorMessages.song_added_to_playlist(title or original_input, playlist_name))
             else:
-                logger.error(
-                    f"Failed to add '{original_input}' to playlist '{playlist_name}' (library rejected)"
-                )
-                return (
-                    False,
-                    f"Failed to add to playlist '{playlist_name}' (internal error)",
-                )
+                logger.error(f"Failed to add '{original_input}' to playlist '{playlist_name}' (library rejected)")
+                return (False, f"Failed to add to playlist '{playlist_name}' (internal error)")
         except Exception as e:
-            logger.error(
-                f"Exception adding '{original_input}' to playlist '{playlist_name}': {e}"
-            )
-            return False, f"Error adding to playlist: {str(e)}"
+            logger.error(f"Exception adding '{original_input}' to playlist '{playlist_name}': {e}")
+            return (False, f"Error adding to playlist: {str(e)}")
 
     def remove_from_playlist(self, playlist_name: str, index: int) -> tuple[bool, dict]:
         """Remove song from playlist by index (1-based for user)
@@ -153,10 +113,7 @@ class PlaylistService:
         """
         playlist = self.library.get_playlist(playlist_name)
         if not playlist:
-            return False, {
-                "error": f"Playlist '{playlist_name}' not found",
-                "message": ErrorMessages.playlist_not_found(playlist_name),
-            }
+            return False, {"error": f"Playlist '{playlist_name}' not found", "message": ErrorMessages.playlist_not_found(playlist_name)}
 
         # Convert to 0-based index
         zero_index = index - 1
@@ -167,9 +124,7 @@ class PlaylistService:
             }
 
         # Get song title before removing
-        removed_song_title = (
-            playlist.entries[zero_index].title if playlist.entries else "Unknown"
-        )
+        removed_song_title = playlist.entries[zero_index].title if playlist.entries else "Unknown"
 
         # Remove from playlist
         if self.library.remove_from_playlist(playlist_name, zero_index):
@@ -215,8 +170,9 @@ class PlaylistService:
             ],
         }
 
-    def delete_playlist(self, playlist_name: str) -> tuple[bool, str]:
+    def delete_playlist(self, playlist_name: str) -> tuple[bool, int]:
         """Delete a playlist"""
+        song_count = len(self.library.list_playlists())
         if self.library.delete_playlist(playlist_name):
-            return True, f"Deleted playlist '{playlist_name}'"
-        return False, f"Failed to delete playlist '{playlist_name}' (may not exist)"
+            return (True, song_count)
+        return (False, 0)
