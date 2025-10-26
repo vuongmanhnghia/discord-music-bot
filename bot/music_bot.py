@@ -54,7 +54,6 @@ class MusicBot(commands.Bot):
             help_command=None,
             description="Modern Music Bot with intelligent processing",
         )
-        self.voice_clients: list[discord.VoiceClient] = []
 
         # Initialize services
         self.library = Library()
