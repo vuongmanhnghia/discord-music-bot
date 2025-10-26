@@ -11,6 +11,7 @@ import discord
 from discord.ext import commands
 
 from .config.config import config
+from .config.performance import performance_config
 from .pkg.logger import logger
 
 from .services.processing_service import ProcessingService
@@ -54,6 +55,9 @@ class MusicBot(commands.Bot):
             help_command=None,
             description="Modern Music Bot with intelligent processing",
         )
+
+        # Load performance config
+        self.config = performance_config
 
         # Initialize services
         self.library = Library()
@@ -112,7 +116,7 @@ class MusicBot(commands.Bot):
 
         while not self.is_closed():
             try:
-                await asyncio.sleep(60)  # Initial delay before checks
+                await asyncio.sleep(self.config.health_check_interval_seconds)  # Initial delay before checks
 
                 # Check all voice clients
                 for voice_client in self.voice_clients:
@@ -128,7 +132,7 @@ class MusicBot(commands.Bot):
                             await self.audio_service.ensure_voice_connection(guild_id)
 
                             # 3. Resume playback if there was a current song
-                            if self.audio_service._queues[guild_id].current_song:
+                            if self.audio_service._tracklists[guild_id].current_song:
                                 logger.info(f"▶️ Resuming playback for guild {guild_id}")
                                 await self.audio_service.play_next_song(guild_id)
 
@@ -144,8 +148,8 @@ class MusicBot(commands.Bot):
 
                         # Check for stuck playback
                         if (
-                            self.audio_service._queues[guild_id]
-                            and self.audio_service._queues[guild_id].current_song
+                            self.audio_service._tracklists[guild_id]
+                            and self.audio_service._tracklists[guild_id].current_song
                             and audio_player
                             and not audio_player.is_playing
                         ):
@@ -160,7 +164,7 @@ class MusicBot(commands.Bot):
 
             except Exception as e:
                 logger.error(f"Error in health & recovery loop: {e}")
-                await asyncio.sleep(60 * 2)  # Wait longer before next check on error
+                await asyncio.sleep(self.config.health_check_error_retry_seconds)  # Wait longer before next check on error
 
     async def _sync_commands(self):
         """Sync slash commands with rate limit handling"""
@@ -227,7 +231,7 @@ class MusicBot(commands.Bot):
         elif isinstance(error, commands.MissingPermissions):
             embed = ErrorEmbedFactory.create_error_embed(
                 "Missing Permissions",
-                "You don't have the required permissions to use this command.",
+                "You don\'t have the required permissions to use this command.",
             )
         elif isinstance(error, commands.CommandOnCooldown):
             embed = ErrorEmbedFactory.create_cooldown_embed(error.retry_after)
@@ -277,7 +281,7 @@ class MusicBot(commands.Bot):
 
         # Auto-disconnect after delay
         logger.info(f"Bot alone in {member.guild.name}, will disconnect")
-        await VoiceStateHelper.handle_auto_disconnect(voice_client, member.guild.id, delay=60)
+        await VoiceStateHelper.handle_auto_disconnect(voice_client, member.guild.id, delay=self.config.auto_disconnect_delay_seconds)
 
     async def on_error(self, event_method: str, *args, **kwargs):
         """Handle errors in event listeners"""
@@ -286,7 +290,7 @@ class MusicBot(commands.Bot):
 
         # Log the error
         logger.error(f"Error in {event_method}: {exc_value}")
-        logger.error(f"Traceback: {''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))}")
+        logger.error(f"Traceback: {'' .join(traceback.format_exception(exc_type, exc_value, exc_traceback))}")
 
     def _setup_commands(self):
         """Setup all bot slash commands using command registry"""

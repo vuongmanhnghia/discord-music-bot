@@ -43,10 +43,13 @@ class PerformanceConfig:
     fragment_retries: int = 3
     reconnect_delay_max: int = 5
 
-    # Resource Monitoring
+    # Resource Monitoring & Health
     memory_threshold_percent: int = 85
     enable_resource_monitoring: bool = True
     cleanup_interval_seconds: int = 300
+    health_check_interval_seconds: int = 60
+    health_check_error_retry_seconds: int = 120
+    auto_disconnect_delay_seconds: int = 60
 
     @classmethod
     def load_from_env(cls) -> "PerformanceConfig":

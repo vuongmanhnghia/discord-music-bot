@@ -71,9 +71,9 @@ class BaseCommandHandler:
 
         return True
 
-    def get_queue(self, guild_id: int):
-        """Get queue manager for guild"""
-        return self.audio_service.get_queue(guild_id)
+    def get_tracklist(self, guild_id: int):
+        """Get tracklist manager for guild"""
+        return self.audio_service.get_tracklist(guild_id)
 
     def create_error_embed(self, title: str, description: str) -> discord.Embed:
         """Create standardized error embed"""

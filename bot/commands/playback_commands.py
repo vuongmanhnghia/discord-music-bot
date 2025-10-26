@@ -10,14 +10,13 @@ from typing import Optional
 from . import BaseCommandHandler
 from ..pkg.logger import logger
 from ..utils.core import Validator
+from ..utils.decorators import require_same_voice_channel
 from ..utils.discord_ui import (
     create_pause_embed,
     create_resume_embed,
     create_stop_embed,
     create_volume_embed,
     create_repeat_mode_embed,
-    create_already_paused_embed,
-    create_already_playing_embed,
     create_shuffle_embed,
     create_shuffle_failed_embed,
     create_skip_embed,
@@ -89,11 +88,9 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 await self.handle_command_error(interaction, e, "play")
 
         @self.bot.tree.command(name="skip", description="Bỏ qua bài hiện tại")
+        @require_same_voice_channel
         async def skip_song(interaction: discord.Interaction):
             try:
-                if not await self.ensure_same_voice_channel(interaction):
-                    return
-
                 # Skip current song
                 success, song_title = await self.playback_service.skip_current_song(interaction.guild.id)
 
@@ -108,58 +105,52 @@ class PlaybackCommandHandler(BaseCommandHandler):
                 await self.handle_command_error(interaction, e, "skip")
 
         @self.bot.tree.command(name="pause", description="Tạm dừng phát")
+        @require_same_voice_channel
         async def pause_music(interaction: discord.Interaction):
             """⏸️ Pause playback"""
             try:
-                voice_client = await self.ensure_voice_connection(interaction)
-                if not voice_client:
-                    return
+                success, message = await self.playback_service.pause_playback(
+                    interaction.guild.id
+                )
 
-                if not await self.ensure_same_voice_channel(interaction):
-                    return
-
-                if voice_client.is_paused():
-                    embed = create_already_paused_embed()
-                    await interaction.response.send_message(embed=embed, ephemeral=True)
-                    return
-
-                voice_client.pause()
-                embed = create_pause_embed()
-                await interaction.response.send_message(embed=embed)
+                if success:
+                    embed = create_pause_embed()
+                    await interaction.response.send_message(embed=embed)
+                else:
+                    embed = self.create_error_embed("Lỗi Tạm Dừng", message)
+                    await interaction.response.send_message(
+                        embed=embed, ephemeral=True
+                    )
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "pause")
 
         @self.bot.tree.command(name="resume", description="Tiếp tục phát nhạc")
+        @require_same_voice_channel
         async def resume_music(interaction: discord.Interaction):
             """▶️ Resume playback"""
             try:
-                voice_client = await self.ensure_voice_connection(interaction)
-                if not voice_client:
-                    return
+                success, message = await self.playback_service.resume_playback(
+                    interaction.guild.id
+                )
 
-                if not await self.ensure_same_voice_channel(interaction):
-                    return
-
-                if not voice_client.is_paused():
-                    embed = create_already_playing_embed()
-                    await interaction.response.send_message(embed=embed, ephemeral=True)
-                    return
-
-                voice_client.resume()
-                embed = create_resume_embed()
-                await interaction.response.send_message(embed=embed)
+                if success:
+                    embed = create_resume_embed()
+                    await interaction.response.send_message(embed=embed)
+                else:
+                    embed = self.create_error_embed("Lỗi Tiếp Tục", message)
+                    await interaction.response.send_message(
+                        embed=embed, ephemeral=True
+                    )
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "resume")
 
         @self.bot.tree.command(name="stop", description="Dừng và xóa hàng đợi")
+        @require_same_voice_channel
         async def stop_music(interaction: discord.Interaction):
             """⏹️ Stop music and clear queue"""
             try:
-                if not await self.ensure_same_voice_channel(interaction):
-                    return
-
                 success = await self.playback_service.stop_playback(interaction.guild.id)
 
                 if success:
@@ -173,12 +164,10 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
         @self.bot.tree.command(name="volume", description="Đặt âm lượng (0-100)")
         @app_commands.describe(volume="Âm lượng từ 0 đến 100")
+        @require_same_voice_channel
         async def set_volume(interaction: discord.Interaction, volume: int):
             """🔊 Set playback volume"""
             try:
-                if not await self.ensure_same_voice_channel(interaction):
-                    return
-
                 # Validate volume using Validator
                 is_valid, error_msg = Validator.validate_volume(volume)
                 if not is_valid:
@@ -207,8 +196,8 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     await interaction.response.send_message(ERROR_MESSAGES["guild_only"], ephemeral=True)
                     return
 
-                queue = self.get_queue(interaction.guild.id)
-                current_song = queue.current_song
+                tracklist = self.get_tracklist(interaction.guild.id)
+                current_song = tracklist.current_song
                 if not current_song:
                     await interaction.response.send_message(ERROR_MESSAGES["no_song_playing"], ephemeral=True)
                     return
@@ -256,25 +245,19 @@ class PlaybackCommandHandler(BaseCommandHandler):
             except Exception as e:
                 await self.handle_command_error(interaction, e, "repeat")
 
-        @self.bot.tree.command(name="shuffle", description="Xáo trộn thứ tự queue")
+        @self.bot.tree.command(name="shuffle", description="Xáo trộn thứ tự tracklist")
+        @require_same_voice_channel
         async def shuffle_queue(interaction: discord.Interaction):
-            """🔀 Shuffle the current queue"""
+            """🔀 Shuffle the current tracklist"""
             try:
-                if not interaction.guild:
-                    await interaction.response.send_message(ERROR_MESSAGES["guild_only"], ephemeral=True)
-                    return
-
-                if not await self.ensure_same_voice_channel(interaction):
-                    return
-
-                queue = self.get_queue(interaction.guild.id)
+                tracklist = self.get_tracklist(interaction.guild.id)
 
                 # Check if there are enough songs to shuffle
-                total_songs = queue.queue_size
-                upcoming_songs = len(queue.get_upcoming(limit=1000))
+                total_songs = tracklist.queue_size
+                upcoming_songs = len(tracklist.get_upcoming(limit=1000))
 
                 if total_songs <= 1:
-                    embed = create_shuffle_failed_embed("Queue chỉ có 1 bài hoặc rỗng, không thể shuffle")
+                    embed = create_shuffle_failed_embed("Tracklist chỉ có 1 bài hoặc rỗng, không thể shuffle")
                     await interaction.response.send_message(embed=embed, ephemeral=True)
                     return
 
@@ -284,14 +267,14 @@ class PlaybackCommandHandler(BaseCommandHandler):
                     return
 
                 # Perform shuffle
-                success = await queue.shuffle()
+                success = await tracklist.shuffle()
 
                 if success:
                     embed = create_shuffle_embed(upcoming_songs)
                     await interaction.response.send_message(embed=embed)
-                    logger.info(f"Shuffled queue in guild {interaction.guild.id} - {upcoming_songs} songs")
+                    logger.info(f"Shuffled tracklist in guild {interaction.guild.id} - {upcoming_songs} songs")
                 else:
-                    embed = create_shuffle_failed_embed("Không thể shuffle queue")
+                    embed = create_shuffle_failed_embed("Không thể shuffle tracklist")
                     await interaction.response.send_message(embed=embed, ephemeral=True)
 
             except Exception as e:

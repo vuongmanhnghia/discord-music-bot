@@ -6,7 +6,7 @@ import discord
 from discord import FFmpegPCMAudio, PCMVolumeTransformer
 from ..stream_refresh import StreamRefreshService
 from ...domain.entities.song import Song
-from ...domain.entities.queue import Queue
+from ...domain.entities.tracklist import Tracklist
 
 from ...pkg.logger import logger
 
@@ -22,11 +22,11 @@ class AudioPlayer:
         stream_refresh_service: StreamRefreshService,
         guild_id: int,
         voice_client: discord.VoiceClient,
-        queue: Queue,
+        tracklist: Tracklist,
         loop: asyncio.AbstractEventLoop,
     ):
         self.voice_client = voice_client
-        self.queue = queue
+        self.tracklist = tracklist
         self._loop = loop
         self.guild_id = guild_id
 
@@ -178,10 +178,10 @@ class AudioPlayer:
             await self._play_next_song()
 
     async def _play_next_song(self):
-        """Auto-play next song in queue (including loop)"""
+        """Auto-play next song in tracklist (including loop)"""
         try:
             # Get next song (handles loop automatically)
-            next_song = await self.queue.next_song()
+            next_song = await self.tracklist.next_song()
 
             if next_song:
                 logger.info(f"🔄 Auto-playing next: {next_song.display_name}")
@@ -192,7 +192,7 @@ class AudioPlayer:
                         return
                     logger.warning(f"⚠️ Failed to play next song, trying again...")
             else:
-                logger.info(f"📭 Queue finished for guild {self.guild_id}")
+                logger.info(f"📭 Tracklist finished for guild {self.guild_id}")
 
         except Exception as e:
             logger.error(f"❌ Error in auto-play next: {e}")

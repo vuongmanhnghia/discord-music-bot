@@ -35,11 +35,11 @@ class QueueCommandHandler(BaseCommandHandler):
                     await interaction.response.send_message(ERROR_MESSAGES["guild_only"], ephemeral=True)
                     return
 
-                queue = self.get_queue(interaction.guild.id)
+                tracklist = self.get_tracklist(interaction.guild.id)
 
-                # Get queue info
-                current_song = queue.current_song
-                all_songs = queue.get_all_songs()
+                # Get tracklist info
+                current_song = tracklist.current_song
+                all_songs = tracklist.get_all_songs()
 
                 if not current_song and not all_songs:
                     logger.info(f"Queue is empty in guild {interaction.guild.id}")
@@ -50,7 +50,7 @@ class QueueCommandHandler(BaseCommandHandler):
                     return
 
                 # Get queue position first
-                current_pos, total_songs = queue.position
+                current_pos, total_songs = tracklist.position
 
                 # Convert songs to dict format for pagination
                 # Only show songs AFTER current song (upcoming songs)
