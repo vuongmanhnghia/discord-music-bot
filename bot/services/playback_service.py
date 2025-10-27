@@ -525,7 +525,7 @@ class PlaybackService:
 
                         # Add delay between immediate processing to avoid rate limits (except first song)
                         if idx > 0:
-                            await asyncio.sleep(self.config.playlist_processing_delay_seconds)  # 3 second delay between songs
+                            await asyncio.sleep(3)  # 3 second delay between songs
 
                         success, _, song = await self.play_request(song_info["original_input"], guild_id, "Playlist", auto_play=(idx == 0))
                         if success:

@@ -86,7 +86,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                         await asyncio.sleep(0.5)  # Brief delay for cleanup
 
                     # Step 2: Clear queue
-                    queue = self.audio_service.get_queue(guild_id)
+                    queue = self.audio_service.get_tracklist(guild_id)
                     if queue:
                         await queue.clear()
 
@@ -265,7 +265,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     )
 
                 # Show queue position
-                queue = self.get_queue(guild_id)
+                queue = self.get_tracklist(guild_id)
                 if queue:
                     current_pos, total_songs = queue.position
                     embed.add_field(
@@ -487,7 +487,7 @@ class PlaylistCommandHandler(BaseCommandHandler):
                         )
 
                     # Show queue position
-                    queue = self.get_queue(interaction.guild.id)
+                    queue = self.get_tracklist(interaction.guild.id)
                     if queue:
                         position = queue.queue_size
                         embed.add_field(

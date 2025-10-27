@@ -182,7 +182,7 @@ class AudioService:
         """Get audio player for guild"""
         return self._audio_players.get(guild_id)
 
-    def get_tracklist(self, guild_id: int) -> Tracklist:
+    def get_tracklist(self, guild_id: int) -> Optional[Tracklist]:
         """Get or create tracklist manager for guild"""
         if guild_id not in self._tracklists:
             self._tracklists[guild_id] = Tracklist(guild_id)
@@ -290,10 +290,6 @@ class AudioService:
         """Check if audio is playing in guild"""
         audio_player = self._audio_players.get(guild_id)
         return audio_player.is_playing if audio_player else False
-
-    def get_tracklist(self, guild_id: int) -> Tracklist:
-        """Get queue manager for guild"""
-        return self._tracklists[guild_id]
 
     # ============================================================================
     # Statistics & Cleanup
