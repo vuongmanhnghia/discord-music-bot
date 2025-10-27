@@ -5,7 +5,7 @@ import discord
 from typing import Callable, Dict, List
 from ..pkg.logger import logger
 
-from ..services import playback_service
+from ..services.audio.audio_service import AudioService
 
 
 class SongUpdateEvent:
@@ -62,7 +62,7 @@ class EventBus:
 class EventBusManager:
     """Real-time Discord message updates when song metadata changes"""
 
-    def __init__(self, audio_service):
+    def __init__(self, audio_service: AudioService):
         self._tracked_messages: Dict[str, list] = {}
         self._lock = asyncio.Lock()
         self._subscribed = False
@@ -131,7 +131,7 @@ class EventBusManager:
             message_type = msg_info["type"]
 
             guild_id = msg_info["guild_id"]
-            queue = self.audio_service.get_queue(guild_id)
+            queue = self.audio_service.get_tracklist(guild_id)
 
             if not queue:
                 return

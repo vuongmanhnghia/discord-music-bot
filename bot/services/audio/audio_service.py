@@ -33,9 +33,7 @@ class AudioService:
 
         logger.info("🎵 AudioService initialized (24/7 mode - no auto-disconnect)")
 
-    async def connect_to_channel(
-        self, channel: Union[discord.VoiceChannel, discord.StageChannel]
-    ) -> bool:
+    async def connect_to_channel(self, channel: Union[discord.VoiceChannel, discord.StageChannel]) -> bool:
         """Connect to voice channel - simplified without ResourceManager"""
         guild_id = channel.guild.id
 
@@ -49,16 +47,12 @@ class AudioService:
                         return True
 
                     # Move to new channel
-                    logger.info(
-                        f"🔄 Moving from {current_channel.name} to {channel.name}"
-                    )
+                    logger.info(f"🔄 Moving from {current_channel.name} to {channel.name}")
                     await self.disconnect_from_guild(guild_id)
 
                 # Connect to channel
                 logger.info(f"🔊 Connecting to voice channel: {channel.name}")
-                voice_client = await asyncio.wait_for(
-                    channel.connect(timeout=30.0, reconnect=True), timeout=30.0
-                )
+                voice_client = await asyncio.wait_for(channel.connect(timeout=30.0, reconnect=True), timeout=30.0)
 
                 # Save connection
                 self._voice_clients[guild_id] = voice_client
@@ -67,9 +61,7 @@ class AudioService:
                 # Initialize audio infrastructure
                 await self._initialize_audio_player(guild_id, voice_client)
 
-                logger.info(
-                    f"✅ Successfully connected to {channel.name} in {channel.guild.name}"
-                )
+                logger.info(f"✅ Successfully connected to {channel.name} in {channel.guild.name}")
                 return True
 
             except asyncio.TimeoutError:
@@ -103,18 +95,14 @@ class AudioService:
                     tracklist_size = self._tracklists[guild_id].queue_size
                     await self._tracklists[guild_id].clear()
                     del self._tracklists[guild_id]
-                    logger.debug(
-                        f"🗑️ Cleared tracklist ({tracklist_size} songs) for guild {guild_id}"
-                    )
+                    logger.debug(f"🗑️ Cleared tracklist ({tracklist_size} songs) for guild {guild_id}")
 
                 # Disconnect voice client
                 if guild_id in self._voice_clients:
                     voice_client = self._voice_clients[guild_id]
                     if voice_client.is_connected():
                         await voice_client.disconnect(force=True)
-                        logger.debug(
-                            f"📡 Disconnected voice client for guild {guild_id}"
-                        )
+                        logger.debug(f"📡 Disconnected voice client for guild {guild_id}")
                     del self._voice_clients[guild_id]
 
                 logger.info(f"👋 Successfully disconnected from guild {guild_id}")
@@ -124,9 +112,7 @@ class AudioService:
                 logger.error(f"❌ Error disconnecting from guild {guild_id}: {e}")
                 return False
 
-    async def ensure_voice_connection(
-        self, guild_id: int, channel_id: int
-    ) -> Optional[discord.VoiceClient]:
+    async def ensure_voice_connection(self, guild_id: int, channel_id: int) -> Optional[discord.VoiceClient]:
         """Ensure bot is connected to voice channel, reconnect if needed"""
         async with self._voice_lock:
             try:
@@ -138,17 +124,13 @@ class AudioService:
                         return voice_client
 
                     # Wrong channel, disconnect first
-                    logger.info(
-                        f"🔄 Reconnecting to different channel in guild {guild_id}"
-                    )
+                    logger.info(f"🔄 Reconnecting to different channel in guild {guild_id}")
                     await self.disconnect_from_guild(guild_id)
 
                 # Get channel and connect
                 channel = self._get_channel_by_id(guild_id, channel_id)
                 if not channel:
-                    logger.error(
-                        f"❌ Channel {channel_id} not found in guild {guild_id}"
-                    )
+                    logger.error(f"❌ Channel {channel_id} not found in guild {guild_id}")
                     return None
 
                 # Reconnect
@@ -162,9 +144,7 @@ class AudioService:
                 logger.error(f"❌ Error ensuring voice connection: {e}")
                 return None
 
-    def _get_channel_by_id(
-        self, guild_id: int, channel_id: int
-    ) -> Optional[Union[discord.VoiceChannel, discord.StageChannel]]:
+    def _get_channel_by_id(self, guild_id: int, channel_id: int) -> Optional[Union[discord.VoiceChannel, discord.StageChannel]]:
         """Helper to get channel by ID"""
         voice_client = self._voice_clients.get(guild_id)
         if voice_client and voice_client.guild:
@@ -175,9 +155,7 @@ class AudioService:
     # Audio Player Management
     # ============================================================================
 
-    async def _initialize_audio_player(
-        self, guild_id: int, voice_client: discord.VoiceClient
-    ) -> bool:
+    async def _initialize_audio_player(self, guild_id: int, voice_client: discord.VoiceClient) -> bool:
         """Initialize audio player and tracklist manager for guild"""
         try:
             # Create tracklist manager if not exists
@@ -197,9 +175,7 @@ class AudioService:
             return True
 
         except Exception as e:
-            logger.error(
-                f"❌ Failed to initialize audio player for guild {guild_id}: {e}"
-            )
+            logger.error(f"❌ Failed to initialize audio player for guild {guild_id}: {e}")
             return False
 
     def get_audio_player(self, guild_id: int) -> Optional[AudioPlayer]:
@@ -241,9 +217,7 @@ class AudioService:
 
             # Start playback
             await audio_player.play_song(next_song)
-            logger.info(
-                f"▶️ Started playing: {next_song.metadata.title} in guild {guild_id}"
-            )
+            logger.info(f"▶️ Started playing: {next_song.metadata.title} in guild {guild_id}")
             return True
 
         except Exception as e:
@@ -303,9 +277,7 @@ class AudioService:
             # Clear tracklist
             if self._tracklists[guild_id]:
                 await self._tracklists[guild_id].clear()
-                logger.debug(
-                    f"🗑️ Cleared tracklist in guild {guild_id}"
-                )
+                logger.debug(f"🗑️ Cleared tracklist in guild {guild_id}")
 
             logger.info(f"⏹️ Stopped playback and cleared tracklist in guild {guild_id}")
             return True
@@ -319,15 +291,17 @@ class AudioService:
         audio_player = self._audio_players.get(guild_id)
         return audio_player.is_playing if audio_player else False
 
+    def get_tracklist(self, guild_id: int) -> Tracklist:
+        """Get queue manager for guild"""
+        return self._tracklists[guild_id]
+
     # ============================================================================
     # Statistics & Cleanup
     # ============================================================================
 
     def get_resource_stats(self) -> dict:
         """Get simple resource statistics"""
-        active_players = sum(
-            1 for player in self._audio_players.values() if player.is_playing
-        )
+        active_players = sum(1 for player in self._audio_players.values() if player.is_playing)
 
         return {
             "voice_connections": len(self._voice_clients),
@@ -364,9 +338,7 @@ class AudioService:
             try:
                 audio_player = self._audio_players.get(guild_id)
 
-                is_playing = bool(
-                    audio_player and getattr(audio_player, "is_playing", False)
-                )
+                is_playing = bool(audio_player and getattr(audio_player, "is_playing", False))
                 tracklist_empty = True
                 if self._tracklists[guild_id]:
                     # queue_size is a sync property
@@ -374,9 +346,7 @@ class AudioService:
 
                 # If not playing and tracklist empty -> consider idle
                 if not is_playing and tracklist_empty:
-                    logger.info(
-                        f"🧹 force_cleanup_idle: disconnecting idle guild {guild_id}"
-                    )
+                    logger.info(f"🧹 force_cleanup_idle: disconnecting idle guild {guild_id}")
                     success = await self.disconnect_from_guild(guild_id)
                     if success:
                         disconnected += 1
