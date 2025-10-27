@@ -153,7 +153,7 @@ HEALTHCHECK --interval=60s --timeout=15s --start-period=45s --retries=3 \
     CMD python -c "import discord, platform, sys; print(f'Bot OK on {platform.machine()}, Python {sys.version_info.major}.{sys.version_info.minor}')" || exit 1
 
 # Expose port for potential web interface (optional)
-EXPOSE 8080
+# EXPOSE 8080
 
 # Use exec form for better signal handling
 CMD ["python", "-u", "run_bot.py"]
