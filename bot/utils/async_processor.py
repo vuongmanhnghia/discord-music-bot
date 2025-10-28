@@ -26,7 +26,9 @@ from ..domain.entities.song import Song
 from ..domain.valueobjects.song_status import SongStatus
 from ..pkg.logger import setup_logger
 
-from ..services import playback_service
+from ..services.processing_service import ProcessingService
+
+_processor = ProcessingService()
 
 logger = setup_logger(__name__)
 
@@ -112,10 +114,7 @@ class CircuitBreaker:
 
     def _should_attempt_reset(self) -> bool:
         """Check if we should attempt to reset the circuit"""
-        return (
-            self.last_failure_time
-            and time.time() - self.last_failure_time > self.recovery_timeout
-        )
+        return self.last_failure_time and time.time() - self.last_failure_time > self.recovery_timeout
 
     def _on_success(self):
         """Handle successful execution"""
@@ -154,9 +153,7 @@ class AsyncSongProcessor:
         self.progress_callback = progress_callback
 
         # Task management
-        self.task_queue: asyncio.PriorityQueue = asyncio.PriorityQueue(
-            maxsize=max_queue_size
-        )
+        self.task_queue: asyncio.PriorityQueue = asyncio.PriorityQueue(maxsize=max_queue_size)
         self.active_tasks: Dict[str, ProcessingTask] = {}
         self.completed_tasks: Dict[str, ProcessingTask] = {}
 
@@ -189,9 +186,7 @@ class AsyncSongProcessor:
             worker_id = f"worker_{i+1}"
             self.worker_stats[worker_id] = WorkerStats(worker_id=worker_id)
 
-            worker_task = asyncio.create_task(
-                self._worker_loop(worker_id), name=f"song_processor_{worker_id}"
-            )
+            worker_task = asyncio.create_task(self._worker_loop(worker_id), name=f"song_processor_{worker_id}")
             self.workers.append(worker_task)
 
         logger.info(f"🚀 Started {self.worker_count} background workers")
@@ -249,9 +244,7 @@ class AsyncSongProcessor:
 
         self.active_tasks[task.id] = task
 
-        logger.info(
-            f"📋 Task {task.id} queued for processing (priority: {priority.name})"
-        )
+        logger.info(f"📋 Task {task.id} queued for processing (priority: {priority.name})")
 
         # Send initial progress update
         await self._send_progress_update(task)
@@ -276,13 +269,7 @@ class AsyncSongProcessor:
 
     async def get_queue_info(self) -> Dict[str, Any]:
         """Get information about current queue status"""
-        active_count = len(
-            [
-                t
-                for t in self.active_tasks.values()
-                if t.status == ProcessingStatus.PROCESSING
-            ]
-        )
+        active_count = len([t for t in self.active_tasks.values() if t.status == ProcessingStatus.PROCESSING])
         queued_count = self.task_queue.qsize()
 
         return {
@@ -322,9 +309,7 @@ class AsyncSongProcessor:
             try:
                 # Get task from queue (wait up to 1 second)
                 try:
-                    priority, created_at, task = await asyncio.wait_for(
-                        self.task_queue.get(), timeout=1.0
-                    )
+                    priority, created_at, task = await asyncio.wait_for(self.task_queue.get(), timeout=1.0)
                 except asyncio.TimeoutError:
                     continue
 
@@ -343,9 +328,7 @@ class AsyncSongProcessor:
         worker_stats.is_active = False
         logger.info(f"🏁 Worker {worker_id} stopped")
 
-    async def _process_task(
-        self, task: ProcessingTask, worker_id: str, worker_stats: WorkerStats
-    ):
+    async def _process_task(self, task: ProcessingTask, worker_id: str, worker_stats: WorkerStats):
         """Process a single task"""
         start_time = time.time()
 
@@ -404,9 +387,7 @@ class AsyncSongProcessor:
 
             # Retry logic
             if task.retry_count < task.max_retries:
-                logger.info(
-                    f"🔄 Retrying task {task.id} ({task.retry_count}/{task.max_retries})"
-                )
+                logger.info(f"🔄 Retrying task {task.id} ({task.retry_count}/{task.max_retries})")
 
                 # Exponential backoff
                 delay = min(2**task.retry_count, 30)
@@ -419,9 +400,7 @@ class AsyncSongProcessor:
             else:
                 # Max retries exceeded
                 await self._send_progress_update(task)
-                logger.error(
-                    f"💀 Task {task.id} failed permanently after {task.max_retries} retries"
-                )
+                logger.error(f"💀 Task {task.id} failed permanently after {task.max_retries} retries")
 
         finally:
             worker_stats.current_task = None
@@ -452,19 +431,12 @@ class AsyncSongProcessor:
             await self._send_progress_update(task)
 
             # Actually process the song using the real processor
-            success, _, processed_song = await playback_service.play_request(
-                song.original_input, song.requested_by, song.guild_id, auto_play=False
-            )
-
-            if success and processed_song and processed_song.is_ready:
-                # Copy processed data to our song object
-                song.metadata = processed_song.metadata
-                song.stream_url = processed_song.stream_url
-                song.status = SongStatus.READY
-                logger.info(f"✅ Song processing completed: {song.display_name}")
+            success = await _processor.process_song(task.song)
+            if success and task.song.is_ready:
+                logger.info(f"✅ Song processing completed: {task.song.display_name}")
             else:
-                song.status = SongStatus.FAILED
-                logger.warning(f"❌ Song processing failed: {song.original_input}")
+                task.song.status = SongStatus.FAILED
+                logger.warning(f"❌ Song processing failed: {task.song.original_input}")
 
         except Exception as e:
             song.status = SongStatus.FAILED
@@ -484,9 +456,7 @@ class AsyncSongProcessor:
 async_processor: Optional[AsyncSongProcessor] = None
 
 
-async def initialize_async_processor(
-    bot_instance=None, worker_count=3, max_queue_size=100
-):
+async def initialize_async_processor(bot_instance=None, worker_count=3, max_queue_size=100):
     """Initialize the global async processor with configurable parameters"""
     global async_processor
 
@@ -494,9 +464,7 @@ async def initialize_async_processor(
         # Create progress callback for Discord updates
         progress_callback = None
         if bot_instance:
-            progress_callback = lambda task: default_discord_progress_callback(
-                bot_instance, task
-            )
+            progress_callback = lambda task: default_discord_progress_callback(bot_instance, task)
 
         async_processor = AsyncSongProcessor(
             worker_count=worker_count,
@@ -505,9 +473,7 @@ async def initialize_async_processor(
         )
 
         await async_processor.start()
-        logger.info(
-            f"🚀 Global AsyncSongProcessor initialized with {worker_count} workers"
-        )
+        logger.info(f"🚀 Global AsyncSongProcessor initialized with {worker_count} workers")
 
     return async_processor
 
@@ -526,7 +492,5 @@ async def get_async_processor() -> AsyncSongProcessor:
     """Get the global async processor instance"""
     global async_processor
     if async_processor is None:
-        raise RuntimeError(
-            "AsyncSongProcessor not initialized. Call initialize_async_processor() first."
-        )
+        raise RuntimeError("AsyncSongProcessor not initialized. Call initialize_async_processor() first.")
     return async_processor

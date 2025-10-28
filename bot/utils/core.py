@@ -8,6 +8,7 @@ from typing import Optional, Tuple
 import discord
 from datetime import datetime, timedelta
 from collections import defaultdict
+from ..services.audio.audio_service import AudioService
 
 from ..pkg.logger import logger
 
@@ -112,22 +113,6 @@ class VoiceStateHelper:
         # Count non-bot members
         human_members = [m for m in channel.members if not m.bot]
         return len(human_members) == 0
-
-    @staticmethod
-    async def handle_auto_disconnect(voice_client: discord.VoiceClient, guild_id: int, delay: int = 60) -> bool:
-        """Handle auto-disconnect after delay if still alone"""
-        from ..services.audio.audio_service import audio_service
-
-        logger.info(f"Bot alone in channel, waiting {delay}s before disconnect")
-        await asyncio.sleep(delay)
-
-        # Double-check still alone
-        if VoiceStateHelper.is_alone_in_channel(voice_client):
-            logger.info(f"Still alone after {delay}s, disconnecting")
-            await audio_service.disconnect_from_guild(guild_id)
-            return True
-
-        return False
 
 
 # ============================================================================

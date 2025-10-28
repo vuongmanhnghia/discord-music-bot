@@ -107,21 +107,6 @@ class EventBusManager:
                         await self._update_message(msg_info, song_id)
                 del self._tracked_messages[song_id]
 
-            # Copy and remove tracked messages under lock, then process them outside the lock
-            async with self._lock:
-                if song_id not in self._tracked_messages:
-                    return
-                messages = self._tracked_messages.pop(song_id, [])
-                logger.info(f"📝 Song {song_id} updated, refreshing {len(messages)} messages")
-
-            # Process updates outside the lock to avoid blocking other operations
-            for msg_info in messages:
-                if msg_info["guild_id"] == guild_id:
-                    try:
-                        await self._update_message(msg_info, song_id)
-                    except Exception as e:
-                        logger.error(f"Error updating tracked message for song {song_id}: {e}")
-
         except Exception as e:
             logger.error(f"Error handling song update event: {e}")
 

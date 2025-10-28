@@ -554,13 +554,7 @@ class InteractionManager:
     """Prevent Discord interaction timeouts for long operations"""
 
     @staticmethod
-    async def handle_long_operation(
-        interaction: discord.Interaction,
-        operation_func: Callable,
-        initial_message: str = None,
-        *args,
-        **kwargs,
-    ) -> Any:
+    async def handle_long_operation(interaction: discord.Interaction, operation_func: Callable, initial_message: str = None, *args, **kwargs) -> Any:
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer()

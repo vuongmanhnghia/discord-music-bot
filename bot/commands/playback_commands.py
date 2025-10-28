@@ -109,18 +109,14 @@ class PlaybackCommandHandler(BaseCommandHandler):
         async def pause_music(interaction: discord.Interaction):
             """⏸️ Pause playback"""
             try:
-                success, message = await self.playback_service.pause_playback(
-                    interaction.guild.id
-                )
+                success, message = await self.playback_service.pause_playback(interaction.guild.id)
 
                 if success:
                     embed = create_pause_embed()
                     await interaction.response.send_message(embed=embed)
                 else:
                     embed = self.create_error_embed("Lỗi Tạm Dừng", message)
-                    await interaction.response.send_message(
-                        embed=embed, ephemeral=True
-                    )
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "pause")
@@ -130,18 +126,14 @@ class PlaybackCommandHandler(BaseCommandHandler):
         async def resume_music(interaction: discord.Interaction):
             """▶️ Resume playback"""
             try:
-                success, message = await self.playback_service.resume_playback(
-                    interaction.guild.id
-                )
+                success, message = await self.playback_service.resume_playback(interaction.guild.id)
 
                 if success:
                     embed = create_resume_embed()
                     await interaction.response.send_message(embed=embed)
                 else:
                     embed = self.create_error_embed("Lỗi Tiếp Tục", message)
-                    await interaction.response.send_message(
-                        embed=embed, ephemeral=True
-                    )
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
 
             except Exception as e:
                 await self.handle_command_error(interaction, e, "resume")
@@ -299,7 +291,7 @@ class PlaybackCommandHandler(BaseCommandHandler):
 
             await self.bot.interaction_manager.handle_long_operation(
                 interaction,
-                self.process_youtube_playlist(interaction, query),
+                lambda: self.process_youtube_playlist(interaction, query),
                 "Đang xử lý YouTube Playlist...",
             )
             return

@@ -26,7 +26,6 @@ class YouTubeHandler:
                 "no_warnings": True,
                 "skip_download": True,
                 "default_search": "auto",
-                # "source_address": "0.0.0.0",  # Cẩn thận khi sử dụng, chỉ dùng khi gặp lỗi 403
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -35,8 +34,13 @@ class YouTubeHandler:
         except ImportError:
             logger.error("yt-dlp not available for YouTube extraction")
             return None
-        except Exception as e:
+        except yt_dlp.DownloadError as e:
+            # Bắt lỗi cụ thể từ yt-dlp
             logger.error(f"Error extracting info from {url}: {e}")
+            return None
+        except Exception as e:
+            # Bắt các lỗi không mong muốn khác
+            logger.error(f"An unexpected error occurred while extracting info from {url}: {e}")
             return None
 
     @staticmethod

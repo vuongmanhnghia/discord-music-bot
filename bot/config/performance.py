@@ -51,6 +51,9 @@ class PerformanceConfig:
     health_check_error_retry_seconds: int = 120
     auto_disconnect_delay_seconds: int = 60
 
+    playlist_queue_full_max_retries: int = 4
+    playlist_queue_full_retry_delay_seconds: int = 2
+
     @classmethod
     def load_from_env(cls) -> "PerformanceConfig":
         """Load configuration from environment variables"""
@@ -58,10 +61,7 @@ class PerformanceConfig:
             # Async Processing
             async_workers=int(os.getenv("BOT_ASYNC_WORKERS", "3")),
             max_concurrent_processing=int(os.getenv("BOT_MAX_CONCURRENT", "3")),
-            enable_background_processing=os.getenv(
-                "BOT_ENABLE_BACKGROUND", "true"
-            ).lower()
-            == "true",
+            enable_background_processing=os.getenv("BOT_ENABLE_BACKGROUND", "true").lower() == "true",
             # Caching
             cache_size=int(os.getenv("BOT_CACHE_SIZE", "100")),
             cache_duration_minutes=int(os.getenv("BOT_CACHE_DURATION", "60")),
@@ -79,11 +79,10 @@ class PerformanceConfig:
             reconnect_delay_max=int(os.getenv("BOT_RECONNECT_DELAY_MAX", "5")),
             # Resource Monitoring
             memory_threshold_percent=int(os.getenv("BOT_MEMORY_THRESHOLD", "85")),
-            enable_resource_monitoring=os.getenv(
-                "BOT_ENABLE_MONITORING", "true"
-            ).lower()
-            == "true",
+            enable_resource_monitoring=os.getenv("BOT_ENABLE_MONITORING", "true").lower() == "true",
             cleanup_interval_seconds=int(os.getenv("BOT_CLEANUP_INTERVAL", "300")),
+            playlist_queue_full_max_retries=int(os.getenv("BOT_QUEUE_FULL_RETRIES", "4")),
+            playlist_queue_full_retry_delay_seconds=int(os.getenv("BOT_QUEUE_FULL_RETRY_DELAY", "2")),
         )
 
     def get_ytdl_opts(self) -> Dict[str, Any]:
@@ -106,9 +105,7 @@ class PerformanceConfig:
             "socket_timeout": self.connection_timeout,
             "retries": self.max_retries,
             "fragment_retries": self.fragment_retries,
-            "retry_sleep_functions": {
-                "http": lambda n: min(2**n, self.reconnect_delay_max)
-            },
+            "retry_sleep_functions": {"http": lambda n: min(2**n, self.reconnect_delay_max)},
             # Anti-detection measures for YouTube
             "extractor_args": {
                 "youtube": {
@@ -117,9 +114,7 @@ class PerformanceConfig:
                 }
             },
             # Concurrent downloads based on hardware
-            "concurrent_fragment_downloads": (
-                1 if self.async_workers <= 1 else min(self.async_workers, 3)
-            ),
+            "concurrent_fragment_downloads": (1 if self.async_workers <= 1 else min(self.async_workers, 3)),
             "http_chunk_size": 1024 * 256 if self.async_workers <= 1 else 1024 * 1024,
             # Additional YouTube workarounds
             "youtube_include_dash_manifest": False,
@@ -128,11 +123,7 @@ class PerformanceConfig:
 
     def is_low_resource_mode(self) -> bool:
         """Check if running in low resource mode (RPi-like)"""
-        return (
-            self.async_workers <= 1
-            or self.max_concurrent_processing <= 1
-            or self.memory_limit_mb <= 256
-        )
+        return self.async_workers <= 1 or self.max_concurrent_processing <= 1 or self.memory_limit_mb <= 256
 
     def log_config(self):
         """Log current configuration for debugging"""
@@ -145,9 +136,7 @@ class PerformanceConfig:
         logger.info(f"⚙️  Max Concurrent: {self.max_concurrent_processing}")
         logger.info(f"⚙️  Cache Size: {self.cache_size}")
         logger.info(f"⚙️  Memory Limit: {self.memory_limit_mb}MB")
-        logger.info(
-            f"⚙️  Background Processing: {'ON' if self.enable_background_processing else 'OFF'}"
-        )
+        logger.info(f"⚙️  Background Processing: {'ON' if self.enable_background_processing else 'OFF'}")
         logger.info(f"⚙️  Audio Bitrate: {self.audio_bitrate}")
 
 

@@ -21,7 +21,7 @@ from .services.audio.audio_service import AudioService
 from .services.youtube_service import YouTubeService
 from .services.playback_service import PlaybackService
 
-
+from .utils.async_processor import AsyncSongProcessor
 from .domain.entities.library import Library
 from .utils.discord_ui import InteractionManager
 from .utils.events import EventBusManager
@@ -59,6 +59,11 @@ class MusicBot(commands.Bot):
         # Load performance config
         self.config = performance_config
 
+        # Initialize utils
+        self.async_processor = AsyncSongProcessor()
+        self.playlist_processor = PlaylistProcessor()
+        self.youtube_handler = YouTubeHandler()
+
         # Initialize services
         self.library = Library()
         self.playlist_service = PlaylistService(self.library)
@@ -68,12 +73,10 @@ class MusicBot(commands.Bot):
         self.audio_service = AudioService(self.stream_refresh_service)
         self.youtube_service = YouTubeService()
 
-        self.playback_service = PlaybackService(self.audio_service, self.library, self.playlist_service, self.processing_service, self.youtube_service)
+        self.playback_service = PlaybackService(
+            self.audio_service, self.library, self.playlist_service, self.processing_service, self.async_processor, self.youtube_service
+        )
         self.interaction_manager = InteractionManager()
-
-        # Initialize utils
-        self.playlist_processor = PlaylistProcessor()
-        self.youtube_handler = YouTubeHandler()
 
         # State
         self.active_playlists: dict[int, str] = {}
@@ -121,6 +124,7 @@ class MusicBot(commands.Bot):
                 # Check all voice clients
                 for voice_client in self.voice_clients:
                     guild_id = voice_client.guild.id
+                    channel_id = voice_client.channel.id
 
                     # 1. Connection health check
                     if voice_client is None or not voice_client.is_connected():
@@ -129,7 +133,7 @@ class MusicBot(commands.Bot):
                         # 2. Auto-recovery attempt
                         try:
                             logger.info(f"🔄 Attempting auto-recovery for guild {guild_id}")
-                            await self.audio_service.ensure_voice_connection(guild_id)
+                            await self.audio_service.ensure_voice_connection(guild_id, channel_id)
 
                             # 3. Resume playback if there was a current song
                             if self.audio_service._tracklists[guild_id].current_song:
@@ -231,7 +235,7 @@ class MusicBot(commands.Bot):
         elif isinstance(error, commands.MissingPermissions):
             embed = ErrorEmbedFactory.create_error_embed(
                 "Missing Permissions",
-                "You don\'t have the required permissions to use this command.",
+                "You don't have the required permissions to use this command.",
             )
         elif isinstance(error, commands.CommandOnCooldown):
             embed = ErrorEmbedFactory.create_cooldown_embed(error.retry_after)
@@ -281,7 +285,7 @@ class MusicBot(commands.Bot):
 
         # Auto-disconnect after delay
         logger.info(f"Bot alone in {member.guild.name}, will disconnect")
-        await VoiceStateHelper.handle_auto_disconnect(voice_client, member.guild.id, delay=self.config.auto_disconnect_delay_seconds)
+        await self.audio_service.disconnect_from_guild(member.guild.id)
 
     async def on_error(self, event_method: str, *args, **kwargs):
         """Handle errors in event listeners"""

@@ -137,12 +137,18 @@ class PlaylistCommandHandler(BaseCommandHandler):
                 else:
                     # Check if it's "already exists" error
                     if "đã tồn tại" in message.lower() or "already exists" in message.lower():
-                        embed = create_playlist_already_exists_embed(name)
+                        embed = EmbedFactory.error(
+                            title="Playlist đã tồn tại",
+                            description=f"Playlist **{name}** đã tồn tại.",
+                            suggestions=["Chọn tên khác", "Dùng `/playlist list` để xem danh sách playlist", f"Xóa playlist cũ bằng `/playlist delete {name}`"],
+                            footer="Tên playlist phải duy nhất",
+                        )
                     else:
-                        embed = EmbedFactory.create_error_embed(
+                        embed = EmbedFactory.error(
                             title="Lỗi tạo playlist",
                             description=message,
                             suggestions=["Kiểm tra lại tên playlist", "Dùng tên khác"],
+                            footer="Tên playlist phải duy nhất",
                         )
                     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -301,13 +307,14 @@ class PlaylistCommandHandler(BaseCommandHandler):
                     if "không tồn tại" in message.lower() or "not found" in message.lower():
                         embed = create_playlist_not_found_embed(playlist_name)
                     else:
-                        embed = EmbedFactory.create_error_embed(
+                        embed = EmbedFactory.error(
                             title="Lỗi xóa bài hát",
                             description=message,
                             suggestions=[
                                 "Kiểm tra lại vị trí bài hát",
                                 "Dùng `/playlist show [tên]` để xem danh sách bài hát",
                             ],
+                            footer="Kiểm tra lại vị trí bài hát",
                         )
                     await interaction.response.send_message(embed=embed, ephemeral=True)
 

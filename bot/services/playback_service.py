@@ -44,6 +44,7 @@ class PlaybackService:
         library: Library,
         playlist_service: PlaylistService,
         processing_service: ProcessingService,
+        async_processor: AsyncSongProcessor,
         youtube_service: YouTubeService,
     ):
         # Load performance configuration
@@ -51,7 +52,7 @@ class PlaybackService:
         self.config.log_config()  # Log current configuration
         self.library: Library = library
 
-        self.async_processor: Optional[AsyncSongProcessor] = None  # Will be initialized later
+        self.async_processor: AsyncSongProcessor = async_processor
         self._processing_tasks: dict[int, set[asyncio.Task]] = {}
 
         # Service

@@ -46,7 +46,7 @@ class StreamRefreshService:
             logger.info(f"🔄 Refreshing stream URL for: {song.display_name}")
 
             # Re-extract info
-            info = await self.youtube_handler.extract_info(song.original_input)
+            info = self.youtube_handler.extract_info(song.original_input)
             if not info or "url" not in info:
                 logger.error(f"❌ Failed to extract new URL for: {song.display_name}")
                 return False

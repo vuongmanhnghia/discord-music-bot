@@ -128,8 +128,9 @@ class BasicCommandHandler(BaseCommandHandler):
                     await interaction.response.send_message(embed=embed, ephemeral=True)
 
             except Exception as e:
-                await self.handle_command_error(interaction, e, "leave") @ self.bot.tree.command(name="stats", description="Xem thống kê bot")
+                await self.handle_command_error(interaction, e, "leave")
 
+        @self.bot.tree.command(name="stats", description="Xem thống kê bot")
         async def stats(interaction: discord.Interaction):
             """📊 Bot statistics"""
             try:
@@ -144,7 +145,7 @@ class BasicCommandHandler(BaseCommandHandler):
                 # Audio statistics
                 embed.add_field(
                     name="🎵 Active Queues",
-                    value=f"`{stats.get('active_queues', 0)}`",
+                    value=f"`{stats.get('tracklist_managers', 0)}`",
                     inline=True,
                 )
                 embed.add_field(

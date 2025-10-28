@@ -26,15 +26,15 @@ class Config:
 
         # Required environment variables
         self.BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
+        if not self.BOT_TOKEN:
+            raise ValueError("BOT_TOKEN environment variable is required")
 
         # Optional with defaults
         self.BOT_NAME: str = os.getenv("BOT_NAME", "Discord Music Bot")
         self.VERSION: str = os.getenv("VERSION", "1.0.0")
         self.COMMAND_PREFIX: str = os.getenv("COMMAND_PREFIX", "!")
         self.PLAYLIST_DIR: str = os.getenv("PLAYLIST_DIR", "./playlist")
-        self.STAY_CONNECTED_24_7: bool = os.getenv(
-            "STAY_CONNECTED_24_7", "true"
-        ).lower() in ["true", "1", "yes"]
+        self.STAY_CONNECTED_24_7: bool = os.getenv("STAY_CONNECTED_24_7", "true").lower() in ["true", "1", "yes"]
         self.LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
         self.LOG_FILE: str = os.getenv("LOG_FILE", "")
 

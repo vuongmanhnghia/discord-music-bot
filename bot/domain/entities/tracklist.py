@@ -113,9 +113,7 @@ class Tracklist:
                 self._songs.pop(index)
                 if index < self._current_index:
                     self._current_index -= 1
-                elif index == self._current_index and self._current_index >= len(
-                    self._songs
-                ):
+                elif index == self._current_index and self._current_index >= len(self._songs):
                     self._current_index = 0
                 return True
             return False
@@ -142,3 +140,14 @@ class Tracklist:
     def get_repeat_mode(self) -> str:
         """Get current repeat mode"""
         return self._repeat_mode
+
+    async def shuffle(self) -> bool:
+        async with self._lock:
+            if len(self._songs) - (self._current_index + 1) <= 1:
+                return False
+            import random
+
+            upcoming = self._songs[self._current_index + 1 :]
+            random.shuffle(upcoming)
+            self._songs[self._current_index + 1 :] = upcoming
+            return True

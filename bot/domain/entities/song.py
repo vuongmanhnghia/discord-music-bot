@@ -1,12 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, Dict, Any, TYPE_CHECKING
+from typing import Optional, Dict, Any
 import uuid
 import asyncio
-
-if TYPE_CHECKING:
-    from ...utils.events import song_event_bus, SongUpdateEvent
 
 from ..valueobjects.source_type import SourceType
 from ..valueobjects.song_status import SongStatus
@@ -26,13 +23,12 @@ class Song:
     status: SongStatus = SongStatus.PENDING
     metadata: Optional[SongMetadata] = None
     stream_url: Optional[str] = None
-    stream_url_timestamp: float = 0.0
     error_message: Optional[str] = None
 
     # Timestamps
     created_at: datetime = field(default_factory=datetime.now)
     processed_at: Optional[datetime] = None
-    stream_url_timestamp: Optional[float] = None
+    stream_url_timestamp: float = 0.0
 
     # Requester info
     requested_by: Optional[str] = None
@@ -41,11 +37,7 @@ class Song:
     @property
     def is_ready(self) -> bool:
         """Check if song is ready to play"""
-        return (
-            self.status == SongStatus.READY
-            and self.metadata is not None
-            and self.stream_url is not None
-        )
+        return self.status == SongStatus.READY and self.metadata is not None and self.stream_url is not None
 
     @property
     def display_name(self) -> str:
@@ -81,6 +73,8 @@ class Song:
     def _publish_update_event(self) -> None:
         """Publish song metadata update event"""
         try:
+            from ...utils.events import SongUpdateEvent, song_event_bus
+
             event = SongUpdateEvent(song_id=self.id, guild_id=self.guild_id)
 
             # Try to publish in event loop if available
@@ -103,9 +97,7 @@ class Song:
             "stream_url": self.stream_url,
             "error_message": self.error_message,
             "created_at": self.created_at.isoformat(),
-            "processed_at": (
-                self.processed_at.isoformat() if self.processed_at else None
-            ),
+            "processed_at": (self.processed_at.isoformat() if self.processed_at else None),
             "requested_by": self.requested_by,
             "guild_id": self.guild_id,
         }

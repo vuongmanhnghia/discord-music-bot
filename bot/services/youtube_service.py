@@ -108,7 +108,7 @@ class YouTubeService:
             return SourceType.SPOTIFY.value
         elif "soundcloud.com" in url:
             return SourceType.SOUNDCLOUD.value
-        return SourceType.UNKNOWN.value
+        return SourceType.YOUTUBE.value
 
     async def create_song(self, url: str, requested_by: str, guild_id: int) -> Tuple[Song, bool]:
         """
