@@ -3,18 +3,20 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
-    #   args:
-    #     - TARGETPLATFORM=${DOCKER_PLATFORM:-linux/amd64}
-    #     - BUILDPLATFORM=${BUILDPLATFORM:-linux/amd64}
-    #     - TARGETARCH=${TARGETARCH:-amd64}
-    # platform: ${DOCKER_PLATFORM:-linux/amd64}
     container_name: discord-music-bot
-    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+    restart: on-failure
     env_file:
       - .env
     
     volumes:
-      # Mount external directories with proper permissions
       - ./data/playlist:/home/bot/playlist:rw
       - ./data/logs:/home/bot/logs:rw
     
