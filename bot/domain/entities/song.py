@@ -8,11 +8,44 @@ import asyncio
 from ..valueobjects.source_type import SourceType
 from ..valueobjects.song_status import SongStatus
 from ..valueobjects.song_metadata import SongMetadata
+from ...pkg.logger import logger
 
 
 @dataclass
 class Song:
-    """Core Song entity - rich domain object with improved state management"""
+    """
+    Core Song entity - rich domain object with improved state management.
+
+    Represents a song in the music bot with full lifecycle management from
+    creation through processing to playback.
+
+    State Machine:
+        PENDING -> PROCESSING -> READY (success)
+                              -> FAILED (error)
+
+    Attributes:
+        original_input: User's input (URL or search query)
+        source_type: Type of source (YouTube, Spotify, etc.)
+        id: Unique identifier (auto-generated UUID)
+        status: Current processing status
+        metadata: Song metadata (title, artist, duration, etc.)
+        stream_url: Playable stream URL
+        error_message: Error message if processing failed
+        requested_by: Username who requested the song
+        guild_id: Discord guild ID
+
+    Example:
+        >>> song = Song(
+        ...     original_input="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        ...     source_type=SourceType.YOUTUBE,
+        ...     requested_by="User#1234",
+        ...     guild_id=123456789
+        ... )
+        >>> song.mark_processing()
+        >>> metadata = SongMetadata(title="Never Gonna Give You Up", ...)
+        >>> song.mark_ready(metadata, "https://stream.url")
+        >>> assert song.is_ready
+    """
 
     # Identity
     original_input: str
@@ -81,10 +114,12 @@ class Song:
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(song_event_bus.publish("song_metadata_updated", event))
-            except RuntimeError:
-                pass  # No event loop running, skip event
-        except Exception:
-            pass  # Don't fail if event system has issues
+            except RuntimeError as e:
+                logger.debug(f"No event loop running for song {self.id}, skipping event publish: {e}")
+        except ImportError as e:
+            logger.warning(f"Event system not available for song {self.id}: {e}")
+        except Exception as e:
+            logger.error(f"Failed to publish song update event for {self.id}: {e}")
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""

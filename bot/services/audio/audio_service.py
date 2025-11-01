@@ -7,6 +7,7 @@ import asyncio
 import discord
 from typing import Dict, Optional, Union
 from ...pkg.logger import logger
+from ...config.constants import VOICE_CONNECTION_TIMEOUT, FFMPEG_CLEANUP_DELAY
 
 from ..stream_refresh import StreamRefreshService
 
@@ -52,7 +53,10 @@ class AudioService:
 
                 # Connect to channel
                 logger.info(f"🔊 Connecting to voice channel: {channel.name}")
-                voice_client = await asyncio.wait_for(channel.connect(timeout=30.0, reconnect=True), timeout=30.0)
+                voice_client = await asyncio.wait_for(
+                    channel.connect(timeout=VOICE_CONNECTION_TIMEOUT, reconnect=True),
+                    timeout=VOICE_CONNECTION_TIMEOUT
+                )
 
                 # Save connection
                 self._voice_clients[guild_id] = voice_client
@@ -81,12 +85,12 @@ class AudioService:
                 # Stop audio player
                 if guild_id in self._audio_players:
                     audio_player = self._audio_players[guild_id]
-                    audio_player._is_disconnected = True  # Ngăn auto-play
+                    audio_player.mark_disconnected()  # Prevent auto-play
 
                     if audio_player.is_playing:
                         audio_player.stop()
                         logger.debug(f"🛑 Stopped audio player for guild {guild_id}")
-                        await asyncio.sleep(1)  # Wait for FFmpeg cleanup
+                        await asyncio.sleep(FFMPEG_CLEANUP_DELAY)  # Wait for FFmpeg cleanup
 
                     del self._audio_players[guild_id]
 
@@ -209,10 +213,10 @@ class AudioService:
                 logger.info(f"📭 Tracklist is empty for guild {guild_id}")
                 return False
 
-            # Get next song
-            next_song = self._tracklists[guild_id].current_song
+            # Get next song (this advances the position in tracklist)
+            next_song = await self._tracklists[guild_id].next_song()
             if not next_song:
-                logger.warning(f"⚠️ No next song available for guild {guild_id}")
+                logger.info(f"📭 No more songs in tracklist for guild {guild_id}")
                 return False
 
             # Start playback
@@ -236,10 +240,14 @@ class AudioService:
                 logger.warning(f"⚠️ Nothing is playing in guild {guild_id}")
                 return False
 
-            audio_player.stop()
+            # Stop with auto_play_next=False to prevent callback from playing next
+            audio_player.stop(auto_play_next=False)
             logger.info(f"⏭️ Skipped song in guild {guild_id}")
 
-            # Play next song
+            # Wait for FFmpeg to fully terminate
+            await asyncio.sleep(FFMPEG_CLEANUP_DELAY)
+
+            # Manually play next song (callback won't do it)
             await self.play_next_song(guild_id)
             return True
 

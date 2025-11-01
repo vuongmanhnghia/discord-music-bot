@@ -213,16 +213,36 @@ class AudioPlayer:
         self.is_paused = False
         return True
 
-    def stop(self) -> bool:
-        """Stop playback"""
+    def stop(self, auto_play_next: bool = True) -> bool:
+        """
+        Stop playback
+
+        Args:
+            auto_play_next: If True, triggers auto-play next song via callback.
+                          If False, prevents auto-play (used for manual skip/stop).
+        """
         if self.voice_client.is_playing() or self.voice_client.is_paused():
-            # self._is_disconnected = True
+            # Prevent auto-play if requested (for manual operations)
+            if not auto_play_next:
+                self._is_disconnected = True
+
             self.voice_client.stop()
             self.current_song = None
             self.is_playing = False
             self.is_paused = False
+
+            # Re-enable auto-play after stop completes
+            if not auto_play_next:
+                # Reset after a short delay to allow stop to complete
+                asyncio.create_task(self._reset_auto_play_flag())
+
             return True
         return False
+
+    async def _reset_auto_play_flag(self):
+        """Reset auto-play flag after stop completes"""
+        await asyncio.sleep(0.5)
+        self._is_disconnected = False
 
     def set_volume(self, volume: float) -> bool:
         """Set volume (0.0 to 1.0)"""
@@ -232,6 +252,11 @@ class AudioPlayer:
         if self.voice_client.is_playing() and isinstance(self.voice_client.source, PCMVolumeTransformer):
             self.voice_client.source.volume = volume
         return True
+
+    def mark_disconnected(self) -> None:
+        """Mark player as disconnected to prevent auto-play"""
+        self._is_disconnected = True
+        logger.debug(f"🔒 Audio player marked as disconnected for guild {self.guild_id}")
 
     def _create_audio_source(self, stream_url: str) -> Optional[discord.AudioSource]:
         """Create optimized FFmpeg audio source"""

@@ -10,8 +10,11 @@ import traceback
 import discord
 from discord.ext import commands
 
+from typing import Optional
+
 from .config.config import config
 from .config.performance import performance_config
+from .config.constants import ERROR_MESSAGE_DELETE_AFTER
 from .pkg.logger import logger
 
 from .services.processing_service import ProcessingService
@@ -119,56 +122,72 @@ class MusicBot(commands.Bot):
 
         while not self.is_closed():
             try:
-                await asyncio.sleep(self.config.health_check_interval_seconds)  # Initial delay before checks
+                await asyncio.sleep(self.config.health_check_interval_seconds)
 
                 # Check all voice clients
                 for voice_client in self.voice_clients:
                     guild_id = voice_client.guild.id
                     channel_id = voice_client.channel.id
 
-                    # 1. Connection health check
-                    if voice_client is None or not voice_client.is_connected():
-                        logger.warning(f"💔 Disconnected voice client detected: guild {guild_id}")
-
-                        # 2. Auto-recovery attempt
-                        try:
-                            logger.info(f"🔄 Attempting auto-recovery for guild {guild_id}")
-                            await self.audio_service.ensure_voice_connection(guild_id, channel_id)
-
-                            # 3. Resume playback if there was a current song
-                            if self.audio_service._tracklists[guild_id].current_song:
-                                logger.info(f"▶️ Resuming playback for guild {guild_id}")
-                                await self.audio_service.play_next_song(guild_id)
-
-                            logger.info(f"✅ Auto-recovery successful for guild {guild_id}")
-
-                        except Exception as recovery_error:
-                            logger.error(f"❌ Auto-recovery failed for guild {guild_id}: {recovery_error}")
+                    # Connection health check
+                    if not self._is_voice_client_connected(voice_client):
+                        await self._attempt_connection_recovery(guild_id, channel_id)
                         continue
 
-                    # 4. Playback health check (for connected clients)
-                    elif voice_client.is_connected():
-                        audio_player = self.audio_service._audio_players.get(guild_id)
-
-                        # Check for stuck playback
-                        if (
-                            self.audio_service._tracklists[guild_id]
-                            and self.audio_service._tracklists[guild_id].current_song
-                            and audio_player
-                            and not audio_player.is_playing
-                        ):
-
-                            logger.warning(f"⚠️ Playback stuck detected for guild {guild_id}")
-
-                            try:
-                                await self.audio_service.play_next_song(guild_id)
-                                logger.info(f"✅ Playback recovered for guild {guild_id}")
-                            except Exception as e:
-                                logger.error(f"Failed to recover playback: {e}")
+                    # Playback health check (for connected clients)
+                    if voice_client.is_connected():
+                        await self._check_and_recover_playback(guild_id)
 
             except Exception as e:
                 logger.error(f"Error in health & recovery loop: {e}")
-                await asyncio.sleep(self.config.health_check_error_retry_seconds)  # Wait longer before next check on error
+                await asyncio.sleep(self.config.health_check_error_retry_seconds)
+
+    def _is_voice_client_connected(self, voice_client: discord.VoiceClient) -> bool:
+        """Check if voice client is properly connected"""
+        return voice_client is not None and voice_client.is_connected()
+
+    async def _attempt_connection_recovery(self, guild_id: int, channel_id: int) -> None:
+        """Attempt to recover disconnected voice connection"""
+        logger.warning(f"💔 Disconnected voice client detected: guild {guild_id}")
+
+        try:
+            logger.info(f"🔄 Attempting auto-recovery for guild {guild_id}")
+            await self.audio_service.ensure_voice_connection(guild_id, channel_id)
+
+            # Resume playback if there was a current song
+            tracklist = self.audio_service._tracklists.get(guild_id)
+            if tracklist and tracklist.current_song:
+                logger.info(f"▶️ Resuming playback for guild {guild_id}")
+                await self.audio_service.play_next_song(guild_id)
+
+            logger.info(f"✅ Auto-recovery successful for guild {guild_id}")
+
+        except Exception as recovery_error:
+            logger.error(f"❌ Auto-recovery failed for guild {guild_id}: {recovery_error}")
+
+    async def _check_and_recover_playback(self, guild_id: int) -> None:
+        """Check for stuck playback and attempt recovery"""
+        audio_player = self.audio_service._audio_players.get(guild_id)
+        tracklist = self.audio_service._tracklists.get(guild_id)
+
+        # Check for stuck playback
+        if self._is_playback_stuck(tracklist, audio_player):
+            logger.warning(f"⚠️ Playback stuck detected for guild {guild_id}")
+
+            try:
+                await self.audio_service.play_next_song(guild_id)
+                logger.info(f"✅ Playback recovered for guild {guild_id}")
+            except Exception as e:
+                logger.error(f"Failed to recover playback: {e}")
+
+    def _is_playback_stuck(self, tracklist: Optional[object], audio_player: Optional[object]) -> bool:
+        """Determine if playback is stuck"""
+        return (
+            tracklist is not None
+            and tracklist.current_song is not None
+            and audio_player is not None
+            and not audio_player.is_playing
+        )
 
     async def _sync_commands(self):
         """Sync slash commands with rate limit handling"""
@@ -251,11 +270,11 @@ class MusicBot(commands.Bot):
 
         # Send error message
         try:
-            await ctx.send(embed=embed, delete_after=30)
+            await ctx.send(embed=embed, delete_after=ERROR_MESSAGE_DELETE_AFTER)
         except discord.HTTPException as send_error:
             if send_error.status != 429:
                 try:
-                    await ctx.send(f"❌ Error: {str(error)}", delete_after=30)
+                    await ctx.send(f"❌ Error: {str(error)}", delete_after=ERROR_MESSAGE_DELETE_AFTER)
                 except discord.HTTPException:
                     pass
 
@@ -294,7 +313,7 @@ class MusicBot(commands.Bot):
 
         # Log the error
         logger.error(f"Error in {event_method}: {exc_value}")
-        logger.error(f"Traceback: {'' .join(traceback.format_exception(exc_type, exc_value, exc_traceback))}")
+        logger.error(f"Traceback: {''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))}")
 
     def _setup_commands(self):
         """Setup all bot slash commands using command registry"""

@@ -9,6 +9,11 @@ from . import BaseCommandHandler
 from ..pkg.logger import logger
 from ..utils.discord_ui import EmbedFactory
 from ..config.constants import ERROR_MESSAGES
+from ..utils.exceptions import (
+    VoiceConnectionError,
+    UserNotInVoiceChannelError,
+    VoiceConnectionTimeoutError
+)
 
 from typing import TYPE_CHECKING
 

@@ -9,6 +9,7 @@ from ..config.service_constants import (
     ErrorMessages,
     ServiceConstants,
 )
+from ..config.constants import PLAYLIST_SONG_DELAY
 
 from ..pkg.logger import logger
 from .processing_service import ProcessingService
@@ -363,10 +364,10 @@ class PlaybackService:
     async def stop_playback(self, guild_id: int) -> tuple[bool, str]:
         """Stop playback and clear tracklist"""
         try:
-            # Stop audio
+            # Stop audio with auto_play_next=False to prevent callback
             audio_player = self.audio_service.get_audio_player(guild_id)
             if audio_player:
-                audio_player.stop()
+                audio_player.stop(auto_play_next=False)
 
             # Clear tracklist
             tracklist = self.audio_service.get_tracklist(guild_id)
@@ -483,98 +484,162 @@ class PlaybackService:
             bool: Success status
         """
         try:
-            # Get playlist content
-            success, playlist_songs = self.playlist_service.get_playlist_content(playlist_name)
-            if not success:
-                logger.error(f"Failed to load playlist '{playlist_name}'")
+            # Load and validate playlist
+            playlist_songs = await self._load_playlist(playlist_name)
+            if playlist_songs is None:
                 return False
-
-            # Empty playlist is OK - just set as active without loading songs
             if not playlist_songs:
-                logger.info(f"Playlist '{playlist_name}' is empty - will be populated with /add commands")
-                return True  # Success even if empty
+                return True  # Empty playlist is OK
 
-            # Get tracklist manager
-            tracklist = self.audio_service.get_tracklist(guild_id)
-
-            # Clear existing tracklist only if not empty (safe approach)
-            existing_songs = tracklist.get_all_songs()
-            if existing_songs:
-                logger.info(f"Clearing {len(existing_songs)} existing songs from tracklist")
-                await tracklist.clear()
+            # Prepare tracklist
+            await self._prepare_tracklist_for_playlist(guild_id)
 
             # Check async processor capacity
-            async_songs_count = len(playlist_songs) - ServiceConstants.IMMEDIATE_PROCESS_COUNT
-            if async_songs_count > 0 and self.async_processor:
-                available_capacity = self.async_processor.get_available_capacity()
-                if available_capacity < async_songs_count:
-                    logger.warning(f"⚠️ Processing queue has limited capacity: {available_capacity}/{async_songs_count} slots available")
-                    logger.info("Songs will be queued with retry logic as queue space becomes available")
+            self._check_async_processor_capacity(playlist_songs)
 
-            # Add songs from playlist to tracklist with smart processing
-            processed_count = 0  # Songs processed immediately (in tracklist)
-            queued_for_processing = 0  # Songs queued for async processing (not in tracklist yet)
-            immediate_process_count = min(ServiceConstants.IMMEDIATE_PROCESS_COUNT, len(playlist_songs))
+            # Process songs (immediate + async)
+            processed_count, queued_count = await self._process_playlist_songs(guild_id, playlist_songs)
 
-            logger.info(f"Processing {immediate_process_count} songs immediately, {len(playlist_songs) - immediate_process_count} async")
-
-            for idx, song_info in enumerate(playlist_songs):
-                try:
-                    if idx < immediate_process_count:
-                        # Process first few songs immediately for instant playback
-                        logger.info(f"🔄 Processing song {idx+1}/{len(playlist_songs)} immediately: {song_info['original_input'][:50]}...")
-
-                        # Add delay between immediate processing to avoid rate limits (except first song)
-                        if idx > 0:
-                            await asyncio.sleep(3)  # 3 second delay between songs
-
-                        success, _, song = await self.play_request(song_info["original_input"], guild_id, "Playlist", auto_play=(idx == 0))
-                        if success:
-                            processed_count += 1
-                            logger.info(f"✅ Song {idx+1} ready for playback: {song.display_name if song else 'Unknown'}")
-                        else:
-                            logger.warning(f"⚠️ Failed to process song {idx+1} immediately")
-                    else:
-                        # Process remaining songs asynchronously in background
-                        logger.info(f"📋 Queuing song {idx+1}/{len(playlist_songs)} for async processing: {song_info['original_input'][:50]}...")
-
-                        # Retry logic for queue full scenarios with exponential backoff
-                        max_queue_retries = self.config.playlist_queue_full_max_retries  # Increased from 3
-                        base_retry_delay = self.config.playlist_queue_full_retry_delay_seconds  # seconds
-
-                        for retry in range(max_queue_retries):
-                            (success_async, _, song_async, task_id) = await self.play_request_async(
-                                song_info["original_input"], guild_id, "Playlist", auto_play=False
-                            )
-
-                            if success_async:
-                                queued_for_processing += 1
-                                logger.info(f"📝 Song {idx+1} submitted for processing with task ID: {task_id}")
-                                break  # Success, exit retry loop
-                            else:
-                                if retry < max_queue_retries - 1:
-                                    # Exponential backoff: 2s, 4s, 8s, 16s
-                                    retry_delay = base_retry_delay * (2**retry)
-                                    logger.warning(f"⚠️ Queue full, retrying song {idx+1} in {retry_delay}s (attempt {retry+1}/{max_queue_retries})")
-                                    await asyncio.sleep(retry_delay)
-                                else:
-                                    logger.error(f"❌ Failed to submit song {idx+1} after {max_queue_retries} attempts - queue persistently full")
-
-                except Exception as e:
-                    logger.error(f"Error adding song {idx+1} to playlist playback: {e}")
-                    continue
-
-            # Summary logging
-            total_handled = processed_count + queued_for_processing
-            if total_handled > 0:
-                logger.info(
-                    f"✅ Started playlist playback: {processed_count} songs ready, " f"{queued_for_processing} processing in background from '{playlist_name}'"
-                )
-                return True
-            else:
-                logger.error(f"❌ Failed to start any songs from playlist '{playlist_name}'")
-                return False
+            # Log summary
+            return self._log_playlist_result(playlist_name, processed_count, queued_count)
 
         except Exception as e:
             logger.error(f"Error in start_playlist_playback: {e}")
+            return False
+
+    async def _load_playlist(self, playlist_name: str) -> Optional[list]:
+        """Load playlist content"""
+        success, playlist_songs = self.playlist_service.get_playlist_content(playlist_name)
+        if not success:
+            logger.error(f"Failed to load playlist '{playlist_name}'")
+            return None
+
+        if not playlist_songs:
+            logger.info(f"Playlist '{playlist_name}' is empty - will be populated with /add commands")
+            return []
+
+        return playlist_songs
+
+    async def _prepare_tracklist_for_playlist(self, guild_id: int) -> None:
+        """Clear existing tracklist if needed"""
+        tracklist = self.audio_service.get_tracklist(guild_id)
+        existing_songs = tracklist.get_all_songs()
+
+        if existing_songs:
+            logger.info(f"Clearing {len(existing_songs)} existing songs from tracklist")
+            await tracklist.clear()
+
+    def _check_async_processor_capacity(self, playlist_songs: list) -> None:
+        """Check and warn about async processor capacity"""
+        async_songs_count = len(playlist_songs) - ServiceConstants.IMMEDIATE_PROCESS_COUNT
+
+        if async_songs_count > 0 and self.async_processor:
+            available_capacity = self.async_processor.get_available_capacity()
+            if available_capacity < async_songs_count:
+                logger.warning(
+                    f"⚠️ Processing queue has limited capacity: "
+                    f"{available_capacity}/{async_songs_count} slots available"
+                )
+                logger.info("Songs will be queued with retry logic as queue space becomes available")
+
+    async def _process_playlist_songs(self, guild_id: int, playlist_songs: list) -> tuple[int, int]:
+        """Process playlist songs (immediate + async). Returns (processed_count, queued_count)"""
+        processed_count = 0
+        queued_count = 0
+        immediate_process_count = min(ServiceConstants.IMMEDIATE_PROCESS_COUNT, len(playlist_songs))
+
+        logger.info(
+            f"Processing {immediate_process_count} songs immediately, "
+            f"{len(playlist_songs) - immediate_process_count} async"
+        )
+
+        for idx, song_info in enumerate(playlist_songs):
+            try:
+                if idx < immediate_process_count:
+                    if await self._process_immediate_song(idx, song_info, guild_id, len(playlist_songs)):
+                        processed_count += 1
+                else:
+                    if await self._queue_async_song(idx, song_info, guild_id, len(playlist_songs)):
+                        queued_count += 1
+
+            except Exception as e:
+                logger.error(f"Error adding song {idx+1} to playlist playback: {e}")
+                continue
+
+        return processed_count, queued_count
+
+    async def _process_immediate_song(
+        self, idx: int, song_info: dict, guild_id: int, total_songs: int
+    ) -> bool:
+        """Process a song immediately for instant playback"""
+        logger.info(
+            f"🔄 Processing song {idx+1}/{total_songs} immediately: "
+            f"{song_info['original_input'][:50]}..."
+        )
+
+        # Add delay between songs (except first)
+        if idx > 0:
+            await asyncio.sleep(PLAYLIST_SONG_DELAY)
+
+        success, _, song = await self.play_request(
+            song_info["original_input"], guild_id, "Playlist", auto_play=(idx == 0)
+        )
+
+        if success:
+            logger.info(f"✅ Song {idx+1} ready for playback: {song.display_name if song else 'Unknown'}")
+            return True
+        else:
+            logger.warning(f"⚠️ Failed to process song {idx+1} immediately")
+            return False
+
+    async def _queue_async_song(
+        self, idx: int, song_info: dict, guild_id: int, total_songs: int
+    ) -> bool:
+        """Queue a song for async background processing"""
+        logger.info(
+            f"📋 Queuing song {idx+1}/{total_songs} for async processing: "
+            f"{song_info['original_input'][:50]}..."
+        )
+
+        # Retry with exponential backoff
+        max_retries = self.config.playlist_queue_full_max_retries
+        base_delay = self.config.playlist_queue_full_retry_delay_seconds
+
+        for retry in range(max_retries):
+            success_async, _, song_async, task_id = await self.play_request_async(
+                song_info["original_input"], guild_id, "Playlist", auto_play=False
+            )
+
+            if success_async:
+                logger.info(f"📝 Song {idx+1} submitted for processing with task ID: {task_id}")
+                return True
+
+            # Retry logic
+            if retry < max_retries - 1:
+                retry_delay = base_delay * (2**retry)
+                logger.warning(
+                    f"⚠️ Queue full, retrying song {idx+1} in {retry_delay}s "
+                    f"(attempt {retry+1}/{max_retries})"
+                )
+                await asyncio.sleep(retry_delay)
+            else:
+                logger.error(
+                    f"❌ Failed to submit song {idx+1} after {max_retries} attempts "
+                    f"- queue persistently full"
+                )
+
+        return False
+
+    def _log_playlist_result(self, playlist_name: str, processed_count: int, queued_count: int) -> bool:
+        """Log playlist processing result and return success status"""
+        total_handled = processed_count + queued_count
+
+        if total_handled > 0:
+            logger.info(
+                f"✅ Started playlist playback: {processed_count} songs ready, "
+                f"{queued_count} processing in background from '{playlist_name}'"
+            )
+            return True
+        else:
+            logger.error(f"❌ Failed to start any songs from playlist '{playlist_name}'")
             return False

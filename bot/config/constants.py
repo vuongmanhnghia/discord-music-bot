@@ -139,3 +139,9 @@ STREAM_URL_REFRESH_THRESHOLD = 900  # Refresh if expires in 15 minutes
 AUTO_RECOVERY_COOLDOWN = 300  # 5 minutes between recoveries
 SCHEDULED_MAINTENANCE_INTERVAL = 21600  # 6 hours
 MAX_CACHE_AGE_DAYS = 7  # Delete cache older than 7 days
+
+# Connection and timeout settings
+VOICE_CONNECTION_TIMEOUT = 30.0  # Seconds to wait for voice connection
+FFMPEG_CLEANUP_DELAY = 1.0  # Seconds to wait for FFmpeg cleanup after stop
+PLAYLIST_SONG_DELAY = 3.0  # Seconds delay between immediate playlist song processing
+ERROR_MESSAGE_DELETE_AFTER = 30  # Seconds before auto-deleting error messages
