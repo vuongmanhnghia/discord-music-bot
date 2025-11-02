@@ -2,6 +2,7 @@
 
 import re
 import logging
+import asyncio
 import yt_dlp
 from typing import List, Optional, Tuple, Dict, Any
 from urllib.parse import parse_qs, urlparse
@@ -13,8 +14,9 @@ class YouTubeHandler:
     """YouTube playlist URL processing and extraction"""
 
     @staticmethod
-    def extract_info(url: str) -> Optional[Dict[str, Any]]:
+    def _extract_info_sync(url: str) -> Optional[Dict[str, Any]]:
         """
+        Synchronous version of extract_info - to be run in executor
         Input: YouTube playlist URL
         Extract playlist information and video URLs
         Output: (id, title, entries,...)
@@ -26,6 +28,7 @@ class YouTubeHandler:
                 "no_warnings": True,
                 "skip_download": True,
                 "default_search": "auto",
+                "socket_timeout": 30,  # Add timeout to prevent hanging
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -41,6 +44,29 @@ class YouTubeHandler:
         except Exception as e:
             # Bắt các lỗi không mong muốn khác
             logger.error(f"An unexpected error occurred while extracting info from {url}: {e}")
+            return None
+
+    @staticmethod
+    async def extract_info(url: str, timeout: float = 60.0) -> Optional[Dict[str, Any]]:
+        """
+        Async version - runs blocking yt-dlp in executor to prevent blocking event loop
+        Input: YouTube playlist URL
+        Extract playlist information and video URLs
+        Output: (id, title, entries,...)
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            # Run blocking call in executor with timeout
+            info = await asyncio.wait_for(
+                loop.run_in_executor(None, YouTubeHandler._extract_info_sync, url),
+                timeout=timeout
+            )
+            return info
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout extracting info from {url} (exceeded {timeout}s)")
+            return None
+        except Exception as e:
+            logger.error(f"Error in async extract_info for {url}: {e}")
             return None
 
     @staticmethod
@@ -85,7 +111,8 @@ class YouTubeHandler:
             return None
 
     @staticmethod
-    async def extract_playlist(url: str) -> Tuple[bool, List[str], str]:
+    def _extract_playlist_sync(url: str) -> Tuple[bool, List[str], str]:
+        """Synchronous playlist extraction - to be run in executor"""
         try:
             playlist_id = YouTubeHandler.extract_playlist_id(url)
             if not playlist_id:
@@ -98,6 +125,7 @@ class YouTubeHandler:
                 "skip_download": True,
                 "extract_flat": True,
                 "playlist_items": "1-100",
+                "socket_timeout": 30,
             }
             video_urls = []
 
@@ -154,6 +182,28 @@ class YouTubeHandler:
         except Exception as e:
             logger.error(f"Unexpected error processing playlist {url}: {e}")
             return False, [], f"Unexpected error: {str(e)}"
+
+    @staticmethod
+    async def extract_playlist(url: str, timeout: float = 90.0) -> Tuple[bool, List[str], str]:
+        """
+        Async playlist extraction - runs blocking yt-dlp in executor
+        Input: YouTube playlist URL
+        Output: (success, video_urls, message)
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            # Run blocking call in executor with timeout
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, YouTubeHandler._extract_playlist_sync, url),
+                timeout=timeout
+            )
+            return result
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout extracting playlist from {url} (exceeded {timeout}s)")
+            return False, [], f"Timeout extracting playlist (exceeded {timeout}s)"
+        except Exception as e:
+            logger.error(f"Error in async extract_playlist for {url}: {e}")
+            return False, [], f"Error extracting playlist: {str(e)}"
 
     # @staticmethod
     # def format_playlist_message(

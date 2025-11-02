@@ -41,12 +41,12 @@ class StreamRefreshService:
         return False
 
     async def refresh_stream_url(self, song: Song) -> bool:
-        """Refresh stream URL using yt-dlp"""
+        """Refresh stream URL using yt-dlp (non-blocking)"""
         try:
             logger.info(f"🔄 Refreshing stream URL for: {song.display_name}")
 
-            # Re-extract info
-            info = self.youtube_handler.extract_info(song.original_input)
+            # Re-extract info (now async, runs in executor)
+            info = await self.youtube_handler.extract_info(song.original_input, timeout=60.0)
             if not info or "url" not in info:
                 logger.error(f"❌ Failed to extract new URL for: {song.display_name}")
                 return False
