@@ -47,14 +47,57 @@ class YouTubeHandler:
             return None
 
     @staticmethod
-    async def extract_info(url: str, timeout: float = 60.0) -> Optional[Dict[str, Any]]:
+    def strip_playlist_params(url: str) -> str:
+        """
+        Strip playlist/radio parameters from YouTube URL to get clean video URL
+        Converts: https://www.youtube.com/watch?v=VIDEO_ID&list=RD...
+        To: https://www.youtube.com/watch?v=VIDEO_ID
+        """
+        try:
+            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+
+            parsed = urlparse(url)
+            if 'youtube.com' in parsed.netloc or 'youtu.be' in parsed.netloc:
+                query_params = parse_qs(parsed.query)
+
+                # Keep only video ID parameter
+                if 'v' in query_params:
+                    clean_query = urlencode({'v': query_params['v'][0]}, doseq=True)
+                    clean_url = urlunparse((
+                        parsed.scheme,
+                        parsed.netloc,
+                        parsed.path,
+                        parsed.params,
+                        clean_query,
+                        parsed.fragment
+                    ))
+                    if clean_url != url:
+                        logger.info(f"Stripped playlist params from URL: {url} -> {clean_url}")
+                    return clean_url
+
+            return url
+        except Exception as e:
+            logger.warning(f"Failed to strip playlist params from {url}: {e}")
+            return url
+
+    @staticmethod
+    async def extract_info(url: str, timeout: float = 60.0, strip_playlist: bool = False) -> Optional[Dict[str, Any]]:
         """
         Async version - runs blocking yt-dlp in executor to prevent blocking event loop
         Input: YouTube playlist URL
         Extract playlist information and video URLs
         Output: (id, title, entries,...)
+
+        Args:
+            url: YouTube URL
+            timeout: Timeout in seconds
+            strip_playlist: If True, strip playlist/radio params before extraction (useful for refresh)
         """
         try:
+            # Strip playlist params if requested (for refresh operations)
+            if strip_playlist:
+                url = YouTubeHandler.strip_playlist_params(url)
+
             loop = asyncio.get_running_loop()
             # Run blocking call in executor with timeout
             info = await asyncio.wait_for(
