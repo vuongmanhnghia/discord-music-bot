@@ -52,10 +52,18 @@ class AudioPlayer:
             if await self.stream_refresh_service.should_refresh_url(song):
                 refreshed = await self.stream_refresh_service.refresh_stream_url(song)
                 if not refreshed:
-                    logger.error(f"❌ Failed to refresh URL for: {song.display_name}")
-                    return False
+                    logger.warning(f"⚠️ Failed to refresh URL for: {song.display_name}, will try with old URL")
+                    # Don't return False - try to play with old URL
+                    # Old URL might still work for a while after expiration
+                else:
+                    logger.info(f"✅ URL refreshed successfully for: {song.display_name}")
 
-            # ✅ 3. Create and play audio source
+            # ✅ 3. Validate stream URL exists
+            if not song.stream_url:
+                logger.error(f"❌ No stream URL available for: {song.display_name}")
+                return False
+
+            # ✅ 4. Create and play audio source
             return await self._start_playback(song)
 
         except Exception as e:
@@ -132,10 +140,16 @@ class AudioPlayer:
         """
         if error:
             error_str = str(error).lower()
-            is_stream_error = any(keyword in error_str for keyword in ["403", "404", "expired", "unavailable", "http error"])
+            is_stream_error = any(keyword in error_str for keyword in ["403", "404", "expired", "unavailable", "http error", "connection reset"])
 
             if is_stream_error:
                 logger.warning(f"⚠️ Stream error detected for {song.display_name}: {error}")
+
+                # Check if this was an old URL that finally expired
+                if hasattr(song, "stream_url_timestamp"):
+                    age_minutes = (self._loop.time() - song.stream_url_timestamp) / 60
+                    logger.info(f"🕐 Stream URL age: {age_minutes:.1f} minutes")
+
                 # Schedule retry with fresh URL
                 asyncio.run_coroutine_threadsafe(self._retry_with_fresh_url(song), self._loop)
                 return

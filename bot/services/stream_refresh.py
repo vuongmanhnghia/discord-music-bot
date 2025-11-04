@@ -45,6 +45,9 @@ class StreamRefreshService:
         try:
             logger.info(f"🔄 Refreshing stream URL for: {song.display_name}")
 
+            # Store old URL for comparison
+            old_url = song.stream_url if hasattr(song, 'stream_url') else None
+
             # First try: strip playlist params (faster, avoids timeout on Radio/Mix URLs)
             info = await self.youtube_handler.extract_info(
                 song.original_input,
@@ -63,18 +66,24 @@ class StreamRefreshService:
 
             if not info or "url" not in info:
                 logger.error(f"❌ Failed to extract new URL for: {song.display_name}")
+                logger.info(f"💡 Tip: Old URL will be used as fallback (may still work temporarily)")
                 return False
 
             # Update song with new URL
-            song.stream_url = info["url"]
+            new_url = info["url"]
+            song.stream_url = new_url
             song.stream_url_timestamp = time.time()  # Track timestamp
 
-            logger.info(f"✅ URL refreshed for: {song.display_name}")
+            # Log if URL actually changed
+            if old_url and old_url != new_url:
+                logger.info(f"✅ URL refreshed for: {song.display_name} (URL changed)")
+            else:
+                logger.info(f"✅ URL refreshed for: {song.display_name} (same URL)")
 
             return True
 
         except Exception as e:
-            logger.error(f"❌ Error refreshing URL for {song.display_name}: {e}")
+            logger.error(f"❌ Error refreshing URL for {song.display_name}: {type(e).__name__}: {e}")
             return False
 
     async def refresh_queue(self, queue_songs: list) -> int:

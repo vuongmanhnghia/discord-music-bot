@@ -29,21 +29,40 @@ class YouTubeHandler:
                 "skip_download": True,
                 "default_search": "auto",
                 "socket_timeout": 30,  # Add timeout to prevent hanging
+                "nocheckcertificate": True,  # Skip SSL certificate verification
+                "ignoreerrors": False,  # Don't ignore errors
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
+
+                # Verify we got valid info
+                if not info:
+                    logger.error(f"yt-dlp returned None for {url}")
+                    return None
+
+                # Check if we have a valid stream URL
+                if "url" not in info and "formats" not in info:
+                    logger.error(f"No stream URL or formats in extracted info for {url}")
+                    return None
+
                 return info
         except ImportError:
             logger.error("yt-dlp not available for YouTube extraction")
             return None
         except yt_dlp.DownloadError as e:
             # Bắt lỗi cụ thể từ yt-dlp
-            logger.error(f"Error extracting info from {url}: {e}")
+            error_msg = str(e).lower()
+            if "video unavailable" in error_msg or "private video" in error_msg:
+                logger.error(f"Video unavailable or private: {url}")
+            elif "429" in error_msg or "too many requests" in error_msg:
+                logger.error(f"Rate limited by YouTube for {url}")
+            else:
+                logger.error(f"yt-dlp DownloadError for {url}: {e}")
             return None
         except Exception as e:
             # Bắt các lỗi không mong muốn khác
-            logger.error(f"An unexpected error occurred while extracting info from {url}: {e}")
+            logger.error(f"Unexpected error extracting info from {url}: {type(e).__name__}: {e}")
             return None
 
     @staticmethod
@@ -81,7 +100,7 @@ class YouTubeHandler:
             return url
 
     @staticmethod
-    async def extract_info(url: str, timeout: float = 60.0, strip_playlist: bool = False) -> Optional[Dict[str, Any]]:
+    async def extract_info(url: str, timeout: float = 60.0, strip_playlist: bool = False, retries: int = 2) -> Optional[Dict[str, Any]]:
         """
         Async version - runs blocking yt-dlp in executor to prevent blocking event loop
         Input: YouTube playlist URL
@@ -92,25 +111,43 @@ class YouTubeHandler:
             url: YouTube URL
             timeout: Timeout in seconds
             strip_playlist: If True, strip playlist/radio params before extraction (useful for refresh)
+            retries: Number of retries on failure (default: 2)
         """
-        try:
-            # Strip playlist params if requested (for refresh operations)
-            if strip_playlist:
-                url = YouTubeHandler.strip_playlist_params(url)
+        # Strip playlist params if requested (for refresh operations)
+        if strip_playlist:
+            url = YouTubeHandler.strip_playlist_params(url)
 
-            loop = asyncio.get_running_loop()
-            # Run blocking call in executor with timeout
-            info = await asyncio.wait_for(
-                loop.run_in_executor(None, YouTubeHandler._extract_info_sync, url),
-                timeout=timeout
-            )
-            return info
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout extracting info from {url} (exceeded {timeout}s)")
-            return None
-        except Exception as e:
-            logger.error(f"Error in async extract_info for {url}: {e}")
-            return None
+        last_error = None
+        for attempt in range(retries + 1):
+            try:
+                if attempt > 0:
+                    # Wait before retry with exponential backoff
+                    wait_time = min(2 ** attempt, 10)  # Max 10 seconds
+                    logger.info(f"⏳ Retry attempt {attempt}/{retries} after {wait_time}s for {url}")
+                    await asyncio.sleep(wait_time)
+
+                loop = asyncio.get_running_loop()
+                # Run blocking call in executor with timeout
+                info = await asyncio.wait_for(
+                    loop.run_in_executor(None, YouTubeHandler._extract_info_sync, url),
+                    timeout=timeout
+                )
+
+                if info:  # Success
+                    if attempt > 0:
+                        logger.info(f"✅ Retry successful on attempt {attempt}")
+                    return info
+
+            except asyncio.TimeoutError:
+                last_error = f"Timeout (exceeded {timeout}s)"
+                logger.warning(f"⏱️ Attempt {attempt + 1}/{retries + 1} timed out for {url}")
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"⚠️ Attempt {attempt + 1}/{retries + 1} failed for {url}: {type(e).__name__}")
+
+        # All retries failed
+        logger.error(f"❌ All {retries + 1} attempts failed for {url}. Last error: {last_error}")
+        return None
 
     @staticmethod
     def is_playlist_url(url: str) -> bool:
