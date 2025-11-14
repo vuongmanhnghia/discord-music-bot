@@ -392,6 +392,357 @@ docker buildx ls
 -   **FFmpeg not found**: Rebuild the Docker image
 -   **Audio issues**: Check Discord bot permissions
 
-## 📝 License
+## � Workflow Architecture
+
+### System Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Discord Music Bot                         │
+├─────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │   Commands   │  │   Services   │  │   Domain     │       │
+│  │  (Handlers)  │  │  (Business)  │  │  (Entities)  │       │
+│  └──────────────┘  └──────────────┘  └──────────────┘       │
+│         │                   │                  │              │
+│         └───────────────────┼──────────────────┘              │
+│                             │                                 │
+│                    ┌────────▼────────┐                        │
+│                    │  PlaybackService │                       │
+│                    └────────┬────────┘                        │
+│         ┌──────────────────┼──────────────────┐              │
+│         │                  │                  │              │
+│    ┌────▼────┐    ┌────────▼────────┐   ┌─────▼────┐       │
+│    │ Audio   │    │  Processing     │   │ Async    │       │
+│    │ Service │    │  Service        │   │Processor │       │
+│    └─────────┘    └─────────────────┘   └──────────┘       │
+│         │                  │                  │              │
+│         └──────────────────┼──────────────────┘              │
+│                             │                                 │
+│                    ┌────────▼────────┐                        │
+│                    │   yt-dlp & APIs  │                       │
+│                    └─────────────────┘                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Song Processing Pipeline
+
+```
+INPUT (User Command)
+    │
+    ├─→ /play [URL/Query]
+    │    └─→ Input Analysis
+    │         ├─→ YouTube URL? → YouTubeService
+    │         ├─→ Spotify URL? → SpotifyService → YouTube Search
+    │         ├─→ SoundCloud? → SoundCloudService
+    │         └─→ Text Query? → YouTube Search
+    │
+    └─→ Song Creation (Domain Entity)
+         └─→ Song(
+             ├─ Status: PENDING
+             ├─ source_type: YOUTUBE/SPOTIFY/SOUNDCLOUD
+             ├─ original_input: [user input]
+             └─ requested_by: [user info]
+             )
+
+Processing Flow:
+Song → ProcessingService.process_song()
+    │
+    ├─→ Find Appropriate Processor
+    │    └─→ YouTube/Spotify/SoundCloud Service
+    │
+    └─→ Processor.process(song)
+         ├─→ Mark PROCESSING
+         ├─→ Check Cache (60-minute validity)
+         ├─→ Extract Metadata
+         │   ├─ Title, Artist
+         │   ├─ Duration, Thumbnail
+         │   └─ Stream URL
+         └─→ Mark READY or FAILED
+
+Song State Machine:
+PENDING → PROCESSING → READY (or FAILED → RETRY)
+```
+
+### Playback Flow
+
+```
+User: /play [input]
+    │
+    ├─→ Connect to Voice Channel
+    ├─→ Create Song Entity (PENDING)
+    ├─→ Process Song (PENDING → PROCESSING → READY)
+    ├─→ Add to Tracklist (Queue)
+    ├─→ Auto-play if idle
+    └─→ Send Response with Song Info
+
+Playback States:
+IDLE → PLAYING ↔ PAUSED
+         │
+         ├─→ skip() → Next Song
+         ├─→ stop() → STOPPED + Clear Queue
+         └─→ on_song_end() → Check repeat mode
+             ├─ repeat=off: Next song or IDLE
+             ├─ repeat=track: Play current again
+             └─ repeat=queue: Reset to first
+```
+
+### Tracklist & Queue Management
+
+```
+Tracklist Features:
+├─ current_song: Song | None
+├─ queue: List[Song]
+├─ position: int
+├─ repeat_mode: "off" | "track" | "queue"
+│
+├─ Operations:
+│   ├─ add_song(song) → Queue management
+│   ├─ next_song() → Navigate queue
+│   ├─ skip() → Remove current
+│   ├─ shuffle() → Randomize order
+│   ├─ clear() → Empty queue
+│   └─ set_repeat_mode() → Set loop mode
+│
+└─ Repeat Behavior:
+    ├─ OFF: Sequential playback
+    ├─ TRACK: Infinite loop on current
+    └─ QUEUE: Loop all songs
+```
+
+### Async Processing System
+
+```
+AsyncSongProcessor (Background Worker Pool):
+├─ worker_count: 3 (configurable)
+├─ task_queue: PriorityQueue (max 100 items)
+│
+└─ Workflow:
+    ├─→ Task Submission
+    │   ├─ Create ProcessingTask with Priority
+    │   ├─ Add to queue (LOW/NORMAL/HIGH/URGENT)
+    │   └─ Progress: 0% → 100%
+    │
+    ├─→ Worker Processing
+    │   ├─ 3 workers running simultaneously
+    │   ├─ Real-time Discord embed updates
+    │   └─ Auto-add ready songs to queue
+    │
+    ├─→ Automatic Retry
+    │   ├─ Max attempts: 3
+    │   ├─ Exponential backoff
+    │   └─ Circuit breaker on failures
+    │
+    └─→ Metrics
+        ├─ total_tasks_processed
+        ├─ total_processing_time
+        ├─ worker_stats (per worker)
+        └─ queue_info
+
+Example: Async Playlist Load (/aplay)
+/aplay [YouTube Playlist URL]
+    │
+    ├─→ Extract video URLs from playlist
+    │
+    ├─→ Immediate Processing (First 3 songs)
+    │   └─ Worker 1, 2, 3 process in parallel
+    │
+    ├─→ Async Processing (Remaining songs)
+    │   └─ Background queue processes when workers free
+    │
+    └─→ Auto-Queue Addition
+        └─ As songs complete → Added to queue
+            └─ Played when current finishes
+```
+
+### 🧪 Testing Architecture
+
+```
+Test Suite:
+├─ Unit Tests (30+ tests)
+│   ├─ TestSongEntity
+│   │   ├─ Creation, state transitions
+│   │   ├─ Properties, serialization
+│   │   └─ Edge cases
+│   │
+│   ├─ TestTracklist
+│   │   ├─ Queue operations
+│   │   ├─ Navigation, repeat modes
+│   │   └─ Shuffle, clear
+│   │
+│   └─ TestValidators & Utils
+│
+├─ Integration Tests (10+ tests)
+│   ├─ TestPlaybackFlow
+│   │   ├─ Play request success
+│   │   ├─ Cached flow optimization
+│   │   ├─ Skip, pause, resume
+│   │   ├─ Stop with queue clear
+│   │   ├─ Volume control
+│   │   └─ Repeat mode switching
+│   │
+│   └─ TestPlaylistFlow
+│       ├─ Async playlist load
+│       └─ Tracklist status queries
+│
+└─ Performance Tests
+    ├─ Memory usage monitoring
+    ├─ Async processor efficiency
+    └─ Cache hit rates
+
+Execution:
+├─ Local: pytest (< 60 seconds total)
+├─ CI/CD: GitHub Actions automated
+└─ Coverage Target: > 85%
+```
+
+### ✅ CI/CD Pipeline
+
+```
+GitHub Actions Workflow:
+
+Push/PR Trigger
+    │
+    ├─→ Test Job
+    │   ├─ Run pytest with coverage
+    │   ├─ Generate coverage reports
+    │   └─ Upload to CI system
+    │
+    ├─→ Lint Job
+    │   ├─ Black formatting check
+    │   ├─ Ruff linting
+    │   └─ isort import verification
+    │
+    ├─→ Type Check Job
+    │   └─ mypy static type analysis
+    │
+    └─→ Security Job
+        ├─ Bandit security scan
+        └─ Safety dependency check
+
+Tag Push (v*) Trigger
+    │
+    └─→ Release Job
+        ├─ Build multi-platform Docker images
+        │   ├─ linux/amd64
+        │   ├─ linux/arm64
+        │   └─ linux/armv7
+        │
+        ├─ Push to registry
+        └─ Create GitHub release
+```
+
+### 🐳 Docker Deployment Pipeline
+
+```
+Multi-Stage Build:
+
+Stage 1: Builder
+├─ python:3.12-slim
+├─ Install: build-essential, pkg-config
+├─ Compile all dependencies to wheels
+└─ Output: /build/wheels/
+
+Stage 2: Runtime
+├─ python:3.12-slim (fresh)
+├─ Install: libopus, libsodium, ffmpeg
+├─ Copy wheels from Stage 1
+├─ Copy application code
+├─ Non-root user (bot:1000)
+├─ Health check enabled
+└─ Final size: ~200MB
+
+docker-compose.yml Configuration:
+├─ Resource Limits:
+│   ├─ CPU: 0.5 limit / 0.25 reservation
+│   ├─ Memory: 1G limit / 512M reservation
+│   └─ Optimized for x86_64 & ARM64
+│
+├─ Volumes:
+│   ├─ ./data/playlist → /home/bot/playlist:rw
+│   ├─ ./data/logs → /home/bot/logs:rw
+│   └─ Environment variables from .env
+│
+└─ Network:
+    └─ bot-network (bridge driver)
+```
+
+### 🔄 Performance Configuration
+
+```
+Performance Config (bot/config/performance.py):
+├─ Async Workers: 3 (parallel processing)
+├─ Max Concurrent: 3 (songs being processed)
+├─ Background Processing: Enabled
+│
+├─ Caching:
+│   ├─ Size: 100 entries
+│   ├─ Duration: 60 minutes
+│   └─ Memory Limit: 512M
+│
+├─ Queue Management:
+│   ├─ Max Queue Size: 100 songs
+│   └─ Processing Queue: 200 tasks
+│
+├─ Audio Settings:
+│   ├─ Bitrate: 192k
+│   └─ Format: opus (optimized)
+│
+├─ Network Resilience:
+│   ├─ Connection Timeout: 30s
+│   ├─ Max Retries: 3
+│   └─ Reconnect Delay: 5s max
+│
+└─ Health Monitoring:
+    ├─ Memory Threshold: 85%
+    ├─ Monitoring Interval: 60s
+    └─ Auto-cleanup: 300s
+```
+
+### 📈 Monitoring & Health Check
+
+```
+Health Check Loop (Runs every 60 seconds):
+
+├─→ Resource Monitoring
+│   ├─ Memory usage vs threshold
+│   ├─ CPU utilization
+│   └─ Alert if > 85% memory
+│
+├─→ Voice Connection Verification
+│   ├─ Check active connections
+│   ├─ Detect disconnections
+│   └─ Attempt reconnect if needed
+│
+├─→ Async Processor Health
+│   ├─ Queue depth
+│   ├─ Worker status
+│   └─ Error rate tracking
+│
+├─→ Cache Maintenance
+│   ├─ Old entry cleanup
+│   ├─ Memory optimization
+│   └─ Cache statistics
+│
+└─→ Graceful Cleanup
+    ├─ Log rotation
+    ├─ Temp file removal
+    └─ Database optimization
+```
+
+### 🔑 Workflow Summary Table
+
+| Workflow      | Command             | Services                                           | Result           |
+| ------------- | ------------------- | -------------------------------------------------- | ---------------- |
+| Single Song   | `/play [URL]`       | PlaybackService → ProcessingService → AudioService | Song playing     |
+| Playlist Load | `/use [name]`       | PlaylistService → PlaybackService → AudioService   | Queue loaded     |
+| Async Batch   | `/aplay [URL]`      | YouTubeService → AsyncProcessor → PlaybackService  | Background batch |
+| Skip          | `/skip`             | AudioService → Tracklist → AudioService            | Next song        |
+| Pause/Resume  | `/pause`, `/resume` | AudioService                                       | State changed    |
+| Stop          | `/stop`             | AudioService → Tracklist                           | Queue cleared    |
+| Volume        | `/volume [0-100]`   | AudioService                                       | Audio adjusted   |
+| Repeat        | `/repeat [mode]`    | Tracklist                                          | Mode set         |
+
+## �📝 License
 
 This project is open source. Please check the license file for details.
