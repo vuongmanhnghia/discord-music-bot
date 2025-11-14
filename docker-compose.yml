@@ -1,8 +1,6 @@
 services:
   discord-music-bot:
-    build: 
-      context: .
-      dockerfile: Dockerfile
+    image: nooblearn2code/discord-music-bot:latest
     container_name: discord-music-bot
     deploy:
       resources:
@@ -17,12 +15,5 @@ services:
       - .env
     
     volumes:
-      - ./data/playlist:/home/bot/playlist:rw
-      - ./data/logs:/home/bot/logs:rw
-    
-    networks:
-      - bot-network
-
-networks:
-  bot-network:
-    driver: bridge
+      - ./playlist:/app/playlist:rw
+      - ./logs:/app/logs:rw
