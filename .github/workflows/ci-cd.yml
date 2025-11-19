@@ -84,6 +84,7 @@ jobs:
           docker compose pull
           echo "Restarting services..."
           docker compose up -d
+          chown nagih. data
           echo "Deployment successful!"
 
       - name: Clean up old Docker images
