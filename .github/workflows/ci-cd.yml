@@ -84,7 +84,8 @@ jobs:
           docker compose pull
           echo "Restarting services..."
           docker compose up -d
-          sudo chown nagih. data
+          sudo chown nagih. logs
+          sudo chown nagih. playlist
           echo "Deployment successful!"
 
       - name: Clean up old Docker images
