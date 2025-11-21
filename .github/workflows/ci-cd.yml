@@ -78,7 +78,7 @@ jobs:
 
       - name: Deploy to Server
         run: |
-          cp docker-compose.yml /home/github-runner/wsp/dmb/compose.yml
+          sudo cp docker-compose.yml /home/github-runner/wsp/dmb/docker-compose.yml
           cd /home/github-runner/wsp/dmb
 
           echo "Pulling the latest image..."
