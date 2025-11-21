@@ -2,6 +2,7 @@ services:
   discord-music-bot:
     image: nooblearn2code/discord-music-bot:latest
     container_name: discord-music-bot
+    network_mode: bridge
     deploy:
       resources:
         limits:
