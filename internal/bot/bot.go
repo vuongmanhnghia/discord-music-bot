@@ -91,7 +91,7 @@ func New(cfg *config.Config, log *logger.Logger) (*MusicBot, error) {
 	}
 
 	// Initialize command handler
-	cmdHandler := commands.NewHandler(session, playbackService, playlistService, ytService, log)
+	cmdHandler := commands.NewHandler(session, playbackService, playlistService, ytService, log, cfg)
 
 	bot := &MusicBot{
 		config:            cfg,
@@ -109,6 +109,7 @@ func New(cfg *config.Config, log *logger.Logger) (*MusicBot, error) {
 	// Register event handlers
 	session.AddHandler(bot.onReady)
 	session.AddHandler(cmdHandler.HandleInteraction)
+	session.AddHandler(bot.onVoiceStateUpdate)
 
 	return bot, nil
 }
@@ -160,9 +161,90 @@ func (b *MusicBot) Stop() {
 func (b *MusicBot) onReady(s *discordgo.Session, event *discordgo.Ready) {
 	b.logger.Infof("✅ Bot is ready! Logged in as %s#%s", event.User.Username, event.User.Discriminator)
 	b.logger.Infof("📊 Connected to %d guilds", len(event.Guilds))
+	b.logger.Infof("🔧 24/7 Mode: %v", b.config.StayConnected247)
 
 	// Set bot status
-	if err := s.UpdateGameStatus(0, "🎵 /play to start"); err != nil {
+	if err := s.UpdateGameStatus(0, "🎵 Music Bot - /help"); err != nil {
 		b.logger.WithError(err).Warn("Failed to update status")
+	}
+}
+
+// onVoiceStateUpdate handles voice state updates (user joins/leaves voice channels)
+func (b *MusicBot) onVoiceStateUpdate(s *discordgo.Session, event *discordgo.VoiceStateUpdate) {
+	// Skip if 24/7 mode is enabled - never auto-disconnect
+	if b.config.StayConnected247 {
+		return
+	}
+
+	// Skip if the event is about the bot itself
+	if event.UserID == s.State.User.ID {
+		return
+	}
+
+	guildID := event.GuildID
+
+	// Check if bot is connected to any voice channel in this guild
+	botChannelID := b.audioService.GetVoiceChannelID(guildID)
+	if botChannelID == "" {
+		// Bot is not connected in this guild
+		return
+	}
+
+	// Check if the user left the bot's channel
+	// event.BeforeUpdate contains the previous voice state
+	if event.BeforeUpdate == nil {
+		// User joined a channel, not left
+		return
+	}
+
+	// Only care if user was in the bot's channel before
+	if event.BeforeUpdate.ChannelID != botChannelID {
+		return
+	}
+
+	// Now check how many users are still in the bot's channel
+	voiceChannel, err := s.State.Channel(botChannelID)
+	if err != nil {
+		b.logger.WithError(err).Warn("Failed to get voice channel state")
+		return
+	}
+
+	// Count users in the voice channel (excluding bots)
+	userCount := 0
+	guild, err := s.State.Guild(guildID)
+	if err != nil {
+		b.logger.WithError(err).Warn("Failed to get guild state")
+		return
+	}
+
+	for _, vs := range guild.VoiceStates {
+		if vs.ChannelID == botChannelID && vs.UserID != s.State.User.ID {
+			// Check if user is not a bot
+			member, err := s.GuildMember(guildID, vs.UserID)
+			if err != nil {
+				continue
+			}
+			if member.User != nil && !member.User.Bot {
+				userCount++
+			}
+		}
+	}
+
+	b.logger.WithFields(map[string]interface{}{
+		"guild":     guildID,
+		"channel":   voiceChannel.Name,
+		"userCount": userCount,
+	}).Debug("Voice state update - checking user count")
+
+	// If no users left in the channel, disconnect
+	if userCount == 0 {
+		b.logger.WithFields(map[string]interface{}{
+			"guild":   guildID,
+			"channel": voiceChannel.Name,
+		}).Info("No users in voice channel, disconnecting...")
+
+		if err := b.audioService.DisconnectFromGuild(guildID); err != nil {
+			b.logger.WithError(err).Warn("Failed to disconnect from guild")
+		}
 	}
 }

@@ -46,7 +46,7 @@ func NewAudioPlayer(guildID string, vc *VoiceConnection, log *logger.Logger) *Au
 		encoder:    NewAudioEncoder(log),
 		logger:     log,
 		stopSignal: make(chan struct{}),
-		volume:     100, // Default volume 100%
+		volume:     30, // Default volume 30%
 	}
 }
 

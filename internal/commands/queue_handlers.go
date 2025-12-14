@@ -13,7 +13,7 @@ func (h *Handler) handleQueue(s *discordgo.Session, i *discordgo.InteractionCrea
 	tracklist := h.playbackService.GetTracklist(i.GuildID)
 	if tracklist == nil || tracklist.Size() == 0 {
 		embed := NewEmbed().
-			Title("📋 Queue").
+			Title("Queue").
 			Description("The queue is empty. Use `/play` to add songs!").
 			Color(ColorInfo).
 			Build()
@@ -21,14 +21,14 @@ func (h *Handler) handleQueue(s *discordgo.Session, i *discordgo.InteractionCrea
 	}
 
 	builder := NewEmbed().
-		Title("📋 Music Queue").
+		Title("Music Queue").
 		Color(ColorPrimary)
 
 	// Current song
 	current := tracklist.CurrentSong()
 	if current != nil && current.GetMetadata() != nil {
 		meta := current.GetMetadata()
-		builder.Field("🎵 Now Playing", fmt.Sprintf("**%s**\n`%s`", meta.Title, meta.DurationFormatted()), false)
+		builder.Field("Now Playing", fmt.Sprintf("**%s**\n`%s`", meta.Title, meta.DurationFormatted()), false)
 	}
 
 	// Up next
@@ -41,10 +41,10 @@ func (h *Handler) handleQueue(s *discordgo.Session, i *discordgo.InteractionCrea
 				if len(title) > 50 {
 					title = title[:47] + "..."
 				}
-				sb.WriteString(fmt.Sprintf("`%d.` %s\n", idx+1, title))
+				sb.WriteString(fmt.Sprintf("> **%d. %s**\n", idx+1, title))
 			}
 		}
-		builder.Field("📜 Up Next", sb.String(), false)
+		builder.Field("Up Next", sb.String(), false)
 	}
 
 	// Footer with stats
@@ -75,18 +75,18 @@ func (h *Handler) handleNowPlaying(s *discordgo.Session, i *discordgo.Interactio
 	metadata := current.GetMetadata()
 
 	builder := NewEmbed().
-		Title("🎵 Now Playing").
+		Title("Now Playing").
 		Description(fmt.Sprintf("**%s**", metadata.Title)).
 		Color(ColorPrimary).
 		Thumbnail(metadata.Thumbnail).
-		Field("⏱️ Duration", metadata.DurationFormatted(), true)
+		Field("Duration", metadata.DurationFormatted(), true)
 
 	if metadata.Uploader != "" {
-		builder.Field("👤 Artist", metadata.Uploader, true)
+		builder.Field("Artist", metadata.Uploader, true)
 	}
 
 	// Add progress indicator
-	builder.Field("📊 Status", "▶️ Playing", true)
+	builder.Field("Status", "Playing", true)
 
 	builder.Footer("Use /skip to play next song")
 
@@ -104,7 +104,7 @@ func (h *Handler) handleShuffle(s *discordgo.Session, i *discordgo.InteractionCr
 	tracklist.Shuffle()
 
 	embed := NewEmbed().
-		Title("🔀 Queue Shuffled").
+		Title("Queue Shuffled").
 		Description(fmt.Sprintf("Successfully shuffled **%d** songs in the queue", count)).
 		Color(ColorSuccess).
 		Build()
@@ -128,7 +128,7 @@ func (h *Handler) handleClear(s *discordgo.Session, i *discordgo.InteractionCrea
 	h.activePlaylistMu.Unlock()
 
 	embed := NewEmbed().
-		Title("🗑️ Queue Cleared").
+		Title("Queue Cleared").
 		Description("Playback stopped and queue has been cleared\nActive playlist has been reset").
 		Color(ColorWarning).
 		Build()

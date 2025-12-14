@@ -7,6 +7,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/domain/entities"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/domain/valueobjects"
+	"github.com/vuongmanhnghia/discord-music-bot/internal/services/youtube"
 )
 
 // handlePlay handles the play command
@@ -23,7 +24,30 @@ func (h *Handler) handlePlay(s *discordgo.Session, i *discordgo.InteractionCreat
 		return followUpError(s, i, "You must be in a voice channel to play music")
 	}
 
-	song := entities.NewSong(query, valueobjects.SourceTypeYouTube, i.Member.User.ID, i.GuildID)
+	// If query is not a YouTube URL, search for it
+	var songURL string
+	var songTitle string
+	if !youtube.IsYouTubeURL(query) {
+		h.logger.WithField("query", query).Info("Searching YouTube...")
+		results, err := h.ytService.Search(query, 1)
+		if err != nil {
+			return followUpError(s, i, "Search failed: "+err.Error())
+		}
+		if len(results) == 0 {
+			return followUpError(s, i, "No results found for: "+query)
+		}
+		songURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", results[0].ID)
+		songTitle = results[0].Title
+		h.logger.WithFields(map[string]interface{}{
+			"title": songTitle,
+			"url":   songURL,
+		}).Info("Found video from search")
+	} else {
+		songURL = query
+		songTitle = query // Will be updated after extraction
+	}
+
+	song := entities.NewSong(songURL, valueobjects.SourceTypeYouTube, i.Member.User.ID, i.GuildID)
 
 	if err := h.playbackService.AddSong(i.GuildID, song); err != nil {
 		return followUpError(s, i, fmt.Sprintf("Failed to add song: %v", err))
@@ -35,9 +59,15 @@ func (h *Handler) handlePlay(s *discordgo.Session, i *discordgo.InteractionCreat
 		}
 	}
 
+	// Use the found title if available, otherwise use the query
+	displayTitle := songTitle
+	if displayTitle == "" || displayTitle == songURL {
+		displayTitle = query
+	}
+
 	embed := NewEmbed().
 		Title("🎵 Added to Queue").
-		Description(fmt.Sprintf("**%s**", query)).
+		Description(fmt.Sprintf("**%s**", displayTitle)).
 		Color(ColorSuccess).
 		Footer("Use /queue to view the queue").
 		Build()
@@ -152,7 +182,7 @@ func (h *Handler) handleSkip(s *discordgo.Session, i *discordgo.InteractionCreat
 	}
 
 	embed := NewEmbed().
-		Title("⏭️ Skipped").
+		Title("Skipped").
 		Description(desc).
 		Color(ColorInfo).
 		Build()

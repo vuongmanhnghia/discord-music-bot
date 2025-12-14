@@ -79,12 +79,12 @@ func (h *Handler) handleStats(s *discordgo.Session, i *discordgo.InteractionCrea
 	}
 
 	embed := NewEmbed().
-		Title("📊 Bot Statistics").
+		Title("Bot Statistics").
 		Color(ColorPrimary).
-		Field("🌐 Servers", fmt.Sprintf("%d", guildCount), true).
-		Field("🔊 Active Sessions", fmt.Sprintf("%d", voiceCount), true).
-		Field("📶 Latency", fmt.Sprintf("%dms %s", latency, latencyStatus), true).
-		Footer("Discord Music Bot v2.0.0 • Go Edition").
+		Field("Servers", fmt.Sprintf("%d", guildCount), true).
+		Field("Active Sessions", fmt.Sprintf("%d", voiceCount), true).
+		Field("Latency", fmt.Sprintf("%dms %s", latency, latencyStatus), true).
+		Footer(h.config.BotName).
 		Timestamp(time.Now().Format(time.RFC3339)).
 		Build()
 
@@ -94,38 +94,40 @@ func (h *Handler) handleStats(s *discordgo.Session, i *discordgo.InteractionCrea
 // handleHelp handles the help command
 func (h *Handler) handleHelp(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	embed := NewEmbed().
-		Title("🎵 Discord Music Bot").
+		Title(h.config.BotName).
 		Description("").
 		Color(ColorPrimary).
-		Field("🎵 Playback",
-			"`/play <query>` - Play a song\n"+
-				"`/aplay <url>` - Load YouTube playlist\n"+
-				"`/pause` - Pause playback\n"+
-				"`/resume` - Resume playback\n"+
-				"`/skip` - Skip current song\n"+
-				"`/stop` - Stop and clear queue\n"+
-				"`/volume <0-100>` - Adjust volume",
+		Field("Basic",
+			"> **`/join` - Join voice channel**\n"+
+				"> **`/leave` - Leave and clear state**\n",
 			false).
-		Field("📋 Queue Management",
-			"`/queue` - View current queue\n"+
-				"`/nowplaying` - Current song info\n"+
-				"`/shuffle` - Shuffle queue\n"+
-				"`/clear` - Clear queue & reset\n"+
-				"`/repeat <mode>` - Set repeat mode",
+		Field("Playback",
+			"> **`/play <query>` - Play a song**\n"+
+				"> **`/aplay <url>` - Load YouTube playlist**\n"+
+				"> **`/pause` - Pause playback**\n"+
+				"> **`/resume` - Resume playback**\n"+
+				"> **`/skip` - Skip current song**\n"+
+				"> **`/stop` - Stop and clear queue**\n"+
+				"> **`/volume <0-100>` - Adjust volume**",
 			false).
-		Field("💾 Playlist Management",
-			"`/playlists` - List all playlists\n"+
-				"`/use <name>` - Load a playlist\n"+
-				"`/add <song>` - Quick add to active playlist\n"+
-				"`/playlist create/delete/show/add`\n"+
-				"`/remove <playlist> <index>` - Remove song",
+		Field("Queue Management",
+			"> **`/queue` - View current queue**\n"+
+				"> **`/nowplaying` - Current song info**\n"+
+				"> **`/shuffle` - Shuffle queue**\n"+
+				"> **`/clear` - Clear queue & reset**\n"+
+				"> **`/repeat <mode>` - Set repeat mode**",
 			false).
-		Field("🔧 Utility",
-			"`/join` - Join voice channel\n"+
-				"`/leave` - Leave and clear state\n"+
-				"`/stats` - Bot statistics\n"+
-				"`/help` - Show this help\n"+
-				"`/sync` - [Admin] Sync commands",
+		Field("Playlist Management",
+			"> **`/playlists` - List all playlists**\n"+
+				"> **`/use <name>` - Load a playlist**\n"+
+				"> **`/add <song>` - Quick add to active playlist**\n"+
+				"> **`/playlist create/delete/show/add`**\n"+
+				"> **`/remove <playlist> <index>` - Remove song**",
+			false).
+		Field("Utility",
+			"> **`/stats` - Bot statistics**\n"+
+				"> **`/help` - Show this help**\n"+
+				"> **`/sync` - [Admin] Sync commands**",
 			false).
 		Footer("Discord Music Bot v2.0.0 • Built with Go").
 		Build()

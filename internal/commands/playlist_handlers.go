@@ -6,6 +6,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/domain/valueobjects"
+	"github.com/vuongmanhnghia/discord-music-bot/internal/services/youtube"
 )
 
 // handlePlaylists shows all available playlists
@@ -18,7 +19,7 @@ func (h *Handler) handlePlaylists(s *discordgo.Session, i *discordgo.Interaction
 
 	if len(playlists) == 0 {
 		embed := NewEmbed().
-			Title("📋 Playlists").
+			Title("Playlists").
 			Description("No playlists found.\nUse `/playlist create <name>` to create one!").
 			Color(ColorInfo).
 			Build()
@@ -26,12 +27,12 @@ func (h *Handler) handlePlaylists(s *discordgo.Session, i *discordgo.Interaction
 	}
 
 	var sb strings.Builder
-	for idx, name := range playlists {
-		sb.WriteString(fmt.Sprintf("`%d.` **%s**\n", idx+1, name))
+	for _, name := range playlists {
+		sb.WriteString(fmt.Sprintf("⚬ **%s**\n", name))
 	}
 
 	embed := NewEmbed().
-		Title("📋 Available Playlists").
+		Title("Available Playlists").
 		Description(sb.String()).
 		Color(ColorPrimary).
 		Footer(fmt.Sprintf("%d playlists • Use /use <name> to load a playlist", len(playlists))).
@@ -59,7 +60,7 @@ func (h *Handler) handleUsePlaylist(s *discordgo.Session, i *discordgo.Interacti
 	// If empty, just set as active
 	if len(playlist.Entries) == 0 {
 		embed := NewEmbed().
-			Title("📋 Playlist Activated").
+			Title("Playlist Activated").
 			Description(fmt.Sprintf("**%s** is now the active playlist (empty)", playlistName)).
 			Color(ColorInfo).
 			Field("💡 Tip", "Use `/add <url>` to add songs to this playlist", false).
@@ -100,11 +101,11 @@ func (h *Handler) handleUsePlaylist(s *discordgo.Session, i *discordgo.Interacti
 	}
 
 	embed := NewEmbed().
-		Title("📻 Playlist Loaded").
+		Title("Playlist Loaded").
 		Description(fmt.Sprintf("Now playing **%s**", playlistName)).
 		Color(ColorSuccess).
-		Field("🎵 Songs", fmt.Sprintf("%d", len(songs)), true).
-		Field("📋 Status", "Active", true).
+		Field("Songs", fmt.Sprintf("%d", len(songs)), true).
+		Field("Status", "Active", true).
 		Footer("Use /queue to view the queue").
 		Build()
 
@@ -128,17 +129,40 @@ func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionC
 	options := i.ApplicationCommandData().Options
 	songQuery := options[0].StringValue()
 
-	info, err := h.ytService.ExtractInfo(songQuery)
-	if err != nil {
-		return followUpError(s, i, "Failed to extract song info: "+err.Error())
+	// If query is not a YouTube URL, search for it
+	var songURL string
+	var songTitle string
+	if !youtube.IsYouTubeURL(songQuery) {
+		h.logger.WithField("query", songQuery).Info("Searching YouTube for /add...")
+		results, err := h.ytService.Search(songQuery, 1)
+		if err != nil {
+			return followUpError(s, i, "Search failed: "+err.Error())
+		}
+		if len(results) == 0 {
+			return followUpError(s, i, "No results found for: "+songQuery)
+		}
+		songURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", results[0].ID)
+		songTitle = results[0].Title
+		h.logger.WithFields(map[string]interface{}{
+			"title": songTitle,
+			"url":   songURL,
+		}).Info("Found video from search")
+	} else {
+		// Extract info from URL
+		info, err := h.ytService.ExtractInfo(songQuery)
+		if err != nil {
+			return followUpError(s, i, "Failed to extract song info: "+err.Error())
+		}
+		songURL = info.WebpageURL
+		songTitle = info.Title
 	}
 
-	err = h.playlistService.AddToPlaylistForGuild(
+	err := h.playlistService.AddToPlaylistForGuild(
 		i.GuildID,
 		playlistName,
-		info.WebpageURL,
+		songURL,
 		valueobjects.SourceTypeYouTube,
-		info.Title,
+		songTitle,
 	)
 	if err != nil {
 		return followUpError(s, i, err.Error())
@@ -146,9 +170,9 @@ func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionC
 
 	embed := NewEmbed().
 		Title("✅ Song Added to Playlist").
-		Description(fmt.Sprintf("**%s**", info.Title)).
+		Description(fmt.Sprintf("**%s**", songTitle)).
 		Color(ColorSuccess).
-		Field("📋 Playlist", playlistName, true).
+		Field("Playlist", playlistName, true).
 		Build()
 
 	return followUpEmbed(s, i, embed)
@@ -181,7 +205,7 @@ func (h *Handler) handleRemove(s *discordgo.Session, i *discordgo.InteractionCre
 	}
 
 	embed := NewEmbed().
-		Title("🗑️ Song Removed").
+		Title("Song Removed").
 		Description(fmt.Sprintf("Removed **%s** from **%s**", songTitle, playlistName)).
 		Color(ColorWarning).
 		Build()
@@ -220,10 +244,10 @@ func (h *Handler) handlePlaylistCreate(s *discordgo.Session, i *discordgo.Intera
 	}
 
 	embed := NewEmbed().
-		Title("✅ Playlist Created").
+		Title("Playlist Created").
 		Description(fmt.Sprintf("Successfully created playlist **%s**", name)).
 		Color(ColorSuccess).
-		Field("💡 Next Steps", fmt.Sprintf("• Use `/use %s` to activate\n• Use `/playlist add %s <song>` to add songs", name, name), false).
+		Field("Next Steps", fmt.Sprintf("> • Use `/use %s` to activate\n> • Use `/playlist add %s <song>` to add songs", name, name), false).
 		Build()
 
 	return respondEmbed(s, i, embed)
@@ -238,7 +262,7 @@ func (h *Handler) handlePlaylistDelete(s *discordgo.Session, i *discordgo.Intera
 	}
 
 	embed := NewEmbed().
-		Title("🗑️ Playlist Deleted").
+		Title("Playlist Deleted").
 		Description(fmt.Sprintf("Playlist **%s** has been permanently deleted", name)).
 		Color(ColorWarning).
 		Build()
@@ -257,7 +281,7 @@ func (h *Handler) handlePlaylistShow(s *discordgo.Session, i *discordgo.Interact
 
 	if len(playlist.Entries) == 0 {
 		embed := NewEmbed().
-			Title(fmt.Sprintf("📋 %s", name)).
+			Title(fmt.Sprintf("%s", name)).
 			Description("This playlist is empty").
 			Color(ColorInfo).
 			Footer("Use /playlist add to add songs").
@@ -278,11 +302,11 @@ func (h *Handler) handlePlaylistShow(s *discordgo.Session, i *discordgo.Interact
 		if len(title) > 45 {
 			title = title[:42] + "..."
 		}
-		sb.WriteString(fmt.Sprintf("`%d.` %s\n", idx+1, title))
+		sb.WriteString(fmt.Sprintf("> **%d. %s**\n", idx+1, title))
 	}
 
 	embed := NewEmbed().
-		Title(fmt.Sprintf("📋 %s", name)).
+		Title(fmt.Sprintf("%s", name)).
 		Description(sb.String()).
 		Color(ColorPrimary).
 		Footer(fmt.Sprintf("%d songs • Use /use %s to play", len(playlist.Entries), name)).
@@ -305,17 +329,40 @@ func (h *Handler) handlePlaylistAdd(s *discordgo.Session, i *discordgo.Interacti
 			return err
 		}
 
-		info, err := h.ytService.ExtractInfo(songQuery)
-		if err != nil {
-			return followUpError(s, i, "Failed to extract song info: "+err.Error())
+		// If query is not a YouTube URL, search for it
+		var songURL string
+		var songTitle string
+		if !youtube.IsYouTubeURL(songQuery) {
+			h.logger.WithField("query", songQuery).Info("Searching YouTube for /playlist add...")
+			results, err := h.ytService.Search(songQuery, 1)
+			if err != nil {
+				return followUpError(s, i, "Search failed: "+err.Error())
+			}
+			if len(results) == 0 {
+				return followUpError(s, i, "No results found for: "+songQuery)
+			}
+			songURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", results[0].ID)
+			songTitle = results[0].Title
+			h.logger.WithFields(map[string]interface{}{
+				"title": songTitle,
+				"url":   songURL,
+			}).Info("Found video from search")
+		} else {
+			// Extract info from URL
+			info, err := h.ytService.ExtractInfo(songQuery)
+			if err != nil {
+				return followUpError(s, i, "Failed to extract song info: "+err.Error())
+			}
+			songURL = info.WebpageURL
+			songTitle = info.Title
 		}
 
-		err = h.playlistService.AddToPlaylistForGuild(
+		err := h.playlistService.AddToPlaylistForGuild(
 			guildID,
 			name,
-			info.WebpageURL,
+			songURL,
 			valueobjects.SourceTypeYouTube,
-			info.Title,
+			songTitle,
 		)
 		if err != nil {
 			return followUpError(s, i, err.Error())
@@ -323,7 +370,7 @@ func (h *Handler) handlePlaylistAdd(s *discordgo.Session, i *discordgo.Interacti
 
 		embed := NewEmbed().
 			Title("✅ Song Added").
-			Description(fmt.Sprintf("Added **%s** to playlist **%s**", info.Title, name)).
+			Description(fmt.Sprintf("Added **%s** to playlist **%s**", songTitle, name)).
 			Color(ColorSuccess).
 			Build()
 
@@ -353,7 +400,7 @@ func (h *Handler) handlePlaylistAdd(s *discordgo.Session, i *discordgo.Interacti
 	}
 
 	embed := NewEmbed().
-		Title("✅ Current Song Added").
+		Title("Current Song Added").
 		Description(fmt.Sprintf("Added **%s** to playlist **%s**", current.DisplayName(), name)).
 		Color(ColorSuccess).
 		Build()

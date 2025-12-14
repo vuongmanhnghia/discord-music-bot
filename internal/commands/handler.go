@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/vuongmanhnghia/discord-music-bot/internal/config"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/services"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/services/youtube"
 	"github.com/vuongmanhnghia/discord-music-bot/pkg/logger"
@@ -17,6 +18,7 @@ type Handler struct {
 	playlistService *services.PlaylistService
 	ytService       *youtube.Service
 	logger          *logger.Logger
+	config          *config.Config
 
 	// Track active playlist per guild
 	activePlaylist   map[string]string
@@ -30,6 +32,7 @@ func NewHandler(
 	playlistSvc *services.PlaylistService,
 	ytSvc *youtube.Service,
 	log *logger.Logger,
+	config *config.Config,
 ) *Handler {
 	return &Handler{
 		session:         session,
@@ -37,6 +40,7 @@ func NewHandler(
 		playlistService: playlistSvc,
 		ytService:       ytSvc,
 		logger:          log,
+		config:          config,
 		activePlaylist:  make(map[string]string),
 	}
 }

@@ -4,7 +4,7 @@
 -- Guild settings table: Store guild-specific configurations
 CREATE TABLE guild_settings (
     guild_id VARCHAR(20) PRIMARY KEY REFERENCES guilds(id) ON DELETE CASCADE,
-    default_volume INTEGER DEFAULT 100 CHECK (default_volume >= 0 AND default_volume <= 100),
+    default_volume INTEGER DEFAULT 30 CHECK (default_volume >= 0 AND default_volume <= 100),
     auto_disconnect_minutes INTEGER DEFAULT 5,
     announce_songs BOOLEAN DEFAULT true,
     restrict_to_dj_role BOOLEAN DEFAULT false,
