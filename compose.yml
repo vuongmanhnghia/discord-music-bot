@@ -1,5 +1,5 @@
 services:
-  bot:
+  bot_1:
     build:
       context: .
       dockerfile: Dockerfile
@@ -7,7 +7,7 @@ services:
       #   VERSION: "2.0.0"
       #   BUILD_TIME: "${BUILD_TIME:-unknown}"
     image: nooblearn2code/discord-music-bot:latest
-    container_name: discord-music-bot
+    container_name: dmb-instance-1
     hostname: music-bot
     
     deploy:
@@ -28,6 +28,7 @@ services:
     environment:
       - TZ=Asia/Ho_Chi_Minh
       - LOG_LEVEL=info
+      - BOT_TOKEN=${BOT_TOKEN_1}
     
     # Volume mounts
     volumes:
@@ -49,41 +50,109 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  postgres:
-    image: postgres:16-alpine
-    container_name: discord-music-bot-db
-    hostname: postgres
-    restart: unless-stopped
-    
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-music_bot}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-music_bot_db_pass}
-      POSTGRES_DB: ${POSTGRES_DB:-music_bot}
-      TZ: Asia/Ho_Chi_Minh
-    
-    volumes:
-      - db_data:/var/lib/postgresql/data
-    
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-music_bot} -d ${POSTGRES_DB:-music_bot}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+  bot_2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # args:
+      #   VERSION: "2.0.0"
+      #   BUILD_TIME: "${BUILD_TIME:-unknown}"
+    image: nooblearn2code/discord-music-bot:latest
+    container_name: dmb-instance-2
+    hostname: music-bot
     
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 256M
+          cpus: '2'
+          memory: 512M
         reservations:
-          cpus: '0.1'
+          cpus: '0.25'
           memory: 64M
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Environment configuration
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+      - LOG_LEVEL=info
+      - BOT_TOKEN=${BOT_TOKEN_2}
+    
+    # Volume mounts
+    volumes:
+      - ./playlist:/app/playlist:rw
+      - ./logs:/app/logs:rw
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "pgrep", "music-bot"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  bot_3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # args:
+      #   VERSION: "2.0.0"
+      #   BUILD_TIME: "${BUILD_TIME:-unknown}"
+    image: nooblearn2code/discord-music-bot:latest
+    container_name: dmb-instance-3
+    hostname: music-bot
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 64M
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Environment configuration
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+      - LOG_LEVEL=info
+      - BOT_TOKEN=${BOT_TOKEN_3}
+    
+    # Volume mounts
+    volumes:
+      - ./playlist:/app/playlist:rw
+      - ./logs:/app/logs:rw
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "pgrep", "music-bot"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   default:
     name: app_network
     external: true
-
-volumes:
-  db_data:

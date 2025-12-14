@@ -97,7 +97,7 @@ jobs:
           sleep 5
 
           echo "Runing migrations..."
-          docker exec discord-music-bot make db-up-prod
+          docker exec dmb-instance-1 make db-up-prod
           echo "Migrations successful!"
 
       - name: Clean up old Docker images
