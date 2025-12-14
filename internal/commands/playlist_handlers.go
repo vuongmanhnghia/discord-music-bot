@@ -10,7 +10,8 @@ import (
 
 // handlePlaylists shows all available playlists
 func (h *Handler) handlePlaylists(s *discordgo.Session, i *discordgo.InteractionCreate) error {
-	playlists, err := h.playlistService.ListPlaylists()
+	guildID := i.GuildID
+	playlists, err := h.playlistService.ListPlaylistsForGuild(guildID)
 	if err != nil {
 		return respondError(s, i, "Failed to retrieve playlists")
 	}
@@ -41,10 +42,11 @@ func (h *Handler) handlePlaylists(s *discordgo.Session, i *discordgo.Interaction
 
 // handleUsePlaylist loads and plays a playlist
 func (h *Handler) handleUsePlaylist(s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	guildID := i.GuildID
 	options := i.ApplicationCommandData().Options
 	playlistName := options[0].StringValue()
 
-	playlist, err := h.playlistService.GetPlaylist(playlistName)
+	playlist, err := h.playlistService.GetPlaylistForGuild(guildID, playlistName)
 	if err != nil {
 		return respondError(s, i, fmt.Sprintf("Playlist '%s' not found", playlistName))
 	}
@@ -74,7 +76,7 @@ func (h *Handler) handleUsePlaylist(s *discordgo.Session, i *discordgo.Interacti
 		return followUpError(s, i, "You must be in a voice channel to play music")
 	}
 
-	songs, err := h.playlistService.GetPlaylistSongs(playlistName)
+	songs, err := h.playlistService.GetPlaylistSongsForGuild(guildID, playlistName)
 	if err != nil {
 		return followUpError(s, i, fmt.Sprintf("Failed to load playlist: %v", err))
 	}
@@ -131,7 +133,8 @@ func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionC
 		return followUpError(s, i, "Failed to extract song info: "+err.Error())
 	}
 
-	err = h.playlistService.AddToPlaylist(
+	err = h.playlistService.AddToPlaylistForGuild(
+		i.GuildID,
 		playlistName,
 		info.WebpageURL,
 		valueobjects.SourceTypeYouTube,
@@ -153,11 +156,12 @@ func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionC
 
 // handleRemove removes a song from a playlist
 func (h *Handler) handleRemove(s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	guildID := i.GuildID
 	options := i.ApplicationCommandData().Options
 	playlistName := options[0].StringValue()
 	index := int(options[1].IntValue())
 
-	playlist, err := h.playlistService.GetPlaylist(playlistName)
+	playlist, err := h.playlistService.GetPlaylistForGuild(guildID, playlistName)
 	if err != nil {
 		return respondError(s, i, err.Error())
 	}
@@ -172,7 +176,7 @@ func (h *Handler) handleRemove(s *discordgo.Session, i *discordgo.InteractionCre
 	}
 
 	originalInput := playlist.Entries[index-1].OriginalInput
-	if err := h.playlistService.RemoveFromPlaylist(playlistName, originalInput); err != nil {
+	if err := h.playlistService.RemoveFromPlaylistForGuild(guildID, playlistName, originalInput); err != nil {
 		return respondError(s, i, err.Error())
 	}
 
@@ -208,9 +212,10 @@ func (h *Handler) handlePlaylistSubcommand(s *discordgo.Session, i *discordgo.In
 }
 
 func (h *Handler) handlePlaylistCreate(s *discordgo.Session, i *discordgo.InteractionCreate, subCmd *discordgo.ApplicationCommandInteractionDataOption) error {
+	guildID := i.GuildID
 	name := subCmd.Options[0].StringValue()
 
-	if err := h.playlistService.CreatePlaylist(name); err != nil {
+	if err := h.playlistService.CreatePlaylistForGuild(guildID, name); err != nil {
 		return respondError(s, i, err.Error())
 	}
 
@@ -225,9 +230,10 @@ func (h *Handler) handlePlaylistCreate(s *discordgo.Session, i *discordgo.Intera
 }
 
 func (h *Handler) handlePlaylistDelete(s *discordgo.Session, i *discordgo.InteractionCreate, subCmd *discordgo.ApplicationCommandInteractionDataOption) error {
+	guildID := i.GuildID
 	name := subCmd.Options[0].StringValue()
 
-	if err := h.playlistService.DeletePlaylist(name); err != nil {
+	if err := h.playlistService.DeletePlaylistForGuild(guildID, name); err != nil {
 		return respondError(s, i, err.Error())
 	}
 
@@ -241,9 +247,10 @@ func (h *Handler) handlePlaylistDelete(s *discordgo.Session, i *discordgo.Intera
 }
 
 func (h *Handler) handlePlaylistShow(s *discordgo.Session, i *discordgo.InteractionCreate, subCmd *discordgo.ApplicationCommandInteractionDataOption) error {
+	guildID := i.GuildID
 	name := subCmd.Options[0].StringValue()
 
-	playlist, err := h.playlistService.GetPlaylist(name)
+	playlist, err := h.playlistService.GetPlaylistForGuild(guildID, name)
 	if err != nil {
 		return respondError(s, i, err.Error())
 	}
@@ -285,6 +292,7 @@ func (h *Handler) handlePlaylistShow(s *discordgo.Session, i *discordgo.Interact
 }
 
 func (h *Handler) handlePlaylistAdd(s *discordgo.Session, i *discordgo.InteractionCreate, subCmd *discordgo.ApplicationCommandInteractionDataOption) error {
+	guildID := i.GuildID
 	name := subCmd.Options[0].StringValue()
 
 	var songQuery string
@@ -302,7 +310,8 @@ func (h *Handler) handlePlaylistAdd(s *discordgo.Session, i *discordgo.Interacti
 			return followUpError(s, i, "Failed to extract song info: "+err.Error())
 		}
 
-		err = h.playlistService.AddToPlaylist(
+		err = h.playlistService.AddToPlaylistForGuild(
+			guildID,
 			name,
 			info.WebpageURL,
 			valueobjects.SourceTypeYouTube,
@@ -322,7 +331,7 @@ func (h *Handler) handlePlaylistAdd(s *discordgo.Session, i *discordgo.Interacti
 	}
 
 	// Add current playing song
-	tracklist := h.playbackService.GetTracklist(i.GuildID)
+	tracklist := h.playbackService.GetTracklist(guildID)
 	if tracklist == nil {
 		return respondError(s, i, "Nothing is playing. Provide a song URL or search query")
 	}
@@ -332,7 +341,8 @@ func (h *Handler) handlePlaylistAdd(s *discordgo.Session, i *discordgo.Interacti
 		return respondError(s, i, "No song is currently playing. Provide a song URL")
 	}
 
-	err := h.playlistService.AddToPlaylist(
+	err := h.playlistService.AddToPlaylistForGuild(
+		guildID,
 		name,
 		current.OriginalInput,
 		current.SourceType,

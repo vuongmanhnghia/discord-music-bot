@@ -122,6 +122,13 @@ func (p *AudioPlayer) playbackLoop(song *entities.Song, sourceURL string) {
 	// Using sourceURL (original YouTube URL) to bypass 403 errors
 	options := DefaultEncodeOptions()
 
+	// Apply current volume setting
+	p.mu.RLock()
+	options.Volume = p.volume
+	p.mu.RUnlock()
+
+	p.logger.WithField("volume", options.Volume).Debug("Starting playback with volume")
+
 	frameChannel, errorChannel, err := p.encoder.EncodeStream(sourceURL, options)
 	if err != nil {
 		p.logger.WithError(err).Error("Failed to start encoding")

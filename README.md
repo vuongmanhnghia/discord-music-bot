@@ -1,12 +1,13 @@
 # 🎵 Discord Music Bot
 
-A high-performance Discord music bot built with Go, featuring YouTube playback, playlist management, and seamless audio streaming.
+A high-performance Discord music bot built with Go, featuring YouTube playback, playlist management, PostgreSQL storage, and seamless audio streaming.
 
 ## ✨ Features
 
 -   🎵 **YouTube Playback** - Play songs from YouTube URLs or search queries
 -   📻 **Playlist Import** - Import entire YouTube playlists
 -   💾 **Custom Playlists** - Create, manage, and save your own playlists
+-   🗄️ **PostgreSQL Storage** - Persistent playlist storage with database
 -   🔀 **Queue Management** - Shuffle, repeat, skip, and clear functionality
 -   🔊 **Volume Control** - Adjust playback volume (0-100%)
 -   ⚡ **High Performance** - Built with Go for minimal resource usage
@@ -21,6 +22,7 @@ A high-performance Discord music bot built with Go, featuring YouTube playback, 
 -   FFmpeg
 -   yt-dlp
 -   Discord Bot Token
+-   PostgreSQL (optional, falls back to file-based storage)
 
 ### Environment Setup
 
@@ -31,9 +33,15 @@ A high-performance Discord music bot built with Go, featuring YouTube playback, 
     ```
 
 2. Edit `.env` and add your Discord bot token:
+
     ```env
     BOT_TOKEN=your_bot_token_here
     LOG_LEVEL=info
+
+    # Optional: PostgreSQL for playlist storage
+    POSTGRES_USER=musicbot
+    POSTGRES_PASSWORD=musicbot
+    POSTGRES_DB=musicbot
     ```
 
 ### Running Locally
@@ -42,14 +50,17 @@ A high-performance Discord music bot built with Go, featuring YouTube playback, 
 # Build
 go build -o music-bot ./cmd/bot
 
-# Run
+# Run (file-based storage)
 ./music-bot
+
+# Run with PostgreSQL
+DATABASE_URL="postgres://user:pass@localhost:5432/musicbot?sslmode=disable" ./music-bot
 ```
 
 ### Running with Docker
 
 ```bash
-# Build and run
+# Build and run (with PostgreSQL)
 docker compose up -d
 
 # View logs
@@ -111,10 +122,13 @@ docker compose down
 ```
 discord-music-bot/
 ├── cmd/
-│   └── bot/           # Main entry point
+│   └── bot/              # Main entry point
+├── db/
+│   ├── migrations/       # Goose SQL migrations
+│   └── queries/          # sqlc query definitions
 ├── internal/
-│   ├── bot/           # Bot setup and lifecycle
-│   ├── commands/      # Slash command handlers
+│   ├── bot/              # Bot setup and lifecycle
+│   ├── commands/         # Slash command handlers
 │   │   ├── commands.go           # Command definitions
 │   │   ├── handler.go            # Main router
 │   │   ├── playback_handlers.go  # Play, pause, skip, etc.
@@ -122,17 +136,51 @@ discord-music-bot/
 │   │   ├── playlist_handlers.go  # Playlist operations
 │   │   ├── utility_handlers.go   # Join, leave, stats, etc.
 │   │   └── response.go           # Embed builder helpers
-│   ├── config/        # Configuration
-│   ├── domain/        # Domain entities
-│   ├── services/      # Business logic
-│   │   ├── audio/     # Audio player & encoding
-│   │   └── youtube/   # YouTube integration
-│   └── utils/         # Utilities
+│   ├── config/           # Configuration
+│   ├── database/         # Database layer (sqlc generated)
+│   │   ├── migrations/   # Embedded migrations
+│   │   ├── connection.go # Connection pool & migrations
+│   │   └── *.sql.go      # Generated query code
+│   ├── domain/           # Domain entities & repositories
+│   │   ├── entities/     # Song, Playlist entities
+│   │   └── repositories/ # Storage interfaces
+│   ├── services/         # Business logic
+│   │   ├── audio/        # Audio player & encoding
+│   │   └── youtube/      # YouTube integration
+│   └── utils/            # Utilities
 ├── pkg/
-│   └── logger/        # Logging package
-├── playlist/          # Saved playlists (JSON)
+│   └── logger/           # Logging package
+├── playlist/             # Saved playlists (file fallback)
+├── sqlc.yaml             # sqlc configuration
 ├── Dockerfile
 └── docker-compose.yml
+```
+
+## 🗄️ Database
+
+The bot uses PostgreSQL for persistent playlist storage with automatic migrations.
+
+### Schema
+
+| Table              | Description                         |
+| ------------------ | ----------------------------------- |
+| `guilds`           | Discord guild information           |
+| `playlists`        | Playlist metadata per guild         |
+| `playlist_entries` | Individual songs in playlists       |
+| `guild_settings`   | Per-guild bot settings              |
+| `active_playlists` | Currently active playlist per guild |
+| `play_history`     | Song play history for statistics    |
+
+### Migrations
+
+Migrations are embedded in the binary and run automatically on startup using [goose](https://github.com/pressly/goose).
+
+### sqlc
+
+Type-safe database queries are generated using [sqlc](https://sqlc.dev/). To regenerate after modifying queries:
+
+```bash
+sqlc generate
 ```
 
 ## 🐳 Docker Deployment
@@ -171,11 +219,19 @@ docker compose down
 
 ## ⚙️ Configuration
 
-| Environment Variable | Description                              | Default            |
-| -------------------- | ---------------------------------------- | ------------------ |
-| `BOT_TOKEN`          | Discord bot token                        | Required           |
-| `LOG_LEVEL`          | Logging level (debug, info, warn, error) | `info`             |
-| `TZ`                 | Timezone                                 | `Asia/Ho_Chi_Minh` |
+| Environment Variable  | Description                              | Default                  |
+| --------------------- | ---------------------------------------- | ------------------------ |
+| `BOT_TOKEN`           | Discord bot token                        | Required                 |
+| `DATABASE_URL`        | PostgreSQL connection URL                | Optional (file fallback) |
+| `POSTGRES_USER`       | PostgreSQL username (Docker)             | `musicbot`               |
+| `POSTGRES_PASSWORD`   | PostgreSQL password (Docker)             | `musicbot`               |
+| `POSTGRES_DB`         | PostgreSQL database (Docker)             | `musicbot`               |
+| `PLAYLIST_DIR`        | Playlist directory (file storage)        | `./playlist`             |
+| `LOG_LEVEL`           | Logging level (debug, info, warn, error) | `info`                   |
+| `WORKER_COUNT`        | Processing worker threads                | `3`                      |
+| `MAX_QUEUE_SIZE`      | Maximum queue size                       | `100`                    |
+| `STAY_CONNECTED_24_7` | Stay in voice channel                    | `true`                   |
+| `TZ`                  | Timezone                                 | `Asia/Ho_Chi_Minh`       |
 
 ## 📊 Resource Usage
 
@@ -196,11 +252,23 @@ The Go implementation is significantly more efficient than the Python version:
 -   Go 1.23+
 -   FFmpeg
 -   yt-dlp
+-   sqlc (for code generation)
+-   PostgreSQL (optional)
 
 ### Build
 
 ```bash
 go build -o music-bot ./cmd/bot
+```
+
+### Database Development
+
+```bash
+# Generate sqlc code after modifying queries
+sqlc generate
+
+# Run migrations manually (optional, runs automatically)
+# Migrations are embedded and run on startup
 ```
 
 ### Run Tests

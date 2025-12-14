@@ -115,6 +115,11 @@ func (e *AudioEncoder) encodeWithYtDlpPipe(streamURL string, options *EncodeOpti
 	// Start FFmpeg process to encode to OGG/Opus
 	// FFmpeg reads from stdin (pipe from yt-dlp) and outputs to stdout
 	// Using similar args to TwiN/discord-music-bot
+
+	// Build audio filter for volume control
+	volumeScale := float64(options.Volume) / 100.0
+	audioFilter := fmt.Sprintf("volume=%.2f", volumeScale)
+
 	ffmpegArgs := []string{
 		"-i", "pipe:0", // Read from stdin
 		"-reconnect", "1",
@@ -122,6 +127,7 @@ func (e *AudioEncoder) encodeWithYtDlpPipe(streamURL string, options *EncodeOpti
 		"-reconnect_streamed", "1",
 		"-reconnect_delay_max", "2",
 		"-map", "0:a",
+		"-af", audioFilter, // Apply volume filter
 		"-acodec", "libopus",
 		"-f", "ogg",
 		"-compression_level", "5",

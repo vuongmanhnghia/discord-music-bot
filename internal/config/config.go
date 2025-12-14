@@ -15,10 +15,13 @@ type Config struct {
 	BotToken         string
 	BotName          string
 	Version          string
-	CommandPrefix    string
 	StayConnected247 bool
 
-	// Directories
+	// Database
+	DatabaseURL string
+	UseDatabase bool
+
+	// Directories (fallback for file-based storage)
 	PlaylistDir string
 	CacheDir    string
 
@@ -48,13 +51,32 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid BOT_TOKEN format (too short)")
 	}
 
+	// Database configuration
+	databaseUser := os.Getenv("POSTGRES_USER")
+	databasePassword := os.Getenv("POSTGRES_PASSWORD")
+	databaseName := os.Getenv("POSTGRES_DB")
+	databaseHost := os.Getenv("POSTGRES_HOST")
+	databasePort := os.Getenv("POSTGRES_PORT")
+
+	var databaseURL string
+	useDatabase := os.Getenv("USE_DATABASE")
+	if useDatabase == "true" || useDatabase == "1" || useDatabase == "yes" {
+		databaseURL = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+			databaseUser, databasePassword, databaseHost, databasePort, databaseName)
+	}
+
+	fmt.Printf("useDatabase: %v", useDatabase)
+
 	cfg := &Config{
 		// Bot Settings
 		BotToken:         botToken,
 		BotName:          getEnvOrDefault("BOT_NAME", "Discord Music Bot"),
 		Version:          getEnvOrDefault("VERSION", "2.0.0"),
-		CommandPrefix:    getEnvOrDefault("COMMAND_PREFIX", "!"),
 		StayConnected247: getEnvBool("STAY_CONNECTED_24_7", true),
+
+		// Database
+		DatabaseURL: databaseURL,
+		UseDatabase: useDatabase == "true" || useDatabase == "1" || useDatabase == "yes",
 
 		// Directories
 		PlaylistDir: getEnvOrDefault("PLAYLIST_DIR", "./playlist"),
@@ -71,9 +93,11 @@ func Load() (*Config, error) {
 		CacheDurationMinutes: getEnvInt("CACHE_DURATION_MINUTES", 360),
 	}
 
-	// Create directories if they don't exist
-	if err := os.MkdirAll(cfg.PlaylistDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create playlist directory: %w", err)
+	// Create directories if needed (for file-based fallback)
+	if !(useDatabase == "true" || useDatabase == "1" || useDatabase == "yes") {
+		if err := os.MkdirAll(cfg.PlaylistDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create playlist directory: %w", err)
+		}
 	}
 
 	if err := os.MkdirAll(filepath.Join(cfg.CacheDir, "songs"), 0755); err != nil {
