@@ -10,9 +10,6 @@ services:
     container_name: discord-music-bot
     hostname: music-bot
     
-    # Network configuration
-    network_mode: bridge
-    
     deploy:
       resources:
         limits:
@@ -85,8 +82,8 @@ services:
 
 networks:
   default:
-    name: music-bot-network
-    driver: bridge
+    name: app_network
+    external: true
 
 volumes:
   db_data:

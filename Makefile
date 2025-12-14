@@ -20,6 +20,10 @@ POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 DATABASE_URL=postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
 
+# Database production
+POSTGRES_HOST_PROD=postgres
+DATABASE_URL_PROD=postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST_PROD):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
+
 # Default target
 .DEFAULT_GOAL := help
 
@@ -157,6 +161,40 @@ db-reset: ## Reset database (DOWN then UP)
 	@echo "🔄 Resetting database..."
 	@goose -dir db/migrations postgres "$(DATABASE_URL)" reset
 	@goose -dir db/migrations postgres "$(DATABASE_URL)" up
+
+# Database production
+db-up-prod: ## Run pending migrations on production database
+	@if [ -z "$(DATABASE_URL_PROD)" ]; then \
+		echo "❌ Error: DATABASE_URL_PROD environment variable is required"; \
+		exit 1; \
+	fi
+	@echo "⬆️  Running migrations on production database..."
+	@goose -dir db/migrations postgres "$(DATABASE_URL_PROD)" up
+
+db-status-prod: ## Show migration status on production database
+	@if [ -z "$(DATABASE_URL_PROD)" ]; then \
+		echo "❌ Error: DATABASE_URL_PROD environment variable is required"; \
+		exit 1; \
+	fi
+	@echo "📊 Migration status on production database:"
+	@goose -dir db/migrations postgres "$(DATABASE_URL_PROD)" status
+
+db-down-prod: ## Rollback last migration on production database
+	@if [ -z "$(DATABASE_URL_PROD)" ]; then \
+		echo "❌ Error: DATABASE_URL_PROD environment variable is required"; \
+		exit 1; \
+	fi
+	@echo "⬇️  Rolling back migration on production database..."
+	@goose -dir db/migrations postgres "$(DATABASE_URL_PROD)" down
+
+db-reset-prod: ## Reset production database (DOWN then UP)
+	@if [ -z "$(DATABASE_URL_PROD)" ]; then \
+		echo "❌ Error: DATABASE_URL_PROD environment variable is required"; \
+		exit 1; \
+	fi
+	@echo "🔄 Resetting production database..."
+	@goose -dir db/migrations postgres "$(DATABASE_URL_PROD)" reset
+	@goose -dir db/migrations postgres "$(DATABASE_URL_PROD)" up
 
 # =============================================================================
 # Docker
