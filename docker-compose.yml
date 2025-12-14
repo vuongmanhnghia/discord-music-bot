@@ -1,20 +1,64 @@
+# =============================================================================
+# Discord Music Bot - Docker Compose Configuration
+# =============================================================================
+# Usage:
+#   Build:  docker compose build
+#   Start:  docker compose up -d
+#   Logs:   docker compose logs -f
+#   Stop:   docker compose down
+# =============================================================================
+
 services:
   discord-music-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: "2.0.0"
+        BUILD_TIME: "${BUILD_TIME:-unknown}"
     image: nooblearn2code/discord-music-bot:latest
     container_name: discord-music-bot
+    hostname: music-bot
+    
+    # Network configuration
     network_mode: bridge
+    
+    # Resource limits (Go is much more efficient than Python)
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 1G
-        reservations:
-          cpus: '0.5'
+          cpus: '2'
           memory: 512M
-    restart: on-failure
+        reservations:
+          cpus: '0.25'
+          memory: 64M
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Environment configuration
     env_file:
       - .env
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+      - LOG_LEVEL=info
     
+    # Volume mounts
     volumes:
       - ./playlist:/app/playlist:rw
       - ./logs:/app/logs:rw
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "pgrep", "music-bot"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

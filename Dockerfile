@@ -1,53 +1,86 @@
-# Stage 1: Builder
-FROM python:3.12-slim AS builder
+# =============================================================================
+# Discord Music Bot - Multi-stage Dockerfile
+# =============================================================================
+# Build: docker build -t discord-music-bot .
+# Run:   docker run -d --env-file .env -v $(pwd)/playlist:/app/playlist discord-music-bot
+# =============================================================================
 
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
-ARG TARGETARCH
+# -----------------------------------------------------------------------------
+# Stage 1: Build
+# -----------------------------------------------------------------------------
+FROM golang:1.23-alpine AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ make pkg-config \
-    libopus-dev libsodium-dev libffi-dev \
-    $(if [ "$TARGETARCH" = "arm64" ]; then echo "libc6-dev-arm64-cross"; fi) \
-    curl ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+# Build arguments
+ARG VERSION=2.0.0
+ARG BUILD_TIME
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /build
-COPY requirements.txt .
 
-RUN mkdir -p /build/wheels && \
-    pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip wheel --no-cache-dir --wheel-dir=/build/wheels -r requirements.txt
+# Copy go modules first for better caching
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
 
+# Copy source code
+COPY . .
+
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-w -s -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
+    -o music-bot \
+    ./cmd/bot
+
+# -----------------------------------------------------------------------------
 # Stage 2: Runtime
-FROM python:3.12-slim AS runtime
+# -----------------------------------------------------------------------------
+FROM alpine:3.20 AS runtime
 
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
-ARG TARGETARCH
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    ffmpeg \
+    python3 \
+    py3-pip \
+    && pip3 install --break-system-packages --no-cache-dir yt-dlp \
+    && rm -rf /root/.cache
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libopus0 libsodium23 libffi8 ffmpeg ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+# Create non-root user for security
+RUN addgroup -g 1000 bot && \
+    adduser -u 1000 -G bot -h /app -D bot
 
 WORKDIR /app
 
-COPY --from=builder /build/wheels /tmp/wheels
-COPY requirements.txt .
+# Copy binary from builder
+COPY --from=builder /build/music-bot .
 
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --find-links=/tmp/wheels --no-index -r requirements.txt && \
-    rm -rf /tmp/wheels /root/.cache
+# Create directories
+RUN mkdir -p playlist logs && \
+    chown -R bot:bot /app
 
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONOPTIMIZE=1
+# Copy config files if any
+COPY --chown=bot:bot playlist/ ./playlist/
 
-RUN mkdir -p playlist logs
+# Switch to non-root user
+USER bot
 
-COPY . .
+# Environment variables
+ENV TZ=Asia/Ho_Chi_Minh
+ENV LOG_LEVEL=info
 
-HEALTHCHECK --interval=60s --timeout=15s --start-period=45s --retries=3 \
-    CMD python -c "import discord" || exit 1
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD pgrep music-bot || exit 1
 
-CMD ["python", "-u", "run_bot.py"]
+# Expose no ports (Discord bot uses outbound connections only)
+
+# Labels
+LABEL org.opencontainers.image.title="Discord Music Bot"
+LABEL org.opencontainers.image.description="High-performance Discord music bot built with Go"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.source="https://github.com/vuongmanhnghia/discord-music-bot"
+
+# Run the bot
+ENTRYPOINT ["./music-bot"]

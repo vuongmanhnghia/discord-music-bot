@@ -95,18 +95,29 @@ func (s *Service) ExtractInfo(url string) (*YouTubeInfo, error) {
 		"--format", "bestaudio/best",
 		"--no-check-certificate",
 		"--geo-bypass",
+		"--no-warnings", // Suppress warnings that break JSON parsing
 		url,
 	}
 
 	cmd := exec.Command(s.ytDlpPath, args...)
-	output, err := cmd.CombinedOutput()
+
+	// Use Output() instead of CombinedOutput() to separate stdout from stderr
+	output, err := cmd.Output()
 	if err != nil {
-		s.logger.WithError(err).WithField("output", string(output)).Error("yt-dlp extraction failed")
+		s.logger.WithError(err).Error("yt-dlp extraction failed")
 		return nil, fmt.Errorf("%w: %v", ErrExtractionFailed, err)
 	}
 
+	// Find JSON start (skip any non-JSON output)
+	jsonStart := strings.Index(string(output), "{")
+	if jsonStart == -1 {
+		s.logger.Error("No JSON found in yt-dlp output")
+		return nil, fmt.Errorf("%w: no JSON in output", ErrExtractionFailed)
+	}
+	jsonOutput := output[jsonStart:]
+
 	var info YouTubeInfo
-	if err := json.Unmarshal(output, &info); err != nil {
+	if err := json.Unmarshal(jsonOutput, &info); err != nil {
 		s.logger.WithError(err).Error("Failed to parse yt-dlp output")
 		return nil, fmt.Errorf("failed to parse video info: %w", err)
 	}
@@ -132,11 +143,12 @@ func (s *Service) ExtractPlaylist(url string) ([]YouTubeInfo, error) {
 		"--flat-playlist", // Fast extraction
 		"--no-check-certificate",
 		"--geo-bypass",
+		"--no-warnings", // Suppress warnings that break JSON parsing
 		url,
 	}
 
 	cmd := exec.Command(s.ytDlpPath, args...)
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output() // Use Output() instead of CombinedOutput()
 	if err != nil {
 		s.logger.WithError(err).Error("Playlist extraction failed")
 		return nil, fmt.Errorf("%w: %v", ErrExtractionFailed, err)
@@ -146,8 +158,9 @@ func (s *Service) ExtractPlaylist(url string) ([]YouTubeInfo, error) {
 	var videos []YouTubeInfo
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "{") {
+			continue // Skip non-JSON lines
 		}
 
 		var info YouTubeInfo
@@ -180,11 +193,12 @@ func (s *Service) Search(query string, maxResults int) ([]YouTubeInfo, error) {
 		"--dump-json",
 		"--no-check-certificate",
 		"--geo-bypass",
+		"--no-warnings", // Suppress warnings
 		searchURL,
 	}
 
 	cmd := exec.Command(s.ytDlpPath, args...)
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output() // Use Output() instead of CombinedOutput()
 	if err != nil {
 		s.logger.WithError(err).Error("Search failed")
 		return nil, fmt.Errorf("search failed: %w", err)
@@ -194,8 +208,9 @@ func (s *Service) Search(query string, maxResults int) ([]YouTubeInfo, error) {
 	var videos []YouTubeInfo
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "{") {
+			continue // Skip non-JSON lines
 		}
 
 		var info YouTubeInfo
@@ -226,11 +241,12 @@ func (s *Service) GetStreamURL(videoID string) (string, error) {
 		"--format", "bestaudio/best",
 		"--no-check-certificate",
 		"--geo-bypass",
+		"--no-warnings", // Suppress warnings
 		videoURL,
 	}
 
 	cmd := exec.Command(s.ytDlpPath, args...)
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output() // Use Output() instead of CombinedOutput()
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to get stream URL")
 		return "", fmt.Errorf("failed to get stream URL: %w", err)

@@ -1,72 +1,64 @@
+# =============================================================================
+# Docker Ignore File
+# =============================================================================
+
 # Git
 .git
 .gitignore
 
-# Python
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.Python
-env
-pip-log.txt
-pip-delete-this-directory.txt
-.tox
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
-.git
-.mypy_cache
-.pytest_cache
-.hypothesis
-
-# Virtual environments
-venv/
-env/
-ENV/
-env.bak/
-venv.bak/
-
 # IDE
-.vscode/
 .idea/
+.vscode/
 *.swp
 *.swo
 *~
 
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
 
-# Project specific
+# Build artifacts
+music-bot
+/bin/
+/dist/
+
+# Logs
 logs/
 *.log
+
+# Environment
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Documentation
-README.md
 *.md
+!README.md
 
-# Development files
-test_*.py
-*_test.py
-tests/
+# CI/CD
+.github/
+.gitlab-ci.yml
 
 # Nix
 flake.lock
-flake.nix
+result
 
-scripts/
-tests/
-playlist/
+# Misc
+.DS_Store
+Thumbs.db
+
+# Old Python files (if any remain)
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.Python
+venv/
+.venv/
