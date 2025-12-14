@@ -62,7 +62,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: deployment-files # Đặt tên cho artifact
-          path: docker-compose.yml # Chỉ định file cần upload
+          path: compose.yml # Chỉ định file cần upload
 
   deploy:
     name: Deploy Application
@@ -78,18 +78,27 @@ jobs:
 
       - name: Deploy to Server
         run: |
-          sudo cp docker-compose.yml /home/github-runner/wsp/dmb/docker-compose.yml
+          sudo cp compose.yml /home/github-runner/wsp/dmb/compose.yml
           cd /home/github-runner/wsp/dmb
 
           echo "Pulling the latest image..."
           docker compose pull
 
           echo "Restarting services..."
-          docker compose up -d
+          docker compose up -d --remove-orphans
 
           sudo chown github-runner. logs
           sudo chown github-runner. playlist
           echo "Deployment successful!"
+
+      - name: Database Migrations
+        run: |
+          echo "Waiting for server container to be ready..."
+          sleep 5
+
+          echo "Runing migrations..."
+          docker exec discord-music-bot make db-up-prod
+          echo "Migrations successful!"
 
       - name: Clean up old Docker images
         run: |

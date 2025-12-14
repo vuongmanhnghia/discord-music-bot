@@ -20,7 +20,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     ./cmd/bot
 
 
-FROM alpine:3.20 AS runtime
+FROM alpine:latest AS runtime
+
+RUN apk add --no-cache make
 
 # Install runtime dependencies
 RUN apk add --no-cache \
@@ -40,6 +42,7 @@ WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /build/music-bot .
+COPY --from=builder /go/bin/goose /usr/local/bin/
 
 # Create directories
 RUN mkdir -p playlist logs
