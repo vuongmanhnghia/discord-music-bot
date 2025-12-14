@@ -1,53 +1,74 @@
-# Stage 1: Builder
-FROM python:3.12-slim AS builder
+FROM golang:1.24-alpine AS builder
 
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
-ARG TARGETARCH
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ make pkg-config \
-    libopus-dev libsodium-dev libffi-dev \
-    $(if [ "$TARGETARCH" = "arm64" ]; then echo "libc6-dev-arm64-cross"; fi) \
-    curl ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /build
-COPY requirements.txt .
 
-RUN mkdir -p /build/wheels && \
-    pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip wheel --no-cache-dir --wheel-dir=/build/wheels -r requirements.txt
+# Copy go modules first for better caching
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
 
-# Stage 2: Runtime
-FROM python:3.12-slim AS runtime
+RUN go install github.com/pressly/goose/v3/cmd/goose@latest
 
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
-ARG TARGETARCH
+# Copy source code
+COPY . .
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libopus0 libsodium23 libffi8 ffmpeg ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -o music-bot \
+    ./cmd/bot
+
+
+FROM alpine:3.20 AS runtime
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    ffmpeg \
+    python3 \
+    py3-pip \
+    && pip3 install --break-system-packages --no-cache-dir yt-dlp \
+    && rm -rf /root/.cache
+
+# # Create non-root user for security
+# RUN addgroup -g 1000 bot && \
+#     adduser -u 1000 -G bot -h /app -D bot
 
 WORKDIR /app
 
-COPY --from=builder /build/wheels /tmp/wheels
-COPY requirements.txt .
+# Copy binary from builder
+COPY --from=builder /build/music-bot .
 
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --find-links=/tmp/wheels --no-index -r requirements.txt && \
-    rm -rf /tmp/wheels /root/.cache
-
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONOPTIMIZE=1
-
+# Create directories
 RUN mkdir -p playlist logs
+    # chown -R bot:bot /app
 
-COPY . .
+# Copy config files if any
+# COPY --chown=bot:bot playlist/ ./playlist/
 
-HEALTHCHECK --interval=60s --timeout=15s --start-period=45s --retries=3 \
-    CMD python -c "import discord" || exit 1
+COPY Makefile .
+COPY db/migrations ./db/migrations
 
-CMD ["python", "-u", "run_bot.py"]
+# Switch to non-root user
+# USER bot
+
+# Environment variables
+ENV TZ=Asia/Ho_Chi_Minh
+ENV LOG_LEVEL=info
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD pgrep music-bot || exit 1
+
+# Expose no ports (Discord bot uses outbound connections only)
+
+# Labels
+# LABEL org.opencontainers.image.title="Discord Music Bot"
+# LABEL org.opencontainers.image.description="High-performance Discord music bot built with Go"
+# LABEL org.opencontainers.image.version="${VERSION}"
+# LABEL org.opencontainers.image.source="https://github.com/vuongmanhnghia/discord-music-bot"
+
+# Run the bot
+ENTRYPOINT ["./music-bot"]

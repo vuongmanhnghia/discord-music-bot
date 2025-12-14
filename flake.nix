@@ -20,32 +20,34 @@
             pyPkgs.pip
             pyPkgs.setuptools
             pyPkgs.wheel
+            pkgs.go
+            pkgs.yt-dlp
             pkgs.pkg-config
             pkgs.libsodium
             pkgs.libopus
+            pkgs.opusfile
             pkgs.ffmpeg
           ];
 
           VENV_DIR = "./venv";
+          
+          # Enable CGO for gopus
+          CGO_ENABLED = "1";
+          
+          # Set pkg-config paths for libopus, opusfile, and libsodium
+          PKG_CONFIG_PATH = "${pkgs.libopus.dev}/lib/pkgconfig:${pkgs.opusfile.dev}/lib/pkgconfig:${pkgs.libsodium.dev}/lib/pkgconfig";
 
           shellHook = ''
-            export PIP_DISABLE_PIP_VERSION_CHECK=1
-            export PIP_NO_INPUT=1
-
-            if [ ! -d "$VENV_DIR" ]; then
-              echo "Creating virtualenv in $VENV_DIR..."
-              ${python.interpreter} -m venv "$VENV_DIR"
-            fi
-
-            . "$VENV_DIR/bin/activate"
-
-            python -m pip install -U pip setuptools wheel
-
-            if [ -f requirements.txt ]; then
-              python -m pip install -r requirements.txt
-            fi
-
-            echo "Virtualenv activated. python=$(which python)"
+            echo "🎵 Discord Music Bot (Go) Dev Environment"
+            echo "========================================"
+            echo "✅ Go: $(go version | cut -d' ' -f3)"
+            echo "✅ FFmpeg: $(ffmpeg -version 2>&1 | head -1 | cut -d' ' -f3)"
+            echo "✅ yt-dlp: $(yt-dlp --version)"
+            echo "✅ libsodium + libopus: Available"
+            echo "✅ CGO_ENABLED: $CGO_ENABLED"
+            echo ""
+            echo "Run bot: go run cmd/bot/main.go"
+            echo "Build:   go build -o bin/musicbot cmd/bot/main.go"
           '';
         };
       });
