@@ -6,7 +6,6 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/domain/valueobjects"
-	"github.com/vuongmanhnghia/discord-music-bot/internal/services/youtube"
 )
 
 // handlePlaylists shows all available playlists
@@ -139,7 +138,7 @@ func (h *Handler) handleUsePlaylist(s *discordgo.Session, i *discordgo.Interacti
 	return followUpEmbed(s, i, embed)
 }
 
-// handleQuickAdd adds a song to the active playlist
+// handleQuickAdd adds a song or playlist to the active playlist
 func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	h.activePlaylistMu.RLock()
 	playlistName, hasActive := h.activePlaylist[i.GuildID]
@@ -156,51 +155,51 @@ func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionC
 	options := i.ApplicationCommandData().Options
 	songQuery := options[0].StringValue()
 
-	// If query is not a YouTube URL, search for it
-	var songURL string
-	var songTitle string
-	if !youtube.IsYouTubeURL(songQuery) {
-		h.logger.WithField("query", songQuery).Info("Searching YouTube for /add...")
-		results, err := h.ytService.Search(songQuery, 1)
-		if err != nil {
-			return followUpError(s, i, "Search failed: "+err.Error())
-		}
-		if len(results) == 0 {
-			return followUpError(s, i, "No results found for: "+songQuery)
-		}
-		songURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", results[0].ID)
-		songTitle = results[0].Title
-		h.logger.WithFields(map[string]interface{}{
-			"title": songTitle,
-			"url":   songURL,
-		}).Info("Found video from search")
-	} else {
-		// Extract info from URL
-		info, err := h.ytService.ExtractInfo(songQuery)
-		if err != nil {
-			return followUpError(s, i, "Failed to extract song info: "+err.Error())
-		}
-		songURL = info.WebpageURL
-		songTitle = info.Title
-	}
-
-	err := h.playlistService.AddToPlaylistForGuild(
-		i.GuildID,
-		playlistName,
-		songURL,
-		valueobjects.SourceTypeYouTube,
-		songTitle,
-	)
+	// Resolve query to song URLs (handles single video, playlist, or search)
+	songs, isPlaylist, err := h.ResolveSongURLs(songQuery)
 	if err != nil {
 		return followUpError(s, i, err.Error())
 	}
 
-	embed := NewEmbed().
-		Title("✅ Song Added to Playlist").
-		Description(fmt.Sprintf("**%s**", songTitle)).
-		Color(ColorSuccess).
-		Field("Playlist", playlistName, true).
-		Build()
+	// Add all songs to playlist
+	addedCount := 0
+	for _, songInfo := range songs {
+		err := h.playlistService.AddToPlaylistForGuild(
+			i.GuildID,
+			playlistName,
+			songInfo.URL,
+			valueobjects.SourceTypeYouTube,
+			songInfo.Title,
+		)
+		if err != nil {
+			h.logger.WithError(err).Warn("Failed to add song to playlist")
+			continue
+		}
+		addedCount++
+	}
+
+	if addedCount == 0 {
+		return followUpError(s, i, "Failed to add any songs to playlist")
+	}
+
+	// Build appropriate response
+	var embed *discordgo.MessageEmbed
+	if isPlaylist {
+		embed = NewEmbed().
+			Title("✅ Playlist Added to Playlist").
+			Description(fmt.Sprintf("Added **%d** songs to **%s**", addedCount, playlistName)).
+			Color(ColorSuccess).
+			Field("Songs Added", fmt.Sprintf("%d", addedCount), true).
+			Field("Playlist", playlistName, true).
+			Build()
+	} else {
+		embed = NewEmbed().
+			Title("✅ Song Added to Playlist").
+			Description(fmt.Sprintf("**%s**", songs[0].Title)).
+			Color(ColorSuccess).
+			Field("Playlist", playlistName, true).
+			Build()
+	}
 
 	return followUpEmbed(s, i, embed)
 }
@@ -342,50 +341,49 @@ func (h *Handler) handlePlaylistAdd(s *discordgo.Session, i *discordgo.Interacti
 			return err
 		}
 
-		// If query is not a YouTube URL, search for it
-		var songURL string
-		var songTitle string
-		if !youtube.IsYouTubeURL(songQuery) {
-			h.logger.WithField("query", songQuery).Info("Searching YouTube for /playlist add...")
-			results, err := h.ytService.Search(songQuery, 1)
-			if err != nil {
-				return followUpError(s, i, "Search failed: "+err.Error())
-			}
-			if len(results) == 0 {
-				return followUpError(s, i, "No results found for: "+songQuery)
-			}
-			songURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", results[0].ID)
-			songTitle = results[0].Title
-			h.logger.WithFields(map[string]interface{}{
-				"title": songTitle,
-				"url":   songURL,
-			}).Info("Found video from search")
-		} else {
-			// Extract info from URL
-			info, err := h.ytService.ExtractInfo(songQuery)
-			if err != nil {
-				return followUpError(s, i, "Failed to extract song info: "+err.Error())
-			}
-			songURL = info.WebpageURL
-			songTitle = info.Title
-		}
-
-		err := h.playlistService.AddToPlaylistForGuild(
-			guildID,
-			name,
-			songURL,
-			valueobjects.SourceTypeYouTube,
-			songTitle,
-		)
+		// Resolve query to song URLs (handles single video, playlist, or search)
+		songs, isPlaylist, err := h.ResolveSongURLs(songQuery)
 		if err != nil {
 			return followUpError(s, i, err.Error())
 		}
 
-		embed := NewEmbed().
-			Title("✅ Song Added").
-			Description(fmt.Sprintf("Added **%s** to playlist **%s**", songTitle, name)).
-			Color(ColorSuccess).
-			Build()
+		// Add all songs to playlist
+		addedCount := 0
+		for _, songInfo := range songs {
+			err := h.playlistService.AddToPlaylistForGuild(
+				guildID,
+				name,
+				songInfo.URL,
+				valueobjects.SourceTypeYouTube,
+				songInfo.Title,
+			)
+			if err != nil {
+				h.logger.WithError(err).Warn("Failed to add song to playlist")
+				continue
+			}
+			addedCount++
+		}
+
+		if addedCount == 0 {
+			return followUpError(s, i, "Failed to add any songs to playlist")
+		}
+
+		// Build appropriate response
+		var embed *discordgo.MessageEmbed
+		if isPlaylist {
+			embed = NewEmbed().
+				Title("✅ Playlist Added").
+				Description(fmt.Sprintf("Added **%d** songs to playlist **%s**", addedCount, name)).
+				Color(ColorSuccess).
+				Field("Songs Added", fmt.Sprintf("%d", addedCount), true).
+				Build()
+		} else {
+			embed = NewEmbed().
+				Title("✅ Song Added").
+				Description(fmt.Sprintf("Added **%s** to playlist **%s**", songs[0].Title, name)).
+				Color(ColorSuccess).
+				Build()
+		}
 
 		return followUpEmbed(s, i, embed)
 	}

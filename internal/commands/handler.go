@@ -91,8 +91,6 @@ func (h *Handler) HandleInteraction(s *discordgo.Session, i *discordgo.Interacti
 	// Playback commands
 	case "play":
 		err = h.handlePlay(s, i)
-	case "aplay":
-		err = h.handleAPlay(s, i)
 	case "pause":
 		err = h.handlePause(s, i)
 	case "resume":

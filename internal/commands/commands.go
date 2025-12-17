@@ -8,24 +8,12 @@ func GetCommands() []*discordgo.ApplicationCommand {
 		// Playback commands
 		{
 			Name:        "play",
-			Description: "Play a song from YouTube URL or search query",
+			Description: "Play a song or playlist from YouTube URL or search query",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "query",
-					Description: "YouTube URL or search query",
-					Required:    true,
-				},
-			},
-		},
-		{
-			Name:        "aplay",
-			Description: "Add all songs from a YouTube playlist to queue",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "url",
-					Description: "YouTube playlist URL",
+					Description: "YouTube URL (video/playlist) or search query",
 					Required:    true,
 				},
 			},
@@ -131,12 +119,12 @@ func GetCommands() []*discordgo.ApplicationCommand {
 		},
 		{
 			Name:        "add",
-			Description: "Quick add a song to the active playlist",
+			Description: "Quick add a song or playlist to the active playlist",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "song",
-					Description: "YouTube URL or search query",
+					Description: "YouTube URL (video/playlist) or search query",
 					Required:    true,
 				},
 			},
@@ -206,7 +194,7 @@ func GetCommands() []*discordgo.ApplicationCommand {
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "add",
-					Description: "Add a song to a playlist",
+					Description: "Add a song or playlist to a playlist",
 					Options: []*discordgo.ApplicationCommandOption{
 						{
 							Type:        discordgo.ApplicationCommandOptionString,
@@ -217,7 +205,7 @@ func GetCommands() []*discordgo.ApplicationCommand {
 						{
 							Type:        discordgo.ApplicationCommandOptionString,
 							Name:        "song",
-							Description: "YouTube URL or search query (leave empty for current song)",
+							Description: "YouTube URL (video/playlist) or search (empty for current song)",
 							Required:    false,
 						},
 					},

@@ -24,112 +24,117 @@ func (h *Handler) handlePlay(s *discordgo.Session, i *discordgo.InteractionCreat
 		return followUpError(s, i, "You must be in a voice channel to play music")
 	}
 
-	// If query is not a YouTube URL, search for it
-	var songURL string
-	var songTitle string
-	if !youtube.IsYouTubeURL(query) {
-		h.logger.WithField("query", query).Info("Searching YouTube...")
-		results, err := h.ytService.Search(query, 1)
-		if err != nil {
-			return followUpError(s, i, "Search failed: "+err.Error())
-		}
-		if len(results) == 0 {
-			return followUpError(s, i, "No results found for: "+query)
-		}
-		songURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", results[0].ID)
-		songTitle = results[0].Title
-		h.logger.WithFields(map[string]interface{}{
-			"title": songTitle,
-			"url":   songURL,
-		}).Info("Found video from search")
-	} else {
-		songURL = query
-		songTitle = query // Will be updated after extraction
-	}
-
-	song := entities.NewSong(songURL, valueobjects.SourceTypeYouTube, i.Member.User.ID, i.GuildID)
-
-	if err := h.playbackService.AddSong(i.GuildID, song); err != nil {
-		return followUpError(s, i, fmt.Sprintf("Failed to add song: %v", err))
-	}
-
-	if !h.playbackService.IsPlaying(i.GuildID) {
-		if err := h.playbackService.Play(i.GuildID, channelID); err != nil {
-			return followUpError(s, i, fmt.Sprintf("Failed to start playback: %v", err))
-		}
-	}
-
-	// Use the found title if available, otherwise use the query
-	displayTitle := songTitle
-	if displayTitle == "" || displayTitle == songURL {
-		displayTitle = query
-	}
-
-	embed := NewEmbed().
-		Title("🎵 Added to Queue").
-		Description(fmt.Sprintf("**%s**", displayTitle)).
-		Color(ColorSuccess).
-		Footer("Use /queue to view the queue").
-		Build()
-
-	return followUpEmbed(s, i, embed)
-}
-
-// handleAPlay handles the aplay command (add YouTube playlist to queue)
-func (h *Handler) handleAPlay(s *discordgo.Session, i *discordgo.InteractionCreate) error {
-	if err := deferResponse(s, i); err != nil {
-		return err
-	}
-
-	options := i.ApplicationCommandData().Options
-	playlistURL := options[0].StringValue()
-
-	channelID, err := h.getUserVoiceChannel(s, i.GuildID, i.Member.User.ID)
+	// Resolve query to song URLs (handles single video, playlist, or search)
+	songs, isPlaylist, err := h.ResolveSongURLs(query)
 	if err != nil {
-		return followUpError(s, i, "You must be in a voice channel to play music")
+		return followUpError(s, i, err.Error())
 	}
 
-	videos, err := h.ytService.ExtractPlaylist(playlistURL)
-	if err != nil {
-		return followUpError(s, i, "Failed to extract playlist: "+err.Error())
-	}
-
-	if len(videos) == 0 {
-		return followUpError(s, i, "Playlist is empty or invalid")
-	}
-
+	// Add all songs to queue
 	addedCount := 0
-	for _, video := range videos {
-		videoURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", video.ID)
-		song := entities.NewSong(videoURL, valueobjects.SourceTypeYouTube, i.Member.User.ID, i.GuildID)
-
+	for _, songInfo := range songs {
+		song := entities.NewSong(songInfo.URL, valueobjects.SourceTypeYouTube, i.Member.User.ID, i.GuildID)
 		if err := h.playbackService.AddSong(i.GuildID, song); err != nil {
-			h.logger.WithError(err).Warn("Failed to add song from playlist")
+			h.logger.WithError(err).Warn("Failed to add song")
 			continue
 		}
 		addedCount++
 	}
 
 	if addedCount == 0 {
-		return followUpError(s, i, "Failed to add any songs from playlist")
+		return followUpError(s, i, "Failed to add any songs")
 	}
 
+	// Start playback if not already playing
 	if !h.playbackService.IsPlaying(i.GuildID) {
 		if err := h.playbackService.Play(i.GuildID, channelID); err != nil {
-			h.logger.WithError(err).Error("Failed to start playback")
+			return followUpError(s, i, fmt.Sprintf("Failed to start playback: %v", err))
 		}
 	}
 
-	embed := NewEmbed().
-		Title("📻 YouTube Playlist Loaded").
-		Description(fmt.Sprintf("Successfully added **%d** songs to the queue", addedCount)).
-		Color(ColorSuccess).
-		Field("Source", "YouTube Playlist", true).
-		Field("Songs Added", fmt.Sprintf("%d", addedCount), true).
-		Footer("Use /queue to view the queue").
-		Build()
+	// Build appropriate response
+	var embed *discordgo.MessageEmbed
+	if isPlaylist {
+		embed = NewEmbed().
+			Title("📻 YouTube Playlist Added").
+			Description(fmt.Sprintf("Successfully added **%d** songs to the queue", addedCount)).
+			Color(ColorSuccess).
+			Field("Source", "YouTube Playlist", true).
+			Field("Songs Added", fmt.Sprintf("%d", addedCount), true).
+			Footer("Use /queue to view the queue").
+			Build()
+	} else {
+		displayTitle := songs[0].Title
+		if displayTitle == "" || displayTitle == songs[0].URL {
+			displayTitle = query
+		}
+		embed = NewEmbed().
+			Title("🎵 Added to Queue").
+			Description(fmt.Sprintf("**%s**", displayTitle)).
+			Color(ColorSuccess).
+			Footer("Use /queue to view the queue").
+			Build()
+	}
 
 	return followUpEmbed(s, i, embed)
+}
+
+// SongInfo represents a resolved song with URL and title
+type SongInfo struct {
+	URL   string
+	Title string
+}
+
+// ResolveSongURLs resolves a query (URL/search) into a list of song URLs and titles
+// Returns: list of (URL, title) pairs and whether it was a playlist
+func (h *Handler) ResolveSongURLs(query string) ([]SongInfo, bool, error) {
+
+	// Check if query is a YouTube playlist URL
+	if youtube.IsPlaylistURL(query) {
+		h.logger.WithField("url", query).Info("Detected YouTube playlist URL")
+
+		videos, err := h.ytService.ExtractPlaylist(query)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to extract playlist: %w", err)
+		}
+
+		if len(videos) == 0 {
+			return nil, false, fmt.Errorf("playlist is empty or invalid")
+		}
+
+		songs := make([]SongInfo, 0, len(videos))
+		for _, video := range videos {
+			songs = append(songs, SongInfo{
+				URL:   fmt.Sprintf("https://www.youtube.com/watch?v=%s", video.ID),
+				Title: video.Title,
+			})
+		}
+
+		return songs, true, nil
+	}
+
+	// If query is not a YouTube URL, search for it
+	if !youtube.IsYouTubeURL(query) {
+		h.logger.WithField("query", query).Info("Searching YouTube...")
+		results, err := h.ytService.Search(query, 1)
+		if err != nil {
+			return nil, false, fmt.Errorf("search failed: %w", err)
+		}
+		if len(results) == 0 {
+			return nil, false, fmt.Errorf("no results found for: %s", query)
+		}
+
+		return []SongInfo{{
+			URL:   fmt.Sprintf("https://www.youtube.com/watch?v=%s", results[0].ID),
+			Title: results[0].Title,
+		}}, false, nil
+	}
+
+	// Regular YouTube video URL
+	return []SongInfo{{
+		URL:   query,
+		Title: query, // Will be updated after extraction
+	}}, false, nil
 }
 
 // handlePause handles the pause command
