@@ -2,7 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/domain/entities"
@@ -11,53 +10,18 @@ import (
 // handleQueue handles the queue command
 func (h *Handler) handleQueue(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	tracklist := h.playbackService.GetTracklist(i.GuildID)
-	if tracklist == nil || tracklist.Size() == 0 {
-		embed := NewEmbed().
-			Title("Queue").
-			Description("The queue is empty. Use `/play` to add songs!").
-			Color(ColorInfo).
-			Build()
-		return respondEmbed(s, i, embed)
-	}
 
-	builder := NewEmbed().
-		Title("Music Queue").
-		Color(ColorPrimary)
+	// Build first page
+	embed, components := buildQueuePage(tracklist, 0)
 
-	// Current song
-	current := tracklist.CurrentSong()
-	if current != nil && current.GetMetadata() != nil {
-		meta := current.GetMetadata()
-		builder.Field("Now Playing", fmt.Sprintf("**%s**\n`%s`", meta.Title, meta.DurationFormatted()), false)
-	}
-
-	// Up next
-	upcoming := tracklist.GetUpcoming(10)
-	if len(upcoming) > 0 {
-		var sb strings.Builder
-		for idx, song := range upcoming {
-			if song.GetMetadata() != nil {
-				title := song.GetMetadata().Title
-				if len(title) > 50 {
-					title = title[:47] + "..."
-				}
-				sb.WriteString(fmt.Sprintf("> **%d. %s**\n", idx+1, title))
-			}
-		}
-		builder.Field("Up Next", sb.String(), false)
-	}
-
-	// Footer with stats
-	repeatMode := tracklist.GetRepeatMode()
-	repeatIcon := "🔁"
-	if repeatMode == entities.RepeatModeNone {
-		repeatIcon = "➡️"
-	} else if repeatMode == entities.RepeatModeTrack {
-		repeatIcon = "🔂"
-	}
-	builder.Footer(fmt.Sprintf("Total: %d songs • Repeat: %s %s", tracklist.Size(), repeatIcon, repeatMode))
-
-	return respondEmbed(s, i, builder.Build())
+	// Send response with pagination buttons
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: components,
+		},
+	})
 }
 
 // handleNowPlaying handles the nowplaying command

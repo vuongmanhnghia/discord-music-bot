@@ -119,7 +119,7 @@ func (h *Handler) handleHelp(s *discordgo.Session, i *discordgo.InteractionCreat
 			false).
 		Field("Playlist Management",
 			"> **`/playlists` - List all playlists**\n"+
-				"> **`/use <name>` - Load a playlist**\n"+
+				"> **`/use <name> <start_index>` - Load a playlist**\n"+
 				"> **`/add <song>` - Quick add to active playlist**\n"+
 				"> **`/playlist create/delete/show/add`**\n"+
 				"> **`/remove <playlist> <index>` - Remove song**",

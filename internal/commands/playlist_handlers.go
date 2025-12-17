@@ -306,40 +306,26 @@ func (h *Handler) handlePlaylistShow(s *discordgo.Session, i *discordgo.Interact
 		return respondError(s, i, err.Error())
 	}
 
-	if len(playlist.Entries) == 0 {
-		embed := NewEmbed().
-			Title(fmt.Sprintf("%s", name)).
-			Description("This playlist is empty").
-			Color(ColorInfo).
-			Footer("Use /playlist add to add songs").
-			Build()
-		return respondEmbed(s, i, embed)
+	// Convert playlist entries to our pagination format
+	entries := make([]PlaylistEntry, len(playlist.Entries))
+	for i, entry := range playlist.Entries {
+		entries[i] = PlaylistEntry{
+			Title:         entry.Title,
+			OriginalInput: entry.OriginalInput,
+		}
 	}
 
-	var sb strings.Builder
-	for idx, entry := range playlist.Entries {
-		if idx >= 15 {
-			sb.WriteString(fmt.Sprintf("\n*...and %d more songs*", len(playlist.Entries)-15))
-			break
-		}
-		title := entry.Title
-		if title == "" {
-			title = entry.OriginalInput
-		}
-		if len(title) > 45 {
-			title = title[:42] + "..."
-		}
-		sb.WriteString(fmt.Sprintf("> **%d. %s**\n", idx+1, title))
-	}
+	// Build first page
+	embed, components := buildPlaylistPage(name, entries, 0)
 
-	embed := NewEmbed().
-		Title(fmt.Sprintf("%s", name)).
-		Description(sb.String()).
-		Color(ColorPrimary).
-		Footer(fmt.Sprintf("%d songs • Use /use %s to play", len(playlist.Entries), name)).
-		Build()
-
-	return respondEmbed(s, i, embed)
+	// Send response with pagination buttons
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: components,
+		},
+	})
 }
 
 func (h *Handler) handlePlaylistAdd(s *discordgo.Session, i *discordgo.InteractionCreate, subCmd *discordgo.ApplicationCommandInteractionDataOption) error {

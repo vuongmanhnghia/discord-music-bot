@@ -68,6 +68,12 @@ func (h *Handler) HandleInteraction(s *discordgo.Session, i *discordgo.Interacti
 		}
 	}()
 
+	// Handle button interactions (pagination)
+	if i.Type == discordgo.InteractionMessageComponent {
+		h.handleButtonInteraction(s, i)
+		return
+	}
+
 	if i.Type != discordgo.InteractionApplicationCommand {
 		return
 	}
