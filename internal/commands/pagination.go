@@ -112,7 +112,7 @@ func buildQueuePage(tracklist *entities.Tracklist, page int) (*discordgo.Message
 
 		// Highlight current song
 		if position == currentPos {
-			indicator = "➜"
+			indicator = fmt.Sprintf("`%2d.`", position) + " ►"
 		}
 
 		if meta != nil {

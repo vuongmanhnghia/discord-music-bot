@@ -165,29 +165,72 @@ func (h *Handler) handleResume(s *discordgo.Session, i *discordgo.InteractionCre
 // handleSkip handles the skip command
 func (h *Handler) handleSkip(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	tracklist := h.playbackService.GetTracklist(i.GuildID)
-	var skippedTitle string
-	if tracklist != nil && tracklist.CurrentSong() != nil {
-		if meta := tracklist.CurrentSong().GetMetadata(); meta != nil {
-			skippedTitle = meta.Title
-		}
+	if tracklist == nil || tracklist.Size() == 0 {
+		return respondError(s, i, "No songs in queue")
 	}
 
+	options := i.ApplicationCommandData().Options
+	var targetIndex *int
+	if len(options) > 0 {
+		idx := int(options[0].IntValue())
+		targetIndex = &idx
+	}
+
+	// Validate index if provided
+	if targetIndex != nil {
+		totalSongs := tracklist.Size()
+		if *targetIndex < 1 || *targetIndex > totalSongs {
+			return respondError(s, i, fmt.Sprintf("Invalid index. Queue has %d songs (use 1-%d)", totalSongs, totalSongs))
+		}
+
+		// Jump to the specific position (this handles both skip and stop)
+		if err := h.playbackService.JumpToPosition(i.GuildID, *targetIndex); err != nil {
+			return respondError(s, i, fmt.Sprintf("Failed to skip to position: %v", err))
+		}
+
+		// Get the song at the target position for display
+		nextSong := tracklist.CurrentSong()
+
+		// Build embed with next song info
+		embed := h.buildSkipEmbed(nextSong, fmt.Sprintf("⏭️ Skipped to song #%d", *targetIndex))
+		return respondEmbed(s, i, embed)
+	}
+
+	// Regular skip to next song
 	if err := h.playbackService.Skip(i.GuildID); err != nil {
 		return respondError(s, i, "No song to skip")
 	}
 
-	desc := "Skipping to the next song"
-	if skippedTitle != "" {
-		desc = fmt.Sprintf("Skipped: **%s**", skippedTitle)
+	// Get the next song that will play
+	nextSong := tracklist.CurrentSong()
+
+	embed := h.buildSkipEmbed(nextSong, "⏭️ Skipped to Next")
+	return respondEmbed(s, i, embed)
+}
+
+// buildSkipEmbed creates an embed for skip response
+func (h *Handler) buildSkipEmbed(nextSong *entities.Song, title string) *discordgo.MessageEmbed {
+	builder := NewEmbed().
+		Title(title).
+		Color(ColorInfo)
+
+	if nextSong != nil {
+		meta := nextSong.GetMetadata()
+		if meta != nil {
+			builder.Description(fmt.Sprintf("Now playing: **%s**", meta.Title))
+			builder.Thumbnail(meta.Thumbnail)
+			builder.Field("Duration", meta.DurationFormatted(), true)
+			if meta.Uploader != "" {
+				builder.Field("Artist", meta.Uploader, true)
+			}
+		} else {
+			builder.Description(fmt.Sprintf("Now playing: **%s**", nextSong.DisplayName()))
+		}
+	} else {
+		builder.Description("No more songs in queue")
 	}
 
-	embed := NewEmbed().
-		Title("Skipped").
-		Description(desc).
-		Color(ColorInfo).
-		Build()
-
-	return respondEmbed(s, i, embed)
+	return builder.Build()
 }
 
 // handleStop handles the stop command

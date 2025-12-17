@@ -40,7 +40,16 @@ func GetCommands() []*discordgo.ApplicationCommand {
 		},
 		{
 			Name:        "skip",
-			Description: "Skip to the next song in queue",
+			Description: "Skip to the next song or jump to a specific song by index",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "index",
+					Description: "Song index to skip to (1-based, optional)",
+					Required:    false,
+					MinValue:    func() *float64 { v := 1.0; return &v }(),
+				},
+			},
 		},
 		{
 			Name:        "stop",

@@ -33,13 +33,14 @@ type PlaybackService struct {
 
 // GuildPlaybackState represents playback state for a guild
 type GuildPlaybackState struct {
-	guildID    string
-	tracklist  *entities.Tracklist
-	isPlaying  bool
-	currentPos int
-	loopCtx    context.Context
-	loopCancel context.CancelFunc
-	mu         sync.RWMutex
+	guildID       string
+	tracklist     *entities.Tracklist
+	isPlaying     bool
+	currentPos    int
+	loopCtx       context.Context
+	loopCancel    context.CancelFunc
+	manualJump    bool // Flag to indicate manual position jump
+	mu            sync.RWMutex
 }
 
 // NewPlaybackService creates a new playback service
@@ -144,6 +145,32 @@ func (s *PlaybackService) Skip(guildID string) error {
 	}
 
 	// Stop current song to trigger next
+	if player := s.audioService.GetPlayer(guildID); player != nil {
+		player.Stop()
+	}
+
+	return nil
+}
+
+// JumpToPosition jumps to a specific song position and starts playing it
+func (s *PlaybackService) JumpToPosition(guildID string, position int) error {
+	state := s.getState(guildID)
+	if state == nil {
+		return ErrNotPlaying
+	}
+
+	// Skip to the position (this sets currentIndex)
+	song := state.tracklist.SkipToPosition(position)
+	if song == nil {
+		return fmt.Errorf("invalid position")
+	}
+
+	// Set flag to prevent NextSong() from being called in handleSongComplete
+	state.mu.Lock()
+	state.manualJump = true
+	state.mu.Unlock()
+
+	// Stop current playback to trigger the new position
 	if player := s.audioService.GetPlayer(guildID); player != nil {
 		player.Stop()
 	}
@@ -286,6 +313,15 @@ func (s *PlaybackService) waitForSong(song *entities.Song, ctx context.Context) 
 
 // handleSongComplete handles song completion
 func (s *PlaybackService) handleSongComplete(state *GuildPlaybackState) {
+	// Check if this was a manual jump - if so, don't call NextSong()
+	state.mu.Lock()
+	if state.manualJump {
+		state.manualJump = false
+		state.mu.Unlock()
+		return
+	}
+	state.mu.Unlock()
+
 	// Move to next based on repeat mode
 	switch state.tracklist.GetRepeatMode() {
 	case entities.RepeatModeNone:
