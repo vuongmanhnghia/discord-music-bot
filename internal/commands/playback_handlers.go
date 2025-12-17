@@ -143,24 +143,85 @@ func (h *Handler) ResolveSongURLs(query string) ([]SongInfo, bool, error) {
 		// Search YouTube for each Spotify track
 		songs := make([]SongInfo, 0, len(tracks))
 		for _, track := range tracks {
-			searchQuery := track.ToSearchQuery()
-			h.logger.WithField("query", searchQuery).Debug("Searching YouTube for Spotify track")
+			var videoID string
+			var found bool
+			spotifyDuration := track.GetDurationSeconds()
 
-			results, err := h.ytService.Search(searchQuery, 1)
-			if err != nil {
-				h.logger.WithError(err).WithField("track", track.Name).Warn("Failed to search YouTube for track")
-				continue
+			// Strategy 1: Try ISRC search first (most accurate)
+			if isrc := track.GetISRC(); isrc != "" {
+				h.logger.WithFields(map[string]interface{}{
+					"track": track.Name,
+					"isrc":  isrc,
+				}).Debug("Trying ISRC search")
+
+				if info, err := h.ytService.SearchByISRC(isrc); err == nil {
+					// Verify duration (±5 seconds tolerance)
+					if abs(info.Duration-spotifyDuration) <= 5 {
+						videoID = info.ID
+						found = true
+						h.logger.WithField("track", track.Name).Info("✅ Found by ISRC with duration match")
+					} else {
+						h.logger.WithFields(map[string]interface{}{
+							"track":            track.Name,
+							"spotify_duration": spotifyDuration,
+							"youtube_duration": info.Duration,
+						}).Warn("ISRC match but duration mismatch, trying other methods")
+					}
+				}
 			}
 
-			if len(results) == 0 {
-				h.logger.WithField("track", track.Name).Warn("No YouTube results for track")
-				continue
+			// Strategy 2: Try detailed search with album info
+			if !found {
+				detailedQuery := track.ToDetailedSearchQuery()
+				h.logger.WithField("query", detailedQuery).Debug("Trying detailed search")
+
+				results, err := h.ytService.Search(detailedQuery, 3) // Get top 3 results
+				if err == nil && len(results) > 0 {
+					// Find best match by duration
+					bestMatch := findBestDurationMatch(results, spotifyDuration)
+					if bestMatch != nil {
+						videoID = bestMatch.ID
+						found = true
+						h.logger.WithField("track", track.Name).Info("✅ Found by detailed search")
+					}
+				}
 			}
 
-			songs = append(songs, SongInfo{
-				URL:   fmt.Sprintf("https://www.youtube.com/watch?v=%s", results[0].ID),
-				Title: track.ToSearchQuery(),
-			})
+			// Strategy 3: Fall back to simple search
+			if !found {
+				simpleQuery := track.ToSearchQuery()
+				h.logger.WithField("query", simpleQuery).Debug("Trying simple search")
+
+				results, err := h.ytService.Search(simpleQuery, 3)
+				if err != nil {
+					h.logger.WithError(err).WithField("track", track.Name).Warn("All search methods failed")
+					continue
+				}
+
+				if len(results) == 0 {
+					h.logger.WithField("track", track.Name).Warn("No YouTube results found")
+					continue
+				}
+
+				// Find best match by duration
+				bestMatch := findBestDurationMatch(results, spotifyDuration)
+				if bestMatch != nil {
+					videoID = bestMatch.ID
+					found = true
+					h.logger.WithField("track", track.Name).Info("✅ Found by simple search")
+				} else {
+					// Last resort: use first result
+					videoID = results[0].ID
+					h.logger.WithField("track", track.Name).Warn("⚠️ Using first result (no duration match)")
+				}
+			}
+
+			if found || videoID != "" {
+				songs = append(songs, SongInfo{
+					URL:   fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID),
+					Title: track.ToSearchQuery(),
+				})
+			}
 		}
 
 		if len(songs) == 0 {
@@ -365,4 +426,40 @@ func (h *Handler) handleVolume(s *discordgo.Session, i *discordgo.InteractionCre
 		Build()
 
 	return respondEmbed(s, i, embed)
+}
+
+// findBestDurationMatch finds the YouTube video with closest duration to target
+// Returns nil if no match within acceptable tolerance (±10 seconds)
+func findBestDurationMatch(results []youtube.YouTubeInfo, targetDuration int) *youtube.YouTubeInfo {
+	if len(results) == 0 {
+		return nil
+	}
+
+	const maxDifference = 10 // ±10 seconds tolerance
+
+	var bestMatch *youtube.YouTubeInfo
+	minDifference := int(^uint(0) >> 1) // Max int
+
+	for i := range results {
+		diff := abs(results[i].Duration - targetDuration)
+		if diff < minDifference {
+			minDifference = diff
+			bestMatch = &results[i]
+		}
+	}
+
+	// Only return match if within acceptable tolerance
+	if minDifference <= maxDifference {
+		return bestMatch
+	}
+
+	return nil
+}
+
+// abs returns the absolute value of an integer
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }

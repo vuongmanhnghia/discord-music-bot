@@ -103,7 +103,6 @@ func (h *Handler) handleHelp(s *discordgo.Session, i *discordgo.InteractionCreat
 			false).
 		Field("Playback",
 			"> **`/play <query>` - Play a song**\n"+
-				"> **`/aplay <url>` - Load YouTube playlist**\n"+
 				"> **`/pause` - Pause playback**\n"+
 				"> **`/resume` - Resume playback**\n"+
 				"> **`/skip` - Skip current song**\n"+

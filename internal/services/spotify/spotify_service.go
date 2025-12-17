@@ -33,10 +33,17 @@ type Service struct {
 
 // Track represents a Spotify track
 type Track struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Artists []Artist `json:"artists"`
-	Album   Album    `json:"album"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Artists         []Artist `json:"artists"`
+	Album           Album    `json:"album"`
+	DurationMs      int      `json:"duration_ms"`
+	ExternalIDs     ExternalIDs `json:"external_ids"`
+}
+
+// ExternalIDs represents external identifiers for a track
+type ExternalIDs struct {
+	ISRC string `json:"isrc"`
 }
 
 // Artist represents a Spotify artist
@@ -237,6 +244,26 @@ func (t *Track) ToSearchQuery() string {
 	}
 	// Format: "Artist - Track Name"
 	return fmt.Sprintf("%s - %s", t.Artists[0].Name, t.Name)
+}
+
+// ToDetailedSearchQuery converts a track to a detailed YouTube search query with album info
+func (t *Track) ToDetailedSearchQuery() string {
+	if len(t.Artists) == 0 {
+		return t.Name
+	}
+	// Format: "Artist - Track Name Album Name official audio"
+	// Adding "official audio" helps find official uploads
+	return fmt.Sprintf("%s - %s %s official audio", t.Artists[0].Name, t.Name, t.Album.Name)
+}
+
+// GetISRC returns the ISRC code if available
+func (t *Track) GetISRC() string {
+	return t.ExternalIDs.ISRC
+}
+
+// GetDurationSeconds returns duration in seconds
+func (t *Track) GetDurationSeconds() int {
+	return t.DurationMs / 1000
 }
 
 // IsSpotifyURL checks if URL is a Spotify URL

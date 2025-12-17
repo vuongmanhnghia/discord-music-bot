@@ -77,7 +77,6 @@ docker compose down
 | Command           | Description              |
 | ----------------- | ------------------------ |
 | `/play <query>`   | Play a song from YouTube |
-| `/aplay <url>`    | Import YouTube playlist  |
 | `/pause`          | Pause playback           |
 | `/resume`         | Resume playback          |
 | `/skip`           | Skip current song        |

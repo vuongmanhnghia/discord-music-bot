@@ -225,6 +225,54 @@ func (s *Service) Search(query string, maxResults int) ([]YouTubeInfo, error) {
 	return videos, nil
 }
 
+// SearchByISRC searches YouTube using ISRC code
+// This provides much better accuracy than text search
+func (s *Service) SearchByISRC(isrc string) (*YouTubeInfo, error) {
+	if isrc == "" {
+		return nil, fmt.Errorf("ISRC is empty")
+	}
+
+	s.logger.WithField("isrc", isrc).Info("Searching YouTube by ISRC...")
+
+	// Search for ISRC on YouTube
+	// Many official uploads include ISRC in metadata
+	searchQuery := fmt.Sprintf("ytsearch1:%s", isrc)
+
+	args := []string{
+		"--dump-json",
+		"--no-check-certificate",
+		"--geo-bypass",
+		"--no-warnings",
+		searchQuery,
+	}
+
+	cmd := exec.Command(s.ytDlpPath, args...)
+	output, err := cmd.Output()
+	if err != nil {
+		s.logger.WithError(err).Debug("ISRC search failed")
+		return nil, fmt.Errorf("ISRC search failed: %w", err)
+	}
+
+	// Parse result
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "{") {
+			continue
+		}
+
+		var info YouTubeInfo
+		if err := json.Unmarshal([]byte(line), &info); err != nil {
+			continue
+		}
+
+		s.logger.WithField("title", info.Title).Info("✅ Found video by ISRC")
+		return &info, nil
+	}
+
+	return nil, fmt.Errorf("no results found for ISRC: %s", isrc)
+}
+
 // GetStreamURL gets the best audio stream URL for a video
 func (s *Service) GetStreamURL(videoID string) (string, error) {
 	// Check cache first
