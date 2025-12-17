@@ -47,6 +47,13 @@ func (h *Handler) handleUsePlaylist(s *discordgo.Session, i *discordgo.Interacti
 	options := i.ApplicationCommandData().Options
 	playlistName := options[0].StringValue()
 
+	// Get optional start_index parameter
+	var startIndex *int
+	if len(options) > 1 {
+		idx := int(options[1].IntValue())
+		startIndex = &idx
+	}
+
 	playlist, err := h.playlistService.GetPlaylistForGuild(guildID, playlistName)
 	if err != nil {
 		return respondError(s, i, fmt.Sprintf("Playlist '%s' not found", playlistName))
@@ -66,6 +73,13 @@ func (h *Handler) handleUsePlaylist(s *discordgo.Session, i *discordgo.Interacti
 			Field("💡 Tip", "Use `/add <url>` to add songs to this playlist", false).
 			Build()
 		return respondEmbed(s, i, embed)
+	}
+
+	// Validate start_index if provided
+	if startIndex != nil {
+		if *startIndex < 1 || *startIndex > len(playlist.Entries) {
+			return respondError(s, i, fmt.Sprintf("Invalid start index. Playlist has %d songs (use 1-%d)", len(playlist.Entries), len(playlist.Entries)))
+		}
 	}
 
 	if err := deferResponse(s, i); err != nil {
@@ -95,14 +109,27 @@ func (h *Handler) handleUsePlaylist(s *discordgo.Session, i *discordgo.Interacti
 		}
 	}
 
+	// Jump to start_index if provided
+	if startIndex != nil {
+		if tracklist := h.playbackService.GetTracklist(i.GuildID); tracklist != nil {
+			tracklist.SkipToPosition(*startIndex)
+		}
+	}
+
 	// Start playback
 	if err := h.playbackService.Play(i.GuildID, channelID); err != nil {
 		return followUpError(s, i, "Failed to start playback")
 	}
 
+	// Build embed with start position info
+	description := fmt.Sprintf("Now playing **%s**", playlistName)
+	if startIndex != nil {
+		description = fmt.Sprintf("Now playing **%s** from song #%d", playlistName, *startIndex)
+	}
+
 	embed := NewEmbed().
 		Title("Playlist Loaded").
-		Description(fmt.Sprintf("Now playing **%s**", playlistName)).
+		Description(description).
 		Color(ColorSuccess).
 		Field("Songs", fmt.Sprintf("%d", len(songs)), true).
 		Field("Status", "Active", true).

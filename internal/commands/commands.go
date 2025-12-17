@@ -111,6 +111,13 @@ func GetCommands() []*discordgo.ApplicationCommand {
 					Description: "Playlist name to load",
 					Required:    true,
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "start_index",
+					Description: "Start playing from this song index (1-based)",
+					Required:    false,
+					MinValue:    func() *float64 { v := 1.0; return &v }(),
+				},
 			},
 		},
 		{
