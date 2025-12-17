@@ -7,6 +7,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/domain/entities"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/domain/valueobjects"
+	"github.com/vuongmanhnghia/discord-music-bot/internal/services/spotify"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/services/youtube"
 )
 
@@ -88,6 +89,86 @@ type SongInfo struct {
 // ResolveSongURLs resolves a query (URL/search) into a list of song URLs and titles
 // Returns: list of (URL, title) pairs and whether it was a playlist
 func (h *Handler) ResolveSongURLs(query string) ([]SongInfo, bool, error) {
+	// Check if query is a Spotify URL
+	if spotify.IsSpotifyURL(query) {
+		if h.spotifyService == nil {
+			return nil, false, fmt.Errorf("Spotify support is not enabled. Please contact the bot owner to add Spotify credentials")
+		}
+
+		urlType, id, err := spotify.ParseSpotifyURL(query)
+		if err != nil {
+			return nil, false, fmt.Errorf("invalid Spotify URL: %w", err)
+		}
+
+		h.logger.WithFields(map[string]interface{}{
+			"type": urlType,
+			"id":   id,
+		}).Info("Detected Spotify URL")
+
+		var tracks []spotify.Track
+		isPlaylist := false
+
+		switch urlType {
+		case "track":
+			track, err := h.spotifyService.GetTrack(id)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to get Spotify track: %w", err)
+			}
+			tracks = []spotify.Track{*track}
+
+		case "playlist":
+			var err error
+			tracks, err = h.spotifyService.GetPlaylistTracks(id)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to get Spotify playlist: %w", err)
+			}
+			isPlaylist = true
+
+		case "album":
+			var err error
+			tracks, err = h.spotifyService.GetAlbumTracks(id)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to get Spotify album: %w", err)
+			}
+			isPlaylist = true
+
+		default:
+			return nil, false, fmt.Errorf("unsupported Spotify URL type: %s", urlType)
+		}
+
+		if len(tracks) == 0 {
+			return nil, false, fmt.Errorf("no tracks found in Spotify content")
+		}
+
+		// Search YouTube for each Spotify track
+		songs := make([]SongInfo, 0, len(tracks))
+		for _, track := range tracks {
+			searchQuery := track.ToSearchQuery()
+			h.logger.WithField("query", searchQuery).Debug("Searching YouTube for Spotify track")
+
+			results, err := h.ytService.Search(searchQuery, 1)
+			if err != nil {
+				h.logger.WithError(err).WithField("track", track.Name).Warn("Failed to search YouTube for track")
+				continue
+			}
+
+			if len(results) == 0 {
+				h.logger.WithField("track", track.Name).Warn("No YouTube results for track")
+				continue
+			}
+
+			songs = append(songs, SongInfo{
+				URL:   fmt.Sprintf("https://www.youtube.com/watch?v=%s", results[0].ID),
+				Title: track.ToSearchQuery(),
+			})
+		}
+
+		if len(songs) == 0 {
+			return nil, false, fmt.Errorf("could not find any YouTube videos for Spotify tracks")
+		}
+
+		return songs, isPlaylist, nil
+	}
 
 	// Check if query is a YouTube playlist URL
 	if youtube.IsPlaylistURL(query) {

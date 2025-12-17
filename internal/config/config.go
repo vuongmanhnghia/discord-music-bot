@@ -21,6 +21,10 @@ type Config struct {
 	DatabaseURL string
 	UseDatabase bool
 
+	// Spotify
+	SpotifyClientID     string
+	SpotifyClientSecret string
+
 	// Directories (fallback for file-based storage)
 	PlaylistDir string
 	CacheDir    string
@@ -77,6 +81,10 @@ func Load() (*Config, error) {
 		// Database
 		DatabaseURL: databaseURL,
 		UseDatabase: useDatabase == "true" || useDatabase == "1" || useDatabase == "yes",
+
+		// Spotify
+		SpotifyClientID:     os.Getenv("SPOTIFY_CLIENT_ID"),
+		SpotifyClientSecret: os.Getenv("SPOTIFY_CLIENT_SECRET"),
 
 		// Directories
 		PlaylistDir: getEnvOrDefault("PLAYLIST_DIR", "./playlist"),

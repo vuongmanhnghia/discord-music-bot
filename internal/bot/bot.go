@@ -10,6 +10,7 @@ import (
 	"github.com/vuongmanhnghia/discord-music-bot/internal/database"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/services"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/services/audio"
+	"github.com/vuongmanhnghia/discord-music-bot/internal/services/spotify"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/services/youtube"
 	"github.com/vuongmanhnghia/discord-music-bot/pkg/logger"
 )
@@ -21,6 +22,7 @@ type MusicBot struct {
 	session           *discordgo.Session
 	db                *database.DB
 	ytService         *youtube.Service
+	spotifyService    *spotify.Service
 	audioService      *audio.AudioService
 	processingService *services.ProcessingService
 	playbackService   *services.PlaybackService
@@ -71,6 +73,19 @@ func New(cfg *config.Config, log *logger.Logger) (*MusicBot, error) {
 		return nil, fmt.Errorf("failed to create YouTube service: %w", err)
 	}
 
+	// Initialize Spotify service (optional)
+	var spotifyService *spotify.Service
+	if cfg.SpotifyClientID != "" && cfg.SpotifyClientSecret != "" {
+		spotifyService, err = spotify.NewService(cfg.SpotifyClientID, cfg.SpotifyClientSecret, log)
+		if err != nil {
+			log.WithError(err).Warn("Failed to initialize Spotify service - Spotify links will not work")
+		} else {
+			log.Info("Spotify service initialized")
+		}
+	} else {
+		log.Info("Spotify credentials not provided - Spotify links will not work")
+	}
+
 	// Initialize audio service
 	audioService := audio.NewAudioService(session, log)
 
@@ -91,7 +106,7 @@ func New(cfg *config.Config, log *logger.Logger) (*MusicBot, error) {
 	}
 
 	// Initialize command handler
-	cmdHandler := commands.NewHandler(session, playbackService, playlistService, ytService, log, cfg)
+	cmdHandler := commands.NewHandler(session, playbackService, playlistService, ytService, spotifyService, log, cfg)
 
 	bot := &MusicBot{
 		config:            cfg,

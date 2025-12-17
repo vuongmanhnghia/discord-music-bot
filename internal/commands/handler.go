@@ -7,6 +7,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/config"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/services"
+	"github.com/vuongmanhnghia/discord-music-bot/internal/services/spotify"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/services/youtube"
 	"github.com/vuongmanhnghia/discord-music-bot/pkg/logger"
 )
@@ -17,6 +18,7 @@ type Handler struct {
 	playbackService *services.PlaybackService
 	playlistService *services.PlaylistService
 	ytService       *youtube.Service
+	spotifyService  *spotify.Service
 	logger          *logger.Logger
 	config          *config.Config
 
@@ -31,6 +33,7 @@ func NewHandler(
 	playbackSvc *services.PlaybackService,
 	playlistSvc *services.PlaylistService,
 	ytSvc *youtube.Service,
+	spotifySvc *spotify.Service,
 	log *logger.Logger,
 	config *config.Config,
 ) *Handler {
@@ -39,6 +42,7 @@ func NewHandler(
 		playbackService: playbackSvc,
 		playlistService: playlistSvc,
 		ytService:       ytSvc,
+		spotifyService:  spotifySvc,
 		logger:          log,
 		config:          config,
 		activePlaylist:  make(map[string]string),
