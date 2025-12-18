@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 
 	"github.com/vuongmanhnghia/discord-music-bot/internal/domain/entities"
@@ -187,20 +188,28 @@ func (s *ProcessingService) processTask(task *ProcessingTask, workerID int) {
 	s.updateStats(true)
 }
 
-// processYouTubeSong processes a YouTube song
+// processYouTubeSong processes a YouTube song or web URL (including SoundCloud)
 func (s *ProcessingService) processYouTubeSong(song *entities.Song) error {
 	source := song.OriginalInput
 
-	// Check if it's a URL or search query
-	if youtube.IsYouTubeURL(source) {
-		// Extract info from URL
+	// Check if it's a web URL (YouTube, SoundCloud, or other yt-dlp supported sites)
+	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+		// Extract info from URL using yt-dlp
 		info, err := s.ytService.ExtractInfo(source)
 		if err != nil {
 			return err
 		}
 
-		// Get stream URL
-		streamURL, err := s.ytService.GetStreamURL(info.ID)
+		// Get stream URL - use original source URL for non-YouTube platforms
+		// For YouTube, info.ID is the video ID; for SoundCloud/others, use the full URL
+		var identifier string
+		if youtube.IsYouTubeURL(source) {
+			identifier = info.ID // YouTube video ID
+		} else {
+			identifier = source // Full URL for SoundCloud, etc.
+		}
+
+		streamURL, err := s.ytService.GetStreamURL(identifier)
 		if err != nil {
 			return err
 		}
@@ -210,7 +219,7 @@ func (s *ProcessingService) processYouTubeSong(song *entities.Song) error {
 		return nil
 	}
 
-	// Search query
+	// Search query (search on YouTube)
 	results, err := s.ytService.Search(source, 1)
 	if err != nil {
 		return err

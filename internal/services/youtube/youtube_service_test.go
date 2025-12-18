@@ -72,7 +72,7 @@ func TestToSongMetadata(t *testing.T) {
 	info := &YouTubeInfo{
 		ID:         "dQw4w9WgXcQ",
 		Title:      "Rick Astley - Never Gonna Give You Up",
-		Duration:   213,
+		Duration:   213.0,
 		Uploader:   "Rick Astley",
 		Thumbnail:  "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
 		WebpageURL: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -84,8 +84,8 @@ func TestToSongMetadata(t *testing.T) {
 		t.Errorf("Expected title %s, got %s", info.Title, metadata.Title)
 	}
 
-	if metadata.Duration != info.Duration {
-		t.Errorf("Expected duration %d, got %d", info.Duration, metadata.Duration)
+	if metadata.Duration != int(info.Duration) {
+		t.Errorf("Expected duration %d, got %d", int(info.Duration), metadata.Duration)
 	}
 
 	if metadata.Thumbnail != info.Thumbnail {

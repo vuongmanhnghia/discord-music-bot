@@ -7,6 +7,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/domain/entities"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/domain/valueobjects"
+	"github.com/vuongmanhnghia/discord-music-bot/internal/services/soundcloud"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/services/spotify"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/services/youtube"
 )
@@ -31,10 +32,23 @@ func (h *Handler) handlePlay(s *discordgo.Session, i *discordgo.InteractionCreat
 		return followUpError(s, i, err.Error())
 	}
 
+	// For single URL, extract metadata before adding to show proper title
+	var extractedTitle string
+	if !isPlaylist && len(songs) == 1 {
+		songURL := songs[0].URL
+		if strings.HasPrefix(songURL, "http://") || strings.HasPrefix(songURL, "https://") {
+			h.logger.WithField("url", songURL).Debug("Extracting metadata for single URL")
+			if info, err := h.ytService.ExtractInfo(songURL); err == nil {
+				extractedTitle = info.Title
+				songs[0].Title = info.Title // Update title for display
+			}
+		}
+	}
+
 	// Add all songs to queue
 	addedCount := 0
 	for _, songInfo := range songs {
-		song := entities.NewSong(songInfo.URL, valueobjects.SourceTypeYouTube, i.Member.User.ID, i.GuildID)
+		song := entities.NewSong(songInfo.URL, songInfo.SourceType, i.Member.User.ID, i.GuildID)
 		if err := h.playbackService.AddSong(i.GuildID, song); err != nil {
 			h.logger.WithError(err).Warn("Failed to add song")
 			continue
@@ -57,15 +71,17 @@ func (h *Handler) handlePlay(s *discordgo.Session, i *discordgo.InteractionCreat
 	var embed *discordgo.MessageEmbed
 	if isPlaylist {
 		embed = NewEmbed().
-			Title("📻 YouTube Playlist Added").
+			Title("📻 Playlist Added").
 			Description(fmt.Sprintf("Successfully added **%d** songs to the queue", addedCount)).
 			Color(ColorSuccess).
-			Field("Source", "YouTube Playlist", true).
 			Field("Songs Added", fmt.Sprintf("%d", addedCount), true).
 			Footer("Use /queue to view the queue").
 			Build()
 	} else {
-		displayTitle := songs[0].Title
+		displayTitle := extractedTitle
+		if displayTitle == "" {
+			displayTitle = songs[0].Title
+		}
 		if displayTitle == "" || displayTitle == songs[0].URL {
 			displayTitle = query
 		}
@@ -80,10 +96,11 @@ func (h *Handler) handlePlay(s *discordgo.Session, i *discordgo.InteractionCreat
 	return followUpEmbed(s, i, embed)
 }
 
-// SongInfo represents a resolved song with URL and title
+// SongInfo represents a resolved song with URL, title, and source type
 type SongInfo struct {
-	URL   string
-	Title string
+	URL        string
+	Title      string
+	SourceType valueobjects.SourceType
 }
 
 // ResolveSongURLs resolves a query (URL/search) into a list of song URLs and titles
@@ -156,7 +173,7 @@ func (h *Handler) ResolveSongURLs(query string) ([]SongInfo, bool, error) {
 
 				if info, err := h.ytService.SearchByISRC(isrc); err == nil {
 					// Verify duration (±5 seconds tolerance)
-					if abs(info.Duration-spotifyDuration) <= 5 {
+					if absFloat(info.Duration-float64(spotifyDuration)) <= 5 {
 						videoID = info.ID
 						found = true
 						h.logger.WithField("track", track.Name).Info("✅ Found by ISRC with duration match")
@@ -218,8 +235,9 @@ func (h *Handler) ResolveSongURLs(query string) ([]SongInfo, bool, error) {
 
 			if found || videoID != "" {
 				songs = append(songs, SongInfo{
-					URL:   fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID),
-					Title: track.ToSearchQuery(),
+					URL:        fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID),
+					Title:      track.ToSearchQuery(),
+					SourceType: valueobjects.SourceTypeYouTube,
 				})
 			}
 		}
@@ -229,6 +247,49 @@ func (h *Handler) ResolveSongURLs(query string) ([]SongInfo, bool, error) {
 		}
 
 		return songs, isPlaylist, nil
+	}
+
+	// Check if query is a SoundCloud URL
+	if soundcloud.IsSoundCloudURL(query) {
+		h.logger.WithField("url", query).Info("Detected SoundCloud URL")
+
+		// SoundCloud playlists/sets
+		if soundcloud.IsPlaylistURL(query) {
+			h.logger.Info("Extracting SoundCloud playlist")
+			videos, err := h.ytService.ExtractPlaylist(query)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to extract SoundCloud playlist: %w", err)
+			}
+
+			if len(videos) == 0 {
+				return nil, false, fmt.Errorf("SoundCloud playlist is empty or invalid")
+			}
+
+			songs := make([]SongInfo, 0, len(videos))
+			for _, video := range videos {
+				// For SoundCloud, the ID field from yt-dlp contains the full track URL
+				trackURL := video.ID
+				if !strings.HasPrefix(trackURL, "http") {
+					// If ID is not a URL, construct SoundCloud URL
+					trackURL = fmt.Sprintf("https://soundcloud.com/%s", video.ID)
+				}
+
+				songs = append(songs, SongInfo{
+					URL:        trackURL,
+					Title:      video.Title,
+					SourceType: valueobjects.SourceTypeYouTube,
+				})
+			}
+
+			return songs, true, nil
+		}
+
+		// Single SoundCloud track - return the URL directly (yt-dlp will handle it)
+		return []SongInfo{{
+			URL:        query,
+			Title:      query, // Will be updated after extraction
+			SourceType: valueobjects.SourceTypeYouTube,
+		}}, false, nil
 	}
 
 	// Check if query is a YouTube playlist URL
@@ -247,8 +308,9 @@ func (h *Handler) ResolveSongURLs(query string) ([]SongInfo, bool, error) {
 		songs := make([]SongInfo, 0, len(videos))
 		for _, video := range videos {
 			songs = append(songs, SongInfo{
-				URL:   fmt.Sprintf("https://www.youtube.com/watch?v=%s", video.ID),
-				Title: video.Title,
+				URL:        fmt.Sprintf("https://www.youtube.com/watch?v=%s", video.ID),
+				Title:      video.Title,
+				SourceType: valueobjects.SourceTypeYouTube,
 			})
 		}
 
@@ -267,15 +329,17 @@ func (h *Handler) ResolveSongURLs(query string) ([]SongInfo, bool, error) {
 		}
 
 		return []SongInfo{{
-			URL:   fmt.Sprintf("https://www.youtube.com/watch?v=%s", results[0].ID),
-			Title: results[0].Title,
+			URL:        fmt.Sprintf("https://www.youtube.com/watch?v=%s", results[0].ID),
+			Title:      results[0].Title,
+			SourceType: valueobjects.SourceTypeYouTube,
 		}}, false, nil
 	}
 
 	// Regular YouTube video URL
 	return []SongInfo{{
-		URL:   query,
-		Title: query, // Will be updated after extraction
+		URL:        query,
+		Title:      query, // Will be updated after extraction
+		SourceType: valueobjects.SourceTypeYouTube,
 	}}, false, nil
 }
 
@@ -435,13 +499,13 @@ func findBestDurationMatch(results []youtube.YouTubeInfo, targetDuration int) *y
 		return nil
 	}
 
-	const maxDifference = 10 // ±10 seconds tolerance
+	const maxDifference = 10.0 // ±10 seconds tolerance
 
 	var bestMatch *youtube.YouTubeInfo
-	minDifference := int(^uint(0) >> 1) // Max int
+	minDifference := 999999.0 // Large number
 
 	for i := range results {
-		diff := abs(results[i].Duration - targetDuration)
+		diff := absFloat(results[i].Duration - float64(targetDuration))
 		if diff < minDifference {
 			minDifference = diff
 			bestMatch = &results[i]
@@ -458,6 +522,14 @@ func findBestDurationMatch(results []youtube.YouTubeInfo, targetDuration int) *y
 
 // abs returns the absolute value of an integer
 func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// absFloat returns the absolute value of a float64
+func absFloat(x float64) float64 {
 	if x < 0 {
 		return -x
 	}

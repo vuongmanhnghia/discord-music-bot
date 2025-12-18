@@ -2,10 +2,11 @@ package commands
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/vuongmanhnghia/discord-music-bot/internal/domain/valueobjects"
 )
 
 // handlePlaylists shows all available playlists
@@ -161,6 +162,19 @@ func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionC
 		return followUpError(s, i, err.Error())
 	}
 
+	// For single URL, extract metadata before adding to show proper title
+	var extractedTitle string
+	if !isPlaylist && len(songs) == 1 {
+		songURL := songs[0].URL
+		if strings.HasPrefix(songURL, "http://") || strings.HasPrefix(songURL, "https://") {
+			h.logger.WithField("url", songURL).Debug("Extracting metadata for single URL")
+			if info, err := h.ytService.ExtractInfo(songURL); err == nil {
+				extractedTitle = info.Title
+				songs[0].Title = info.Title // Update title for saving and display
+			}
+		}
+	}
+
 	// Add all songs to playlist
 	addedCount := 0
 	for _, songInfo := range songs {
@@ -168,7 +182,7 @@ func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionC
 			i.GuildID,
 			playlistName,
 			songInfo.URL,
-			valueobjects.SourceTypeYouTube,
+			songInfo.SourceType,
 			songInfo.Title,
 		)
 		if err != nil {
@@ -193,9 +207,16 @@ func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionC
 			Field("Playlist", playlistName, true).
 			Build()
 	} else {
+		displayTitle := extractedTitle
+		if displayTitle == "" {
+			displayTitle = songs[0].Title
+		}
+		if displayTitle == "" || displayTitle == songs[0].URL {
+			displayTitle = songQuery
+		}
 		embed = NewEmbed().
 			Title("✅ Song Added to Playlist").
-			Description(fmt.Sprintf("**%s**", songs[0].Title)).
+			Description(fmt.Sprintf("**%s**", displayTitle)).
 			Color(ColorSuccess).
 			Field("Playlist", playlistName, true).
 			Build()
@@ -204,35 +225,97 @@ func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionC
 	return followUpEmbed(s, i, embed)
 }
 
-// handleRemove removes a song from a playlist
+// handleRemove removes one or more songs from a playlist
 func (h *Handler) handleRemove(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	guildID := i.GuildID
 	options := i.ApplicationCommandData().Options
 	playlistName := options[0].StringValue()
-	index := int(options[1].IntValue())
+	indexesInput := options[1].StringValue()
 
+	// Parse indexes from string
+	indexes, err := parseIndexes(indexesInput)
+	if err != nil {
+		return respondError(s, i, fmt.Sprintf("Invalid indexes format: %s", err.Error()))
+	}
+
+	// Get playlist
 	playlist, err := h.playlistService.GetPlaylistForGuild(guildID, playlistName)
 	if err != nil {
 		return respondError(s, i, err.Error())
 	}
 
-	if index < 1 || index > len(playlist.Entries) {
-		return respondError(s, i, fmt.Sprintf("Invalid index. Playlist has %d songs", len(playlist.Entries)))
+	playlistSize := len(playlist.Entries)
+	if playlistSize == 0 {
+		return respondError(s, i, "Playlist is empty")
 	}
 
-	songTitle := playlist.Entries[index-1].Title
-	if songTitle == "" {
-		songTitle = playlist.Entries[index-1].OriginalInput
+	// Validate all indexes
+	for _, idx := range indexes {
+		if idx < 1 || idx > playlistSize {
+			return respondError(s, i, fmt.Sprintf("Invalid index %d. Playlist has %d songs", idx, playlistSize))
+		}
 	}
 
-	originalInput := playlist.Entries[index-1].OriginalInput
-	if err := h.playlistService.RemoveFromPlaylistForGuild(guildID, playlistName, originalInput); err != nil {
-		return respondError(s, i, err.Error())
+	// Remove duplicates and collect song titles
+	removedSongs := make([]string, 0, len(indexes))
+	removedCount := 0
+
+	// Remove from highest index to lowest (already sorted descending)
+	for _, idx := range indexes {
+		if idx < 1 || idx > len(playlist.Entries) {
+			// Skip if already removed (in case of duplicates after other removals)
+			continue
+		}
+
+		songTitle := playlist.Entries[idx-1].Title
+		if songTitle == "" {
+			songTitle = playlist.Entries[idx-1].OriginalInput
+		}
+
+		originalInput := playlist.Entries[idx-1].OriginalInput
+		if err := h.playlistService.RemoveFromPlaylistForGuild(guildID, playlistName, originalInput); err != nil {
+			h.logger.WithError(err).Warn("Failed to remove song from playlist")
+			continue
+		}
+
+		removedSongs = append(removedSongs, songTitle)
+		removedCount++
+
+		// Reload playlist after each removal to keep indexes accurate
+		playlist, err = h.playlistService.GetPlaylistForGuild(guildID, playlistName)
+		if err != nil {
+			break
+		}
+	}
+
+	if removedCount == 0 {
+		return respondError(s, i, "Failed to remove any songs")
+	}
+
+	// Build response
+	var description string
+	if removedCount == 1 {
+		description = fmt.Sprintf("Removed **%s** from **%s**", removedSongs[0], playlistName)
+	} else {
+		// Show first 5 songs, then "and X more"
+		displayCount := 5
+		if len(removedSongs) <= displayCount {
+			description = fmt.Sprintf("Removed **%d songs** from **%s**:\n", removedCount, playlistName)
+			for _, song := range removedSongs {
+				description += fmt.Sprintf("• %s\n", song)
+			}
+		} else {
+			description = fmt.Sprintf("Removed **%d songs** from **%s**:\n", removedCount, playlistName)
+			for i := 0; i < displayCount; i++ {
+				description += fmt.Sprintf("• %s\n", removedSongs[i])
+			}
+			description += fmt.Sprintf("...and %d more", len(removedSongs)-displayCount)
+		}
 	}
 
 	embed := NewEmbed().
-		Title("Song Removed").
-		Description(fmt.Sprintf("Removed **%s** from **%s**", songTitle, playlistName)).
+		Title("Songs Removed").
+		Description(description).
 		Color(ColorWarning).
 		Build()
 
@@ -347,6 +430,19 @@ func (h *Handler) handlePlaylistAdd(s *discordgo.Session, i *discordgo.Interacti
 			return followUpError(s, i, err.Error())
 		}
 
+		// For single URL, extract metadata before adding to show proper title
+		var extractedTitle string
+		if !isPlaylist && len(songs) == 1 {
+			songURL := songs[0].URL
+			if strings.HasPrefix(songURL, "http://") || strings.HasPrefix(songURL, "https://") {
+				h.logger.WithField("url", songURL).Debug("Extracting metadata for single URL")
+				if info, err := h.ytService.ExtractInfo(songURL); err == nil {
+					extractedTitle = info.Title
+					songs[0].Title = info.Title // Update title for saving and display
+				}
+			}
+		}
+
 		// Add all songs to playlist
 		addedCount := 0
 		for _, songInfo := range songs {
@@ -354,7 +450,7 @@ func (h *Handler) handlePlaylistAdd(s *discordgo.Session, i *discordgo.Interacti
 				guildID,
 				name,
 				songInfo.URL,
-				valueobjects.SourceTypeYouTube,
+				songInfo.SourceType,
 				songInfo.Title,
 			)
 			if err != nil {
@@ -378,9 +474,16 @@ func (h *Handler) handlePlaylistAdd(s *discordgo.Session, i *discordgo.Interacti
 				Field("Songs Added", fmt.Sprintf("%d", addedCount), true).
 				Build()
 		} else {
+			displayTitle := extractedTitle
+			if displayTitle == "" {
+				displayTitle = songs[0].Title
+			}
+			if displayTitle == "" || displayTitle == songs[0].URL {
+				displayTitle = songQuery
+			}
 			embed = NewEmbed().
 				Title("✅ Song Added").
-				Description(fmt.Sprintf("Added **%s** to playlist **%s**", songs[0].Title, name)).
+				Description(fmt.Sprintf("Added **%s** to playlist **%s**", displayTitle, name)).
 				Color(ColorSuccess).
 				Build()
 		}
@@ -417,4 +520,66 @@ func (h *Handler) handlePlaylistAdd(s *discordgo.Session, i *discordgo.Interacti
 		Build()
 
 	return respondEmbed(s, i, embed)
+}
+
+// parseIndexes parses a string containing song indexes and returns a sorted slice of unique indexes
+// Supports formats:
+// - "2-5" (range)
+// - "2, 3, 10" (list with spaces)
+// - "2,3,10" (list without spaces)
+// - "1-3,5,7-9" (mixed)
+func parseIndexes(input string) ([]int, error) {
+	input = strings.ReplaceAll(input, " ", "") // Remove all spaces
+	if input == "" {
+		return nil, fmt.Errorf("empty input")
+	}
+
+	indexMap := make(map[int]bool) // Use map to avoid duplicates
+
+	// Split by comma
+	parts := strings.Split(input, ",")
+	for _, part := range parts {
+		// Check if it's a range (contains '-')
+		if strings.Contains(part, "-") {
+			rangeParts := strings.Split(part, "-")
+			if len(rangeParts) != 2 {
+				return nil, fmt.Errorf("invalid range format: %s", part)
+			}
+
+			start, err := strconv.Atoi(rangeParts[0])
+			if err != nil || start < 1 {
+				return nil, fmt.Errorf("invalid start index in range: %s", rangeParts[0])
+			}
+
+			end, err := strconv.Atoi(rangeParts[1])
+			if err != nil || end < 1 {
+				return nil, fmt.Errorf("invalid end index in range: %s", rangeParts[1])
+			}
+
+			if start > end {
+				return nil, fmt.Errorf("invalid range: start (%d) is greater than end (%d)", start, end)
+			}
+
+			// Add all indexes in range
+			for i := start; i <= end; i++ {
+				indexMap[i] = true
+			}
+		} else {
+			// Single index
+			idx, err := strconv.Atoi(part)
+			if err != nil || idx < 1 {
+				return nil, fmt.Errorf("invalid index: %s", part)
+			}
+			indexMap[idx] = true
+		}
+	}
+
+	// Convert map to sorted slice
+	indexes := make([]int, 0, len(indexMap))
+	for idx := range indexMap {
+		indexes = append(indexes, idx)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(indexes))) // Sort descending to remove from end first
+
+	return indexes, nil
 }

@@ -8,12 +8,12 @@ func GetCommands() []*discordgo.ApplicationCommand {
 		// Playback commands
 		{
 			Name:        "play",
-			Description: "Play a song or playlist from YouTube URL or search query",
+			Description: "Play music from YouTube, Spotify, SoundCloud, or search query",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "query",
-					Description: "YouTube URL (video/playlist) or search query",
+					Description: "URL (YouTube/Spotify/SoundCloud) or search query",
 					Required:    true,
 				},
 			},
@@ -119,19 +119,19 @@ func GetCommands() []*discordgo.ApplicationCommand {
 		},
 		{
 			Name:        "add",
-			Description: "Quick add a song or playlist to the active playlist",
+			Description: "Add music from YouTube, Spotify, SoundCloud to queue",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "song",
-					Description: "YouTube URL (video/playlist) or search query",
+					Description: "URL (YouTube/Spotify/SoundCloud) or search query",
 					Required:    true,
 				},
 			},
 		},
 		{
 			Name:        "remove",
-			Description: "Remove a song from a playlist by index",
+			Description: "Remove songs from a playlist (supports: 2-5, 2,3,10, 2, 3, 10)",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -140,11 +140,10 @@ func GetCommands() []*discordgo.ApplicationCommand {
 					Required:    true,
 				},
 				{
-					Type:        discordgo.ApplicationCommandOptionInteger,
-					Name:        "index",
-					Description: "Song index (1-based)",
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "indexes",
+					Description: "Song index(es): single (5), range (2-5), list (2,3,10), or mixed (1-3,5,7-9)",
 					Required:    true,
-					MinValue:    func() *float64 { v := 1.0; return &v }(),
 				},
 			},
 		},
@@ -194,7 +193,7 @@ func GetCommands() []*discordgo.ApplicationCommand {
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "add",
-					Description: "Add a song or playlist to a playlist",
+					Description: "Add music from YouTube, Spotify, SoundCloud to playlist",
 					Options: []*discordgo.ApplicationCommandOption{
 						{
 							Type:        discordgo.ApplicationCommandOptionString,
@@ -205,7 +204,7 @@ func GetCommands() []*discordgo.ApplicationCommand {
 						{
 							Type:        discordgo.ApplicationCommandOptionString,
 							Name:        "song",
-							Description: "YouTube URL (video/playlist) or search (empty for current song)",
+							Description: "URL (YouTube/Spotify/SoundCloud) or search (empty for current song)",
 							Required:    false,
 						},
 					},

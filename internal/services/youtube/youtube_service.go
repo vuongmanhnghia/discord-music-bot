@@ -22,11 +22,12 @@ var (
 	ErrInvalidURL = errors.New("invalid YouTube URL")
 )
 
-// YouTubeInfo represents extracted YouTube video information
+// YouTubeInfo represents extracted video information from yt-dlp
+// Supports YouTube, SoundCloud, and other platforms
 type YouTubeInfo struct {
 	ID         string        `json:"id"`
 	Title      string        `json:"title"`
-	Duration   int           `json:"duration"`
+	Duration   float64       `json:"duration"` // Changed to float64 for SoundCloud compatibility
 	Uploader   string        `json:"uploader"`
 	Thumbnail  string        `json:"thumbnail"`
 	WebpageURL string        `json:"webpage_url"`
@@ -86,7 +87,7 @@ func (s *Service) ExtractInfo(url string) (*YouTubeInfo, error) {
 		return cached.(*YouTubeInfo), nil
 	}
 
-	s.logger.WithField("url", url).Info("Extracting YouTube info...")
+	s.logger.WithField("url", url).Info("Extracting video info...")
 
 	// Build yt-dlp command
 	args := []string{
@@ -282,7 +283,15 @@ func (s *Service) GetStreamURL(videoID string) (string, error) {
 		return cached.(string), nil
 	}
 
-	videoURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+	// videoID can be either a YouTube video ID or a full URL (for SoundCloud, etc.)
+	var videoURL string
+	if strings.HasPrefix(videoID, "http://") || strings.HasPrefix(videoID, "https://") {
+		// Already a full URL (e.g., SoundCloud)
+		videoURL = videoID
+	} else {
+		// YouTube video ID, construct URL
+		videoURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+	}
 
 	args := []string{
 		"--get-url",
@@ -325,7 +334,7 @@ func IsYouTubeURL(url string) bool {
 func (info *YouTubeInfo) ToSongMetadata() *valueobjects.SongMetadata {
 	return &valueobjects.SongMetadata{
 		Title:     info.Title,
-		Duration:  info.Duration, // Duration is in seconds
+		Duration:  int(info.Duration), // Convert float64 to int (rounds down)
 		Thumbnail: info.Thumbnail,
 		Uploader:  info.Uploader,
 	}
