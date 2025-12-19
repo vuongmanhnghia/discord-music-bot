@@ -209,6 +209,25 @@ func GetCommands() []*discordgo.ApplicationCommand {
 						},
 					},
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "rename",
+					Description: "Rename an existing playlist",
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "oldname",
+							Description: "Current playlist name",
+							Required:    true,
+						},
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "newname",
+							Description: "New playlist name",
+							Required:    true,
+						},
+					},
+				},
 			},
 		},
 

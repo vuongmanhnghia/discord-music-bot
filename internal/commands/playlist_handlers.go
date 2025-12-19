@@ -339,6 +339,8 @@ func (h *Handler) handlePlaylistSubcommand(s *discordgo.Session, i *discordgo.In
 		return h.handlePlaylistShow(s, i, subCmd)
 	case "add":
 		return h.handlePlaylistAdd(s, i, subCmd)
+	case "rename":
+		return h.handlePlaylistRename(s, i, subCmd)
 	default:
 		return respondError(s, i, "Unknown subcommand")
 	}
@@ -517,6 +519,43 @@ func (h *Handler) handlePlaylistAdd(s *discordgo.Session, i *discordgo.Interacti
 		Title("Current Song Added").
 		Description(fmt.Sprintf("Added **%s** to playlist **%s**", current.DisplayName(), name)).
 		Color(ColorSuccess).
+		Build()
+
+	return respondEmbed(s, i, embed)
+}
+
+func (h *Handler) handlePlaylistRename(s *discordgo.Session, i *discordgo.InteractionCreate, subCmd *discordgo.ApplicationCommandInteractionDataOption) error {
+	guildID := i.GuildID
+	oldName := subCmd.Options[0].StringValue()
+	newName := subCmd.Options[1].StringValue()
+
+	// Validate new name
+	if newName == "" {
+		return respondError(s, i, "New playlist name cannot be empty")
+	}
+
+	if oldName == newName {
+		return respondError(s, i, "New name is the same as the old name")
+	}
+
+	// Rename playlist
+	if err := h.playlistService.RenamePlaylistForGuild(guildID, oldName, newName); err != nil {
+		return respondError(s, i, err.Error())
+	}
+
+	// Update active playlist if it was the renamed one
+	h.activePlaylistMu.Lock()
+	if h.activePlaylist[guildID] == oldName {
+		h.activePlaylist[guildID] = newName
+	}
+	h.activePlaylistMu.Unlock()
+
+	embed := NewEmbed().
+		Title("✅ Playlist Renamed").
+		Description(fmt.Sprintf("**%s** → **%s**", oldName, newName)).
+		Color(ColorSuccess).
+		Field("Old Name", oldName, true).
+		Field("New Name", newName, true).
 		Build()
 
 	return respondEmbed(s, i, embed)

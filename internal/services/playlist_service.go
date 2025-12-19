@@ -237,3 +237,38 @@ func (s *PlaylistService) PlaylistExists(name string) bool {
 func (s *PlaylistService) PlaylistExistsForGuild(guildID, name string) bool {
 	return s.repo.Exists(guildID, name)
 }
+
+// RenamePlaylistForGuild renames an existing playlist for a specific guild
+func (s *PlaylistService) RenamePlaylistForGuild(guildID, oldName, newName string) error {
+	// Check if old playlist exists
+	if !s.repo.Exists(guildID, oldName) {
+		return fmt.Errorf("playlist '%s' does not exist", oldName)
+	}
+
+	// Check if new name already exists
+	if s.repo.Exists(guildID, newName) {
+		return fmt.Errorf("playlist '%s' already exists", newName)
+	}
+
+	// Load old playlist
+	playlist, err := s.repo.Load(guildID, oldName)
+	if err != nil {
+		return fmt.Errorf("failed to load playlist: %w", err)
+	}
+
+	// Update playlist name
+	playlist.Name = newName
+
+	// Save with new name
+	if err := s.repo.Save(guildID, playlist); err != nil {
+		return fmt.Errorf("failed to save renamed playlist: %w", err)
+	}
+
+	// Delete old playlist
+	if err := s.repo.Delete(guildID, oldName); err != nil {
+		s.logger.WithError(err).Warn("Failed to delete old playlist after rename")
+		// Not returning error here because the new playlist is already saved
+	}
+
+	return nil
+}
