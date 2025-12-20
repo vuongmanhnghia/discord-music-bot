@@ -89,8 +89,8 @@ func New(cfg *config.Config, log *logger.Logger) (*MusicBot, error) {
 	// Initialize audio service
 	audioService := audio.NewAudioService(session, log)
 
-	// Initialize processing service (4 workers, queue size 100)
-	processingService := services.NewProcessingService(ytService, 4, 100, log)
+	// Initialize processing service with config values
+	processingService := services.NewProcessingService(ytService, cfg.WorkerCount, cfg.MaxQueueSize, log)
 
 	// Initialize playback service
 	playbackService := services.NewPlaybackService(session, audioService, processingService, log)

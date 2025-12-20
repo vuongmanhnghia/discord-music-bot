@@ -535,3 +535,135 @@ func absFloat(x float64) float64 {
 	}
 	return x
 }
+
+// resolveSpotifyTrackToYouTube searches YouTube for a Spotify track
+// Returns YouTube URL or empty string if not found
+func (h *Handler) resolveSpotifyTrackToYouTube(track spotify.Track) string {
+	var videoID string
+	var found bool
+	spotifyDuration := track.GetDurationSeconds()
+
+	// Strategy 1: Try ISRC search first (most accurate)
+	if isrc := track.GetISRC(); isrc != "" {
+		h.logger.WithFields(map[string]interface{}{
+			"track": track.Name,
+			"isrc":  isrc,
+		}).Debug("Trying ISRC search")
+
+		if info, err := h.ytService.SearchByISRC(isrc); err == nil {
+			// Verify duration (±5 seconds tolerance)
+			if absFloat(info.Duration-float64(spotifyDuration)) <= 5 {
+				videoID = info.ID
+				found = true
+				h.logger.WithField("track", track.Name).Info("✅ Found by ISRC with duration match")
+			} else {
+				h.logger.WithFields(map[string]interface{}{
+					"track":            track.Name,
+					"spotify_duration": spotifyDuration,
+					"youtube_duration": info.Duration,
+				}).Warn("ISRC match but duration mismatch, trying other methods")
+			}
+		}
+	}
+
+	// Strategy 2: Try detailed search with album info
+	if !found {
+		detailedQuery := track.ToDetailedSearchQuery()
+		h.logger.WithField("query", detailedQuery).Debug("Trying detailed search")
+
+		results, err := h.ytService.Search(detailedQuery, 3)
+		if err == nil && len(results) > 0 {
+			bestMatch := findBestDurationMatch(results, spotifyDuration)
+			if bestMatch != nil {
+				videoID = bestMatch.ID
+				found = true
+				h.logger.WithField("track", track.Name).Info("✅ Found by detailed search")
+			}
+		}
+	}
+
+	// Strategy 3: Fall back to simple search
+	if !found {
+		simpleQuery := track.ToSearchQuery()
+		h.logger.WithField("query", simpleQuery).Debug("Trying simple search")
+
+		results, err := h.ytService.Search(simpleQuery, 3)
+		if err != nil {
+			h.logger.WithError(err).WithField("track", track.Name).Warn("All search methods failed")
+			return ""
+		}
+
+		if len(results) == 0 {
+			h.logger.WithField("track", track.Name).Warn("No YouTube results found")
+			return ""
+		}
+
+		bestMatch := findBestDurationMatch(results, spotifyDuration)
+		if bestMatch != nil {
+			videoID = bestMatch.ID
+			found = true
+			h.logger.WithField("track", track.Name).Info("✅ Found by simple search")
+		} else {
+			// Last resort: use first result
+			videoID = results[0].ID
+			h.logger.WithField("track", track.Name).Warn("⚠️ Using first result (no duration match)")
+		}
+	}
+
+	if videoID == "" {
+		return ""
+	}
+
+	return fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+}
+
+// addSpotifyTracksProgressively resolves Spotify tracks to YouTube progressively
+// Resolves initialCount tracks immediately, then resolves remaining in background
+// Returns: initial songs resolved and total track count
+func (h *Handler) addSpotifyTracksProgressively(guildID, userID string, tracks []spotify.Track, initialCount int) ([]SongInfo, int) {
+	totalTracks := len(tracks)
+	if initialCount <= 0 || initialCount > totalTracks {
+		initialCount = totalTracks
+	}
+
+	// Resolve initial batch immediately
+	initialSongs := make([]SongInfo, 0, initialCount)
+	for i := 0; i < initialCount && i < totalTracks; i++ {
+		ytURL := h.resolveSpotifyTrackToYouTube(tracks[i])
+		if ytURL != "" {
+			initialSongs = append(initialSongs, SongInfo{
+				URL:        ytURL,
+				Title:      tracks[i].Name,
+				SourceType: valueobjects.SourceTypeYouTube,
+			})
+		}
+	}
+
+	// Resolve and add remaining tracks in background
+	if totalTracks > initialCount {
+		remaining := tracks[initialCount:]
+		h.logger.WithFields(map[string]interface{}{
+			"initial_resolved": len(initialSongs),
+			"remaining":        len(remaining),
+			"total":            totalTracks,
+		}).Info("Resolving remaining Spotify tracks in background...")
+
+		go func() {
+			for _, track := range remaining {
+				ytURL := h.resolveSpotifyTrackToYouTube(track)
+				if ytURL == "" {
+					continue
+				}
+
+				song := entities.NewSong(ytURL, valueobjects.SourceTypeYouTube, userID, guildID)
+				if err := h.playbackService.AddSong(guildID, song); err != nil {
+					h.logger.WithError(err).Debug("Failed to add background Spotify song")
+					continue
+				}
+			}
+			h.logger.WithField("count", len(remaining)).Info("✅ Finished resolving background Spotify tracks")
+		}()
+	}
+
+	return initialSongs, totalTracks
+}

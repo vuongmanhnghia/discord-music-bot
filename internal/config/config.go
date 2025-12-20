@@ -38,6 +38,7 @@ type Config struct {
 	MaxQueueSize         int
 	CacheSizeMB          int
 	CacheDurationMinutes int
+	InitialLoadSize      int
 }
 
 // Load reads configuration from environment variables
@@ -99,6 +100,7 @@ func Load() (*Config, error) {
 		MaxQueueSize:         getEnvInt("MAX_QUEUE_SIZE", 100),
 		CacheSizeMB:          getEnvInt("CACHE_SIZE_MB", 100),
 		CacheDurationMinutes: getEnvInt("CACHE_DURATION_MINUTES", 360),
+		InitialLoadSize:      getEnvInt("INITIAL_LOAD_SIZE", 5),
 	}
 
 	// Create directories if needed (for file-based fallback)
