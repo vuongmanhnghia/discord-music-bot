@@ -40,10 +40,6 @@ func GetCommands() []*discordgo.ApplicationCommand {
 			},
 		},
 		{
-			Name:        "stop",
-			Description: "Stop playback and clear the queue",
-		},
-		{
 			Name:        "volume",
 			Description: "Adjust playback volume (0-100%)",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -73,7 +69,7 @@ func GetCommands() []*discordgo.ApplicationCommand {
 		},
 		{
 			Name:        "clear",
-			Description: "Clear the queue and reset playback state",
+			Description: "Stop playback, clear queue, reset all state and cache (full reset)",
 		},
 		{
 			Name:        "repeat",

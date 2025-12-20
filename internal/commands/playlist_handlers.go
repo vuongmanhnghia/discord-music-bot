@@ -141,13 +141,27 @@ func (h *Handler) handleUsePlaylist(s *discordgo.Session, i *discordgo.Interacti
 		}).Info("Loading remaining playlist songs in background...")
 
 		go func(guildID string, songs []*entities.Song) {
+			addedCount := 0
 			for _, song := range songs {
+				// Check if playback is still active before adding more songs
+				if !h.playbackService.IsPlaying(guildID) {
+					h.logger.WithField("added", addedCount).Info("⏹️ Playback stopped, halting background playlist loading")
+					return
+				}
+
+				// Check if tracklist still exists
+				if h.playbackService.GetTracklist(guildID) == nil {
+					h.logger.WithField("added", addedCount).Info("⏹️ Tracklist cleared, halting background playlist loading")
+					return
+				}
+
 				if err := h.playbackService.AddSong(guildID, song); err != nil {
 					h.logger.WithError(err).Debug("Failed to add background song to queue")
 					continue
 				}
+				addedCount++
 			}
-			h.logger.WithField("count", len(songs)).Info("✅ Finished loading background playlist songs")
+			h.logger.WithField("count", addedCount).Info("✅ Finished loading background playlist songs")
 		}(i.GuildID, remainingSongs)
 	}
 

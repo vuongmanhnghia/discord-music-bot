@@ -101,8 +101,6 @@ func (h *Handler) HandleInteraction(s *discordgo.Session, i *discordgo.Interacti
 		err = h.handleResume(s, i)
 	case "skip":
 		err = h.handleSkip(s, i)
-	case "stop":
-		err = h.handleStop(s, i)
 	case "volume":
 		err = h.handleVolume(s, i)
 

@@ -78,22 +78,37 @@ func (h *Handler) handleShuffle(s *discordgo.Session, i *discordgo.InteractionCr
 
 // handleClear handles the clear command
 func (h *Handler) handleClear(s *discordgo.Session, i *discordgo.InteractionCreate) error {
-	// Stop playback
+	h.logger.WithField("guild", i.GuildID).Info("🔄 Performing full reset...")
+
+	// 1. Stop playback immediately
 	h.playbackService.Stop(i.GuildID)
 
-	// Clear queue
+	// 2. Clear queue
 	if tracklist := h.playbackService.GetTracklist(i.GuildID); tracklist != nil {
 		tracklist.Clear()
 	}
 
-	// Clear active playlist
+	// 3. Clear active playlist
 	h.activePlaylistMu.Lock()
 	delete(h.activePlaylist, i.GuildID)
 	h.activePlaylistMu.Unlock()
 
+	// 4. Clear YouTube cache
+	h.ytService.ClearCache()
+
+	// 5. Leave voice channel to fully disconnect
+	voiceConnections := s.VoiceConnections
+	if vc, exists := voiceConnections[i.GuildID]; exists && vc != nil {
+		if err := vc.Disconnect(); err != nil {
+			h.logger.WithError(err).Warn("Failed to disconnect from voice channel")
+		}
+	}
+
+	h.logger.Info("✅ Full reset completed")
+
 	embed := NewEmbed().
-		Title("Queue Cleared").
-		Description("Playback stopped and queue has been cleared\nActive playlist has been reset").
+		Title("🔄 Bot Reset Complete").
+		Description("✅ All operations stopped\n✅ Queue cleared\n✅ Active playlist reset\n✅ Cache cleared\n✅ Disconnected from voice\n\nBot is back to initial state").
 		Color(ColorWarning).
 		Build()
 

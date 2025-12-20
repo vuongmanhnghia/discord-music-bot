@@ -522,25 +522,6 @@ func (h *Handler) buildSkipEmbed(nextSong *entities.Song, title string) *discord
 	return builder.Build()
 }
 
-// handleStop handles the stop command
-func (h *Handler) handleStop(s *discordgo.Session, i *discordgo.InteractionCreate) error {
-	if err := h.playbackService.Stop(i.GuildID); err != nil {
-		return respondError(s, i, "No active playback to stop")
-	}
-
-	if tracklist := h.playbackService.GetTracklist(i.GuildID); tracklist != nil {
-		tracklist.Clear()
-	}
-
-	embed := NewEmbed().
-		Title("⏹️ Playback Stopped").
-		Description("Playback has been stopped and the queue has been cleared").
-		Color(ColorError).
-		Build()
-
-	return respondEmbed(s, i, embed)
-}
-
 // handleVolume handles the volume command
 func (h *Handler) handleVolume(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	options := i.ApplicationCommandData().Options
@@ -727,7 +708,20 @@ func (h *Handler) addSpotifyTracksProgressively(guildID, userID string, tracks [
 		}).Info("Resolving remaining Spotify tracks in background...")
 
 		go func() {
+			addedCount := 0
 			for _, track := range remaining {
+				// Check if playback is still active before adding more songs
+				if !h.playbackService.IsPlaying(guildID) {
+					h.logger.WithField("added", addedCount).Info("⏹️ Playback stopped, halting background Spotify track loading")
+					return
+				}
+
+				// Check if tracklist still exists
+				if h.playbackService.GetTracklist(guildID) == nil {
+					h.logger.WithField("added", addedCount).Info("⏹️ Tracklist cleared, halting background Spotify track loading")
+					return
+				}
+
 				ytURL := h.resolveSpotifyTrackToYouTube(track)
 				if ytURL == "" {
 					continue
@@ -738,8 +732,9 @@ func (h *Handler) addSpotifyTracksProgressively(guildID, userID string, tracks [
 					h.logger.WithError(err).Debug("Failed to add background Spotify song")
 					continue
 				}
+				addedCount++
 			}
-			h.logger.WithField("count", len(remaining)).Info("✅ Finished resolving background Spotify tracks")
+			h.logger.WithField("count", addedCount).Info("✅ Finished resolving background Spotify tracks")
 		}()
 	}
 
