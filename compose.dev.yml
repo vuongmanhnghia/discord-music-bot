@@ -1,42 +1,89 @@
-services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: music-bot-db
-    hostname: postgres
-    restart: unless-stopped
+# services:
+#   postgres:
+#     image: postgres:16-alpine
+#     container_name: music-bot-db
+#     hostname: postgres
+#     restart: unless-stopped
     
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-music_bot}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-music_bot_db_pass}
-      POSTGRES_DB: ${POSTGRES_DB:-music_bot}
-      TZ: Asia/Ho_Chi_Minh
+#     environment:
+#       POSTGRES_USER: ${POSTGRES_USER:-music_bot}
+#       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-music_bot_db_pass}
+#       POSTGRES_DB: ${POSTGRES_DB:-music_bot}
+#       TZ: Asia/Ho_Chi_Minh
     
-    ports:
-      - "5432:5432"
+#     ports:
+#       - "5432:5432"
     
-    volumes:
-      - db_data:/var/lib/postgresql/data
+#     volumes:
+#       - db_data:/var/lib/postgresql/data
 
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-music_bot} -d ${POSTGRES_DB:-music_bot}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+#     healthcheck:
+#       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-music_bot} -d ${POSTGRES_DB:-music_bot}"]
+#       interval: 10s
+#       timeout: 5s
+#       retries: 5
+#       start_period: 10s
+    
+#     deploy:
+#       resources:
+#         limits:
+#           cpus: '1'
+#           memory: 256M
+#         reservations:
+#           cpus: '0.1'
+#           memory: 64M
+
+# networks:
+#   default:
+#     name: music-bot-network
+#     external: true
+
+# volumes:
+#   db_data:
+
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: discord-music-bot
     
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 256M
+          cpus: '2'
+          memory: 512M
         reservations:
-          cpus: '0.1'
-          memory: 64M
-
-networks:
-  default:
-    name: music-bot-network
-    external: true
-
-volumes:
-  db_data:
+          cpus: '0.5'
+          memory: 256M
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Environment configuration
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+      - LOG_LEVEL=info
+    
+    # Volume mounts
+    volumes:
+      - ./playlist:/app/playlist:rw
+      - ./logs:/app/logs:rw
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "pgrep", "music-bot"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

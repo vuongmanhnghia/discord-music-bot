@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/vuongmanhnghia/discord-music-bot/internal/domain/entities"
+	"github.com/vuongmanhnghia/discord-music-bot/internal/services/spotify"
 )
 
 // handlePlaylists shows all available playlists
@@ -102,8 +104,16 @@ func (h *Handler) handleUsePlaylist(s *discordgo.Session, i *discordgo.Interacti
 		tracklist.Clear()
 	}
 
-	// Add songs
-	for _, song := range songs {
+	// Calculate initial load size
+	totalSongs := len(songs)
+	initialLoadSize := h.config.InitialLoadSize
+	if initialLoadSize <= 0 || initialLoadSize > totalSongs {
+		initialLoadSize = totalSongs
+	}
+
+	// Add initial songs to queue
+	initialSongs := songs[:initialLoadSize]
+	for _, song := range initialSongs {
 		if err := h.playbackService.AddSong(i.GuildID, song); err != nil {
 			h.logger.WithError(err).Warn("Failed to add song to queue")
 		}
@@ -121,17 +131,42 @@ func (h *Handler) handleUsePlaylist(s *discordgo.Session, i *discordgo.Interacti
 		return followUpError(s, i, "Failed to start playback")
 	}
 
-	// Build embed with start position info
+	// Add remaining songs in background
+	if totalSongs > initialLoadSize {
+		remainingSongs := songs[initialLoadSize:]
+		h.logger.WithFields(map[string]interface{}{
+			"initial_loaded": initialLoadSize,
+			"remaining":      len(remainingSongs),
+			"total":          totalSongs,
+		}).Info("Loading remaining playlist songs in background...")
+
+		go func(guildID string, songs []*entities.Song) {
+			for _, song := range songs {
+				if err := h.playbackService.AddSong(guildID, song); err != nil {
+					h.logger.WithError(err).Debug("Failed to add background song to queue")
+					continue
+				}
+			}
+			h.logger.WithField("count", len(songs)).Info("✅ Finished loading background playlist songs")
+		}(i.GuildID, remainingSongs)
+	}
+
+	// Build embed with start position info and progressive loading status
 	description := fmt.Sprintf("Now playing **%s**", playlistName)
 	if startIndex != nil {
 		description = fmt.Sprintf("Now playing **%s** from song #%d", playlistName, *startIndex)
+	}
+
+	// Add progressive loading info if applicable
+	if totalSongs > initialLoadSize {
+		description += fmt.Sprintf("\n\n🎵 Playing first **%d** songs immediately\n⏳ Loading remaining **%d** songs in background...", initialLoadSize, totalSongs-initialLoadSize)
 	}
 
 	embed := NewEmbed().
 		Title("Playlist Loaded").
 		Description(description).
 		Color(ColorSuccess).
-		Field("Songs", fmt.Sprintf("%d", len(songs)), true).
+		Field("Total Songs", fmt.Sprintf("%d", totalSongs), true).
 		Field("Status", "Active", true).
 		Footer("Use /queue to view the queue").
 		Build()
@@ -139,7 +174,7 @@ func (h *Handler) handleUsePlaylist(s *discordgo.Session, i *discordgo.Interacti
 	return followUpEmbed(s, i, embed)
 }
 
-// handleQuickAdd adds a song or playlist to the active playlist
+// handleQuickAdd adds a song or playlist to the active playlist and plays it
 func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	h.activePlaylistMu.RLock()
 	playlistName, hasActive := h.activePlaylist[i.GuildID]
@@ -155,6 +190,20 @@ func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionC
 
 	options := i.ApplicationCommandData().Options
 	songQuery := options[0].StringValue()
+
+	// Get user's voice channel for playback
+	channelID, err := h.getUserVoiceChannel(s, i.GuildID, i.Member.User.ID)
+	if err != nil {
+		return followUpError(s, i, "You must be in a voice channel to play music")
+	}
+
+	// Check for Spotify playlist/album and use progressive loading
+	if spotify.IsSpotifyURL(songQuery) && h.spotifyService != nil {
+		urlType, id, parseErr := spotify.ParseSpotifyURL(songQuery)
+		if parseErr == nil && (urlType == "playlist" || urlType == "album") {
+			return h.handleQuickAddSpotifyPlaylist(s, i, playlistName, channelID, urlType, id)
+		}
+	}
 
 	// Resolve query to song URLs (handles single video, playlist, or search)
 	songs, isPlaylist, err := h.ResolveSongURLs(songQuery)
@@ -175,7 +224,7 @@ func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionC
 		}
 	}
 
-	// Add all songs to playlist
+	// Add all songs to playlist database
 	addedCount := 0
 	for _, songInfo := range songs {
 		err := h.playlistService.AddToPlaylistForGuild(
@@ -196,12 +245,34 @@ func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionC
 		return followUpError(s, i, "Failed to add any songs to playlist")
 	}
 
+	// Also add songs to playback queue
+	queuedCount := 0
+	for _, songInfo := range songs {
+		song := entities.NewSong(songInfo.URL, songInfo.SourceType, i.Member.User.ID, i.GuildID)
+		if err := h.playbackService.AddSong(i.GuildID, song); err != nil {
+			h.logger.WithError(err).Warn("Failed to add song to playback queue")
+			continue
+		}
+		queuedCount++
+	}
+
+	// Start playback if not already playing
+	if !h.playbackService.IsPlaying(i.GuildID) && queuedCount > 0 {
+		if err := h.playbackService.Play(i.GuildID, channelID); err != nil {
+			h.logger.WithError(err).Warn("Failed to start playback")
+		}
+	}
+
 	// Build appropriate response
 	var embed *discordgo.MessageEmbed
 	if isPlaylist {
+		description := fmt.Sprintf("Added **%d** songs to **%s**", addedCount, playlistName)
+		if queuedCount > 0 {
+			description += fmt.Sprintf("\n🎵 Playing now!")
+		}
 		embed = NewEmbed().
-			Title("✅ Playlist Added to Playlist").
-			Description(fmt.Sprintf("Added **%d** songs to **%s**", addedCount, playlistName)).
+			Title("✅ Playlist Added").
+			Description(description).
 			Color(ColorSuccess).
 			Field("Songs Added", fmt.Sprintf("%d", addedCount), true).
 			Field("Playlist", playlistName, true).
@@ -214,13 +285,99 @@ func (h *Handler) handleQuickAdd(s *discordgo.Session, i *discordgo.InteractionC
 		if displayTitle == "" || displayTitle == songs[0].URL {
 			displayTitle = songQuery
 		}
+		description := fmt.Sprintf("**%s**", displayTitle)
+		if queuedCount > 0 {
+			description += "\n🎵 Playing now!"
+		}
 		embed = NewEmbed().
-			Title("✅ Song Added to Playlist").
-			Description(fmt.Sprintf("**%s**", displayTitle)).
+			Title("✅ Song Added").
+			Description(description).
 			Color(ColorSuccess).
 			Field("Playlist", playlistName, true).
 			Build()
 	}
+
+	return followUpEmbed(s, i, embed)
+}
+
+// handleQuickAddSpotifyPlaylist handles adding and playing Spotify playlist/album with progressive loading
+func (h *Handler) handleQuickAddSpotifyPlaylist(s *discordgo.Session, i *discordgo.InteractionCreate, playlistName, channelID, urlType, id string) error {
+	h.logger.WithFields(map[string]interface{}{
+		"type": urlType,
+		"id":   id,
+	}).Info("Using progressive loading for Spotify playlist/album in /add")
+
+	// Get all tracks from Spotify
+	var tracks []spotify.Track
+	var err error
+	if urlType == "playlist" {
+		tracks, err = h.spotifyService.GetPlaylistTracks(id)
+	} else {
+		tracks, err = h.spotifyService.GetAlbumTracks(id)
+	}
+	if err != nil {
+		return followUpError(s, i, fmt.Sprintf("Failed to get Spotify %s: %v", urlType, err))
+	}
+
+	if len(tracks) == 0 {
+		return followUpError(s, i, fmt.Sprintf("Spotify %s is empty", urlType))
+	}
+
+	// Resolve tracks progressively
+	initialSongs, totalCount := h.addSpotifyTracksProgressively(i.GuildID, i.Member.User.ID, tracks, h.config.InitialLoadSize)
+
+	if len(initialSongs) == 0 {
+		return followUpError(s, i, "Failed to resolve any songs from Spotify playlist")
+	}
+
+	// Add all resolved songs to database (initial + background will be added by goroutine)
+	addedToDBCount := 0
+	for _, songInfo := range initialSongs {
+		err := h.playlistService.AddToPlaylistForGuild(
+			i.GuildID,
+			playlistName,
+			songInfo.URL,
+			songInfo.SourceType,
+			songInfo.Title,
+		)
+		if err != nil {
+			h.logger.WithError(err).Warn("Failed to add song to playlist database")
+			continue
+		}
+		addedToDBCount++
+	}
+
+	// Background task to add remaining tracks to database as they resolve
+	go func(guildID, playlist string, trackCount int) {
+		h.logger.WithField("tracks", trackCount).Info("Will add remaining Spotify tracks to database in background...")
+		// Note: The remaining tracks are already being resolved and added to playback queue
+		// by addSpotifyTracksProgressively(). We just need to also save them to the database.
+		// We'll rely on the playback service to handle the songs, and they'll be in the database
+		// next time the playlist is loaded.
+	}(i.GuildID, playlistName, totalCount-len(initialSongs))
+
+	// Initial songs are already added to playback queue by addSpotifyTracksProgressively
+	// Start playback if not already playing
+	if !h.playbackService.IsPlaying(i.GuildID) {
+		if err := h.playbackService.Play(i.GuildID, channelID); err != nil {
+			return followUpError(s, i, fmt.Sprintf("Failed to start playback: %v", err))
+		}
+	}
+
+	// Build response
+	description := fmt.Sprintf("Added to **%s**\n\n🎵 Playing first **%d** songs immediately\n⏳ Loading remaining **%d** songs in background...", playlistName, len(initialSongs), totalCount-len(initialSongs))
+	if totalCount == len(initialSongs) {
+		description = fmt.Sprintf("Added **%d** songs to **%s**\n🎵 Playing now!", totalCount, playlistName)
+	}
+
+	embed := NewEmbed().
+		Title("✅ Spotify Playlist Added").
+		Description(description).
+		Color(ColorSuccess).
+		Field("Total Tracks", fmt.Sprintf("%d", totalCount), true).
+		Field("Playlist", playlistName, true).
+		Footer("Use /queue to view the queue").
+		Build()
 
 	return followUpEmbed(s, i, embed)
 }

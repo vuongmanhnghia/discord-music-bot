@@ -26,6 +26,14 @@ func (h *Handler) handlePlay(s *discordgo.Session, i *discordgo.InteractionCreat
 		return followUpError(s, i, "You must be in a voice channel to play music")
 	}
 
+	// Check for Spotify playlist/album and use progressive loading
+	if spotify.IsSpotifyURL(query) && h.spotifyService != nil {
+		urlType, id, err := spotify.ParseSpotifyURL(query)
+		if err == nil && (urlType == "playlist" || urlType == "album") {
+			return h.handleSpotifyPlaylistPlay(s, i, urlType, id, channelID)
+		}
+	}
+
 	// Resolve query to song URLs (handles single video, playlist, or search)
 	songs, isPlaylist, err := h.ResolveSongURLs(query)
 	if err != nil {
@@ -92,6 +100,76 @@ func (h *Handler) handlePlay(s *discordgo.Session, i *discordgo.InteractionCreat
 			Footer("Use /queue to view the queue").
 			Build()
 	}
+
+	return followUpEmbed(s, i, embed)
+}
+
+// handleSpotifyPlaylistPlay handles Spotify playlist/album with progressive loading
+func (h *Handler) handleSpotifyPlaylistPlay(s *discordgo.Session, i *discordgo.InteractionCreate, urlType, id, channelID string) error {
+	h.logger.WithFields(map[string]interface{}{
+		"type": urlType,
+		"id":   id,
+	}).Info("Using progressive loading for Spotify playlist/album")
+
+	// Get all tracks from Spotify
+	var tracks []spotify.Track
+	var err error
+	if urlType == "playlist" {
+		tracks, err = h.spotifyService.GetPlaylistTracks(id)
+	} else {
+		tracks, err = h.spotifyService.GetAlbumTracks(id)
+	}
+	if err != nil {
+		return followUpError(s, i, fmt.Sprintf("Failed to get Spotify %s: %v", urlType, err))
+	}
+
+	if len(tracks) == 0 {
+		return followUpError(s, i, fmt.Sprintf("Spotify %s is empty", urlType))
+	}
+
+	// Resolve tracks progressively
+	initialSongs, totalCount := h.addSpotifyTracksProgressively(i.GuildID, i.Member.User.ID, tracks, h.config.InitialLoadSize)
+
+	if len(initialSongs) == 0 {
+		return followUpError(s, i, "Failed to resolve any songs from Spotify playlist")
+	}
+
+	// Add initial songs to queue
+	addedCount := 0
+	for _, songInfo := range initialSongs {
+		song := entities.NewSong(songInfo.URL, songInfo.SourceType, i.Member.User.ID, i.GuildID)
+		if err := h.playbackService.AddSong(i.GuildID, song); err != nil {
+			h.logger.WithError(err).Warn("Failed to add song")
+			continue
+		}
+		addedCount++
+	}
+
+	if addedCount == 0 {
+		return followUpError(s, i, "Failed to add any songs to queue")
+	}
+
+	// Start playback if not already playing
+	if !h.playbackService.IsPlaying(i.GuildID) {
+		if err := h.playbackService.Play(i.GuildID, channelID); err != nil {
+			return followUpError(s, i, fmt.Sprintf("Failed to start playback: %v", err))
+		}
+	}
+
+	// Build response showing progressive loading
+	description := fmt.Sprintf("🎵 Playing first **%d** songs immediately\n⏳ Loading remaining **%d** songs in background...", addedCount, totalCount-addedCount)
+	if totalCount == addedCount {
+		description = fmt.Sprintf("✅ Successfully added **%d** songs to the queue", addedCount)
+	}
+
+	embed := NewEmbed().
+		Title("📻 Spotify Playlist Added").
+		Description(description).
+		Color(ColorSuccess).
+		Field("Total Tracks", fmt.Sprintf("%d", totalCount), true).
+		Field("Playing Now", fmt.Sprintf("%d", addedCount), true).
+		Footer("Use /queue to view the queue").
+		Build()
 
 	return followUpEmbed(s, i, embed)
 }

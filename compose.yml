@@ -1,11 +1,5 @@
 services:
   bot_1:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      # args:
-      #   VERSION: "2.0.0"
-      #   BUILD_TIME: "${BUILD_TIME:-unknown}"
     image: nooblearn2code/discord-music-bot:latest
     container_name: dmb-instance-1
     hostname: music-bot
@@ -51,12 +45,6 @@ services:
         max-file: "3"
 
   bot_2:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      # args:
-      #   VERSION: "2.0.0"
-      #   BUILD_TIME: "${BUILD_TIME:-unknown}"
     image: nooblearn2code/discord-music-bot:latest
     container_name: dmb-instance-2
     hostname: music-bot
@@ -102,12 +90,6 @@ services:
         max-file: "3"
 
   bot_3:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      # args:
-      #   VERSION: "2.0.0"
-      #   BUILD_TIME: "${BUILD_TIME:-unknown}"
     image: nooblearn2code/discord-music-bot:latest
     container_name: dmb-instance-3
     hostname: music-bot
