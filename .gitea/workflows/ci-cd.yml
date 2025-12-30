@@ -1,0 +1,111 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip build]')
+    container:
+      image: catthehacker/ubuntu:act-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/discord-music-bot:latest
+          platforms: linux/arm64
+          cache-from: |
+            type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/discord-music-bot:latest
+            type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/discord-music-bot:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/discord-music-bot:buildcache,mode=max
+          provenance: false
+
+  deploy:
+    name: Deploy Application
+    runs-on: rpi-runner
+    needs: build
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    container:
+      image: catthehacker/ubuntu:act-latest
+      volumes:
+        - /opt/dmb:/opt/dmb
+    steps:
+      - name: Deploy
+        run: |
+          echo "Starting deployment..."
+          # Create deployment directory if it doesn't exist
+          mkdir -p /opt/dmb
+          # Clone repo to get compose.yml
+          git clone --depth 1 --branch ${{ github.ref_name }} ${{ github.server_url }}/${{ github.repository }} /tmp/repo-${{ github.run_id }}
+          cp /tmp/repo-${{ github.run_id }}/compose.yml /opt/dmb/
+          rm -rf /tmp/repo-${{ github.run_id }}
+
+      - name: Pull and restart services
+        run: |
+          cd /opt/dmb
+          pwd
+          ls -la
+          echo "Pulling the latest image..."
+          docker compose pull
+
+          echo "Restarting services..."
+          docker compose up -d --remove-orphans
+          echo "Deployment successful!"
+
+      - name: Database Migrations
+        run: |
+          echo "Waiting for container to be healthy..."
+          timeout=60
+          elapsed=0
+          while [ $elapsed -lt $timeout ]; do
+            if docker inspect --format='{{.State.Health.Status}}' dmb-instance-1 2>/dev/null | grep -q "healthy"; then
+              echo "Container is healthy!"
+              break
+            fi
+            echo "Waiting... ($elapsed/$timeout seconds)"
+            sleep 2
+            elapsed=$((elapsed + 2))
+          done
+
+          if [ $elapsed -ge $timeout ]; then
+            echo "ERROR: Container failed to become healthy"
+            docker logs dmb-instance-1 --tail 50
+            exit 1
+          fi
+
+          echo "Running migrations..."
+          docker exec dmb-instance-1 make db-up-prod || {
+            echo "ERROR: Migration failed"
+            docker logs dmb-instance-1 --tail 50
+            exit 1
+          }
+          echo "Migrations successful!"
+
+      - name: Clean up old Docker images
+        if: success()
+        run: |
+          # Cleanup images và containers không dùng
+          docker image prune -f &
+          docker container prune -f &
+          wait
+          echo "Cleanup completed!"
