@@ -34,6 +34,7 @@ WORKDIR /app
 COPY --from=builder /build/music-bot .
 COPY --from=builder /go/bin/goose /usr/local/bin/
 COPY --from=builder /build/db/migrations ./db/migrations
+COPY Makefile .
 
 # Setup non-root user
 RUN addgroup -g 1000 bot \
