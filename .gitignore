@@ -1,6 +1,9 @@
+music_bot
+
 music/*
 .env
-venv/
+.env.prod
+
 .DS_Store
 
 data/
@@ -15,3 +18,4 @@ TASK.md
 playlist/*
 
 **/__pycache__/*
+

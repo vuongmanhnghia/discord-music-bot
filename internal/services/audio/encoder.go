@@ -81,9 +81,9 @@ func (e *AudioEncoder) encodeWithYtDlpPipe(streamURL string, options *EncodeOpti
 	// Start yt-dlp process to download audio to stdout
 	// Added options to bypass YouTube's 403 restrictions
 	ytDlpArgs := []string{
-		// Use 'ba' (bestaudio) instead of 'bestaudio/best' for iOS client compatibility
-		// iOS client returns different format IDs, 'ba' is more flexible
-		"-f", "ba/b",
+		// Use explicit format selector for iOS/web client compatibility
+		// iOS client returns m4a formats, this selector handles them properly
+		"-f", "bestaudio[ext=m4a]/bestaudio/best",
 		"-o", "-", // Output to stdout
 		"--no-playlist",
 		"--no-check-certificate",

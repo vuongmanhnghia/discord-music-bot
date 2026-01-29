@@ -24,6 +24,8 @@ RUN apk add --no-cache \
     ffmpeg \
     python3 \
     py3-pip \
+    nodejs \
+    yt-dlp-ejs \
     make \
     && pip3 install --break-system-packages --no-cache-dir --upgrade yt-dlp \
     && yt-dlp --version \

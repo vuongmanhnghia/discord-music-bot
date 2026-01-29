@@ -65,12 +65,11 @@ func Load() (*Config, error) {
 
 	var databaseURL string
 	useDatabase := os.Getenv("USE_DATABASE")
-	if useDatabase == "true" || useDatabase == "1" || useDatabase == "yes" {
+	useDatabaseEnabled := isDatabaseEnabled(useDatabase)
+	if useDatabaseEnabled {
 		databaseURL = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
 			databaseUser, databasePassword, databaseHost, databasePort, databaseName)
 	}
-
-	fmt.Printf("useDatabase: %v", useDatabase)
 
 	cfg := &Config{
 		// Bot Settings
@@ -81,7 +80,7 @@ func Load() (*Config, error) {
 
 		// Database
 		DatabaseURL: databaseURL,
-		UseDatabase: useDatabase == "true" || useDatabase == "1" || useDatabase == "yes",
+		UseDatabase: useDatabaseEnabled,
 
 		// Spotify
 		SpotifyClientID:     os.Getenv("SPOTIFY_CLIENT_ID"),
@@ -103,8 +102,13 @@ func Load() (*Config, error) {
 		InitialLoadSize:      getEnvInt("INITIAL_LOAD_SIZE", 5),
 	}
 
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
 	// Create directories if needed (for file-based fallback)
-	if !(useDatabase == "true" || useDatabase == "1" || useDatabase == "yes") {
+	if !useDatabaseEnabled {
 		if err := os.MkdirAll(cfg.PlaylistDir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create playlist directory: %w", err)
 		}
@@ -153,4 +157,43 @@ func getEnvBool(key string, defaultValue bool) bool {
 		}
 	}
 	return defaultValue
+}
+
+// isDatabaseEnabled checks if database usage is enabled
+func isDatabaseEnabled(value string) bool {
+	return value == "true" || value == "1" || value == "yes"
+}
+
+// Validate validates the configuration
+func (c *Config) Validate() error {
+	// Worker count validation
+	if c.WorkerCount < 1 {
+		return fmt.Errorf("worker count must be at least 1, got %d", c.WorkerCount)
+	}
+	if c.WorkerCount > 100 {
+		return fmt.Errorf("worker count too high (max 100), got %d", c.WorkerCount)
+	}
+
+	// Queue size validation
+	if c.MaxQueueSize < 1 {
+		return fmt.Errorf("max queue size must be at least 1, got %d", c.MaxQueueSize)
+	}
+	if c.MaxQueueSize > 10000 {
+		return fmt.Errorf("max queue size too high (max 10000), got %d", c.MaxQueueSize)
+	}
+
+	// Cache validation
+	if c.CacheSizeMB < 0 {
+		return fmt.Errorf("cache size cannot be negative, got %d", c.CacheSizeMB)
+	}
+	if c.CacheDurationMinutes < 0 {
+		return fmt.Errorf("cache duration cannot be negative, got %d", c.CacheDurationMinutes)
+	}
+
+	// Initial load size validation
+	if c.InitialLoadSize < 1 {
+		return fmt.Errorf("initial load size must be at least 1, got %d", c.InitialLoadSize)
+	}
+
+	return nil
 }
