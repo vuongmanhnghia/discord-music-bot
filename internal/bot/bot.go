@@ -114,6 +114,7 @@ func New(cfg *config.Config, log *logger.Logger) (*MusicBot, error) {
 		session:           session,
 		db:                db,
 		ytService:         ytService,
+		spotifyService:    spotifyService,
 		audioService:      audioService,
 		processingService: processingService,
 		playbackService:   playbackService,
@@ -196,6 +197,11 @@ func (b *MusicBot) onVoiceStateUpdate(s *discordgo.Session, event *discordgo.Voi
 		return
 	}
 
+	// Only care about users leaving channels
+	if event.BeforeUpdate == nil {
+		return
+	}
+
 	guildID := event.GuildID
 
 	// Check if bot is connected to any voice channel in this guild
@@ -205,49 +211,48 @@ func (b *MusicBot) onVoiceStateUpdate(s *discordgo.Session, event *discordgo.Voi
 		return
 	}
 
-	// Check if the user left the bot's channel
-	// event.BeforeUpdate contains the previous voice state
-	if event.BeforeUpdate == nil {
-		// User joined a channel, not left
-		return
-	}
-
 	// Only care if user was in the bot's channel before
 	if event.BeforeUpdate.ChannelID != botChannelID {
 		return
 	}
 
-	// Now check how many users are still in the bot's channel
-	voiceChannel, err := s.State.Channel(botChannelID)
-	if err != nil {
-		b.logger.WithError(err).Warn("Failed to get voice channel state")
-		return
-	}
-
-	// Count users in the voice channel (excluding bots)
-	userCount := 0
+	// Get guild from state
 	guild, err := s.State.Guild(guildID)
 	if err != nil {
 		b.logger.WithError(err).Warn("Failed to get guild state")
 		return
 	}
 
+	// Count non-bot users in the bot's channel
+	// Optimization: Check voice states directly without fetching members
+	userCount := 0
 	for _, vs := range guild.VoiceStates {
-		if vs.ChannelID == botChannelID && vs.UserID != s.State.User.ID {
-			// Check if user is not a bot
-			member, err := s.GuildMember(guildID, vs.UserID)
-			if err != nil {
-				continue
-			}
-			if member.User != nil && !member.User.Bot {
+		if vs.ChannelID != botChannelID || vs.UserID == s.State.User.ID {
+			continue
+		}
+
+		// Try to get user from guild members cache first
+		if vs.Member != nil && vs.Member.User != nil {
+			if !vs.Member.User.Bot {
 				userCount++
 			}
+			continue
+		}
+
+		// Fallback: fetch member if not in cache
+		member, err := s.State.Member(guildID, vs.UserID)
+		if err != nil {
+			// If we can't get member info, assume it's a user (conservative)
+			userCount++
+			continue
+		}
+		if member.User != nil && !member.User.Bot {
+			userCount++
 		}
 	}
 
 	b.logger.WithFields(map[string]interface{}{
 		"guild":     guildID,
-		"channel":   voiceChannel.Name,
 		"userCount": userCount,
 	}).Debug("Voice state update - checking user count")
 
@@ -255,7 +260,7 @@ func (b *MusicBot) onVoiceStateUpdate(s *discordgo.Session, event *discordgo.Voi
 	if userCount == 0 {
 		b.logger.WithFields(map[string]interface{}{
 			"guild":   guildID,
-			"channel": voiceChannel.Name,
+			"channel": botChannelID,
 		}).Info("No users in voice channel, disconnecting...")
 
 		if err := b.audioService.DisconnectFromGuild(guildID); err != nil {

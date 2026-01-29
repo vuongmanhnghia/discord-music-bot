@@ -54,9 +54,11 @@ type Format struct {
 
 // Service handles YouTube operations
 type Service struct {
-	cache     *utils.SmartCache
-	logger    *logger.Logger
-	ytDlpPath string
+	cache       *utils.SmartCache
+	logger      *logger.Logger
+	ytDlpPath   string
+	cleanupStop chan struct{}
+	cleanupDone chan struct{}
 }
 
 // NewService creates a new YouTube service
@@ -72,11 +74,18 @@ func NewService(log *logger.Logger) (*Service, error) {
 
 	log.WithField("ytdlp_path", ytDlpPath).Info("YouTube service initialized")
 
-	return &Service{
-		cache:     cache,
-		logger:    log,
-		ytDlpPath: ytDlpPath,
-	}, nil
+	svc := &Service{
+		cache:       cache,
+		logger:      log,
+		ytDlpPath:   ytDlpPath,
+		cleanupStop: make(chan struct{}),
+		cleanupDone: make(chan struct{}),
+	}
+
+	// Start cache cleanup worker to prevent memory leaks
+	go svc.startCacheCleanup()
+
+	return svc, nil
 }
 
 // ExtractInfo extracts video/playlist information from URL
@@ -102,10 +111,18 @@ func (s *Service) ExtractInfo(url string) (*YouTubeInfo, error) {
 
 	cmd := exec.Command(s.ytDlpPath, args...)
 
-	// Use Output() instead of CombinedOutput() to separate stdout from stderr
+	// Capture both stdout and stderr
 	output, err := cmd.Output()
 	if err != nil {
-		s.logger.WithError(err).Error("yt-dlp extraction failed")
+		// Try to get stderr if available
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			s.logger.WithFields(map[string]interface{}{
+				"stderr": string(exitErr.Stderr),
+				"url":    url,
+			}).Error("yt-dlp extraction failed")
+		} else {
+			s.logger.WithError(err).Error("yt-dlp extraction failed")
+		}
 		return nil, fmt.Errorf("%w: %v", ErrExtractionFailed, err)
 	}
 
@@ -149,9 +166,16 @@ func (s *Service) ExtractPlaylist(url string) ([]YouTubeInfo, error) {
 	}
 
 	cmd := exec.Command(s.ytDlpPath, args...)
-	output, err := cmd.Output() // Use Output() instead of CombinedOutput()
+	output, err := cmd.Output()
 	if err != nil {
-		s.logger.WithError(err).Error("Playlist extraction failed")
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			s.logger.WithFields(map[string]interface{}{
+				"stderr": string(exitErr.Stderr),
+				"url":    url,
+			}).Error("Playlist extraction failed")
+		} else {
+			s.logger.WithError(err).Error("Playlist extraction failed")
+		}
 		return nil, fmt.Errorf("%w: %v", ErrExtractionFailed, err)
 	}
 
@@ -349,4 +373,32 @@ func (s *Service) CacheStats() (hits, misses, evictions int64, size int) {
 func (s *Service) ClearCache() {
 	s.cache.Clear()
 	s.logger.Info("Cache cleared")
+}
+
+// startCacheCleanup runs a background worker to periodically clean expired cache entries
+func (s *Service) startCacheCleanup() {
+	defer close(s.cleanupDone)
+
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			removed := s.cache.CleanupExpired()
+			if removed > 0 {
+				s.logger.WithField("removed", removed).Debug("Cleaned up expired cache entries")
+			}
+		case <-s.cleanupStop:
+			s.logger.Debug("Cache cleanup worker stopped")
+			return
+		}
+	}
+}
+
+// Close stops the cleanup worker and releases resources
+func (s *Service) Close() {
+	close(s.cleanupStop)
+	<-s.cleanupDone
+	s.logger.Info("YouTube service closed")
 }

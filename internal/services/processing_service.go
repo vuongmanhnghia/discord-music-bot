@@ -118,6 +118,11 @@ func (s *ProcessingService) Submit(song *entities.Song, priority int) error {
 		s.mu.Lock()
 		delete(s.processing, song.ID)
 		s.mu.Unlock()
+		s.logger.WithFields(map[string]interface{}{
+			"song_id":    song.ID,
+			"queue_size": len(s.queue),
+			"max_size":   cap(s.queue),
+		}).Warn("Processing queue is full, rejecting song")
 		return ErrMaxQueueSize
 	}
 }

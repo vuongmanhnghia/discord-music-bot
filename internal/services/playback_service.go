@@ -33,14 +33,14 @@ type PlaybackService struct {
 
 // GuildPlaybackState represents playback state for a guild
 type GuildPlaybackState struct {
-	guildID       string
-	tracklist     *entities.Tracklist
-	isPlaying     bool
-	currentPos    int
-	loopCtx       context.Context
-	loopCancel    context.CancelFunc
-	manualJump    bool // Flag to indicate manual position jump
-	mu            sync.RWMutex
+	guildID    string
+	tracklist  *entities.Tracklist
+	isPlaying  bool
+	currentPos int
+	loopCtx    context.Context
+	loopCancel context.CancelFunc
+	manualJump bool // Flag to indicate manual position jump
+	mu         sync.RWMutex
 }
 
 // NewPlaybackService creates a new playback service
@@ -286,6 +286,7 @@ func (s *PlaybackService) waitForSong(song *entities.Song, ctx context.Context) 
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
+	// Use 30 seconds timeout (can be made configurable later)
 	timeout := time.After(30 * time.Second)
 
 	for {
@@ -296,6 +297,10 @@ func (s *PlaybackService) waitForSong(song *entities.Song, ctx context.Context) 
 		}
 
 		if status == valueobjects.SongStatusFailed {
+			s.logger.WithFields(map[string]interface{}{
+				"song_id": song.ID,
+				"status":  status,
+			}).Warn("Song processing failed")
 			return false
 		}
 
@@ -303,7 +308,10 @@ func (s *PlaybackService) waitForSong(song *entities.Song, ctx context.Context) 
 		case <-ticker.C:
 			continue
 		case <-timeout:
-			s.logger.Warn("Timeout waiting for song to be ready")
+			s.logger.WithFields(map[string]interface{}{
+				"song_id": song.ID,
+				"status":  status,
+			}).Warn("Timeout waiting for song to be ready")
 			return false
 		case <-ctx.Done():
 			return false

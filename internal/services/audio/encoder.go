@@ -79,12 +79,26 @@ func (e *AudioEncoder) encodeWithYtDlpPipe(streamURL string, options *EncodeOpti
 	// yt-dlp downloads and outputs to stdout, FFmpeg reads from stdin and outputs Opus to stdout
 
 	// Start yt-dlp process to download audio to stdout
+	// Added options to bypass YouTube's 403 restrictions
 	ytDlpArgs := []string{
-		"-f", "bestaudio/best",
+		// Use 'ba' (bestaudio) instead of 'bestaudio/best' for iOS client compatibility
+		// iOS client returns different format IDs, 'ba' is more flexible
+		"-f", "ba/b",
 		"-o", "-", // Output to stdout
 		"--no-playlist",
 		"--no-check-certificate",
 		"--geo-bypass",
+
+		// User-Agent spoofing to bypass restrictions
+		"--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+
+		// Use iOS client to bypass 403 errors (more reliable than web client)
+		"--extractor-args", "youtube:player_client=ios,web",
+
+		// Additional bypass options
+		"--add-header", "Accept-Language:en-US,en;q=0.9",
+		"--add-header", "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+
 		"--quiet",
 		"--no-warnings",
 		streamURL,
@@ -108,7 +122,7 @@ func (e *AudioEncoder) encodeWithYtDlpPipe(streamURL string, options *EncodeOpti
 	go func() {
 		scanner := bufio.NewScanner(ytDlpStderr)
 		for scanner.Scan() {
-			e.logger.WithField("yt-dlp", scanner.Text()).Debug("yt-dlp output")
+			e.logger.WithField("yt-dlp", scanner.Text()).Warn("yt-dlp output")
 		}
 	}()
 

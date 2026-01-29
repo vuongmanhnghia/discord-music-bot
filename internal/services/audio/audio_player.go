@@ -32,6 +32,7 @@ type AudioPlayer struct {
 	isPlaying   atomic.Bool
 	isPaused    atomic.Bool
 	stopSignal  chan struct{}
+	stopOnce    sync.Once // Ensures stopSignal is closed only once
 	callback    PlaybackCallback
 	volume      int // Volume level 0-100
 
@@ -85,6 +86,7 @@ func (p *AudioPlayer) Play(song *entities.Song, callback PlaybackCallback) error
 	p.currentSong = song
 	p.callback = callback
 	p.stopSignal = make(chan struct{})
+	p.stopOnce = sync.Once{} // Reset for new playback
 	p.isPlaying.Store(true)
 	p.isPaused.Store(false)
 
@@ -214,16 +216,10 @@ func (p *AudioPlayer) Stop() error {
 
 	p.logger.Info("⏹️ Stopping playback...")
 
-	// Signal stop - use select to avoid panic on double close
-	select {
-	case <-p.stopSignal:
-		// Already closed
-	default:
+	// Signal stop - sync.Once ensures this is only called once
+	p.stopOnce.Do(func() {
 		close(p.stopSignal)
-	}
-
-	// Wait a bit for cleanup
-	time.Sleep(100 * time.Millisecond)
+	})
 
 	p.isPlaying.Store(false)
 	p.isPaused.Store(false)

@@ -25,7 +25,8 @@ RUN apk add --no-cache \
     python3 \
     py3-pip \
     make \
-    && pip3 install --break-system-packages --no-cache-dir yt-dlp \
+    && pip3 install --break-system-packages --no-cache-dir --upgrade yt-dlp \
+    && yt-dlp --version \
     && rm -rf /root/.cache /var/cache/apk/*
 
 WORKDIR /app

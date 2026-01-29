@@ -67,8 +67,13 @@ func (h *Handler) HandleInteraction(s *discordgo.Session, i *discordgo.Interacti
 	// Panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			h.logger.WithField("panic", r).Error("Recovered from panic in command handler")
-			_ = respondError(s, i, "An internal error occurred")
+			h.logger.WithFields(map[string]interface{}{
+				"panic":   r,
+				"command": i.ApplicationCommandData().Name,
+				"guild":   i.GuildID,
+				"user":    i.Member.User.ID,
+			}).Error("Recovered from panic in command handler")
+			_ = respondError(s, i, "An internal error occurred. Please try again later.")
 		}
 	}()
 
