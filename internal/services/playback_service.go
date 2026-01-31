@@ -261,6 +261,16 @@ func (s *PlaybackService) playNextSong(state *GuildPlaybackState) bool {
 	// Play song
 	if err := player.Play(song, onComplete); err != nil {
 		s.logger.WithError(err).Error("Failed to play song")
+
+		// Don't retry if already playing - this prevents infinite loops
+		// when multiple songs try to play simultaneously
+		if errors.Is(err, ErrAlreadyPlaying) {
+			s.logger.Warn("Song skipped because another song is already playing")
+			// Don't move to next song, just wait for current to finish
+			return true
+		}
+
+		// For other errors, skip to next song
 		s.handleFailedSong(state, song)
 		return false
 	}
@@ -420,4 +430,10 @@ func (s *PlaybackService) SetVolume(guildID string, level int) error {
 	}
 
 	return nil
+}
+
+// SetProcessingService updates the processing service reference
+// Used when restarting the processing service (single-server mode)
+func (s *PlaybackService) SetProcessingService(ps *ProcessingService) {
+	s.processingService = ps
 }

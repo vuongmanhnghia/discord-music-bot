@@ -51,20 +51,44 @@ func TestIsYouTubeURL(t *testing.T) {
 
 func TestIsPlaylistURL(t *testing.T) {
 	tests := []struct {
+		name     string
 		url      string
 		expected bool
 	}{
-		{"https://www.youtube.com/playlist?list=PLtest", true},
-		{"https://www.youtube.com/watch?v=123&list=PLtest", true},
-		{"https://www.youtube.com/watch?v=dQw4w9WgXcQ", false},
-		{"https://youtu.be/dQw4w9WgXcQ", false},
+		{
+			name:     "Actual playlist URL",
+			url:      "https://www.youtube.com/playlist?list=PLtest",
+			expected: true,
+		},
+		{
+			name:     "Video URL with regular list parameter (should extract single video)",
+			url:      "https://www.youtube.com/watch?v=123&list=PLtest",
+			expected: false,
+		},
+		{
+			name:     "Video URL with YouTube Radio list parameter",
+			url:      "https://www.youtube.com/watch?v=D8OCBS2UZOk&list=RDD8OCBS2UZOk&start_radio=1",
+			expected: false,
+		},
+		{
+			name:     "Single video URL without list",
+			url:      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+			expected: false,
+		},
+		{
+			name:     "Short YouTube URL",
+			url:      "https://youtu.be/dQw4w9WgXcQ",
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
-		result := IsPlaylistURL(tt.url)
-		if result != tt.expected {
-			t.Errorf("IsPlaylistURL(%s) = %v, expected %v", tt.url, result, tt.expected)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			result := IsPlaylistURL(tt.url)
+			if result != tt.expected {
+				t.Errorf("IsPlaylistURL(%s) = %v, expected %v", tt.url, result, tt.expected)
+			}
+		})
 	}
 }
 

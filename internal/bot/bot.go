@@ -106,7 +106,7 @@ func New(cfg *config.Config, log *logger.Logger) (*MusicBot, error) {
 	}
 
 	// Initialize command handler
-	cmdHandler := commands.NewHandler(session, playbackService, playlistService, ytService, spotifyService, log, cfg)
+	cmdHandler := commands.NewHandler(session, playbackService, processingService, playlistService, ytService, spotifyService, log, cfg)
 
 	bot := &MusicBot{
 		config:            cfg,

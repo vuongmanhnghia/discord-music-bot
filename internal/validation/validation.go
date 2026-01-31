@@ -50,6 +50,20 @@ func IsSupportedURL(input string) bool {
 	return IsYouTubeURL(input) || IsSoundCloudURL(input) || IsSpotifyURL(input)
 }
 
+// IsYouTubePlaylistURL checks if URL is an actual YouTube playlist URL
+// Returns true only for /playlist?list=... URLs
+// Returns false for video URLs with list parameter like /watch?v=...&list=...
+func IsYouTubePlaylistURL(input string) bool {
+	if !IsYouTubeURL(input) {
+		return false
+	}
+	// Only match actual playlist URLs, not video URLs with list parameter
+	// Playlist URLs have the format: youtube.com/playlist?list=...
+	// Video URLs with list are: youtube.com/watch?v=...&list=... (which we want to ignore)
+	return strings.Contains(input, "/playlist?list=") ||
+		(strings.Contains(input, "/playlist") && strings.Contains(input, "list="))
+}
+
 // ValidateVolume validates volume level (0-100)
 func ValidateVolume(volume int) error {
 	if volume < 0 || volume > 100 {

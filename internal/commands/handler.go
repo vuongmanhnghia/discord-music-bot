@@ -14,13 +14,14 @@ import (
 
 // Handler manages all bot commands
 type Handler struct {
-	session         *discordgo.Session
-	playbackService *services.PlaybackService
-	playlistService *services.PlaylistService
-	ytService       *youtube.Service
-	spotifyService  *spotify.Service
-	logger          *logger.Logger
-	config          *config.Config
+	session           *discordgo.Session
+	playbackService   *services.PlaybackService
+	processingService *services.ProcessingService
+	playlistService   *services.PlaylistService
+	ytService         *youtube.Service
+	spotifyService    *spotify.Service
+	logger            *logger.Logger
+	config            *config.Config
 
 	// Track active playlist per guild
 	activePlaylist   map[string]string
@@ -31,6 +32,7 @@ type Handler struct {
 func NewHandler(
 	session *discordgo.Session,
 	playbackSvc *services.PlaybackService,
+	processingSvc *services.ProcessingService,
 	playlistSvc *services.PlaylistService,
 	ytSvc *youtube.Service,
 	spotifySvc *spotify.Service,
@@ -38,14 +40,15 @@ func NewHandler(
 	config *config.Config,
 ) *Handler {
 	return &Handler{
-		session:         session,
-		playbackService: playbackSvc,
-		playlistService: playlistSvc,
-		ytService:       ytSvc,
-		spotifyService:  spotifySvc,
-		logger:          log,
-		config:          config,
-		activePlaylist:  make(map[string]string),
+		session:           session,
+		playbackService:   playbackSvc,
+		processingService: processingSvc,
+		playlistService:   playlistSvc,
+		ytService:         ytSvc,
+		spotifyService:    spotifySvc,
+		logger:            log,
+		config:            config,
+		activePlaylist:    make(map[string]string),
 	}
 }
 

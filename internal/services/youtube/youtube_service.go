@@ -345,8 +345,13 @@ func (s *Service) GetStreamURL(videoID string) (string, error) {
 }
 
 // IsPlaylistURL checks if URL is a playlist
+// Only returns true for actual playlist URLs like /playlist?list=...
+// Returns false for video URLs with list parameter like /watch?v=...&list=...
 func IsPlaylistURL(url string) bool {
-	return strings.Contains(url, "playlist?list=") || strings.Contains(url, "&list=")
+	// Only match actual playlist URLs, not video URLs with list parameter
+	// Playlist URLs have the format: youtube.com/playlist?list=...
+	// Video URLs with list are: youtube.com/watch?v=...&list=... or similar (which we want to ignore)
+	return strings.Contains(url, "/playlist?list=") || strings.Contains(url, "/playlist") && strings.Contains(url, "list=")
 }
 
 // IsYouTubeURL checks if URL is a valid YouTube URL

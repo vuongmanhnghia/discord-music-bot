@@ -2,9 +2,11 @@ package commands
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/vuongmanhnghia/discord-music-bot/internal/domain/entities"
+	"github.com/vuongmanhnghia/discord-music-bot/internal/services"
 )
 
 // handleQueue handles the queue command
@@ -78,25 +80,39 @@ func (h *Handler) handleShuffle(s *discordgo.Session, i *discordgo.InteractionCr
 
 // handleClear handles the clear command
 func (h *Handler) handleClear(s *discordgo.Session, i *discordgo.InteractionCreate) error {
-	h.logger.WithField("guild", i.GuildID).Info("🔄 Performing full reset...")
+	h.logger.WithField("guild", i.GuildID).Info("🔄 Performing FULL reset (single-server mode)...")
 
-	// 1. Stop playback immediately
+	// 1. Stop and restart processing service (kills all yt-dlp processes)
+	h.logger.Info("Stopping processing service...")
+	h.processingService.Stop()
+
+	// Let workers finish gracefully
+	time.Sleep(200 * time.Millisecond)
+
+	h.logger.Info("Restarting processing service...")
+	h.processingService = services.NewProcessingService(h.ytService, h.config.WorkerCount, h.config.MaxQueueSize, h.logger)
+	h.processingService.Start()
+
+	// Update playback service reference
+	h.playbackService.SetProcessingService(h.processingService)
+
+	// 2. Stop playback immediately
 	h.playbackService.Stop(i.GuildID)
 
-	// 2. Clear queue
+	// 3. Clear queue
 	if tracklist := h.playbackService.GetTracklist(i.GuildID); tracklist != nil {
 		tracklist.Clear()
 	}
 
-	// 3. Clear active playlist
+	// 4. Clear active playlist
 	h.activePlaylistMu.Lock()
 	delete(h.activePlaylist, i.GuildID)
 	h.activePlaylistMu.Unlock()
 
-	// 4. Clear YouTube cache
+	// 5. Clear YouTube cache
 	h.ytService.ClearCache()
 
-	// 5. Leave voice channel to fully disconnect
+	// 6. Leave voice channel to fully disconnect
 	voiceConnections := s.VoiceConnections
 	if vc, exists := voiceConnections[i.GuildID]; exists && vc != nil {
 		if err := vc.Disconnect(); err != nil {
@@ -104,12 +120,18 @@ func (h *Handler) handleClear(s *discordgo.Session, i *discordgo.InteractionCrea
 		}
 	}
 
-	h.logger.Info("✅ Full reset completed")
+	h.logger.Info("✅ FULL reset completed (all workers stopped and restarted)")
 
 	embed := NewEmbed().
-		Title("🔄 Bot Reset Complete").
-		Description("✅ All operations stopped\n✅ Queue cleared\n✅ Active playlist reset\n✅ Cache cleared\n✅ Disconnected from voice\n\nBot is back to initial state").
-		Color(ColorWarning).
+		Title("🔄 Complete Bot Reset").
+		Description(
+			"✅ All extraction stopped\n" +
+				"✅ All workers restarted\n" +
+				"✅ Queue cleared\n" +
+				"✅ Cache cleared\n" +
+				"✅ Disconnected from voice\n\n" +
+				"Bot is completely reset to initial state").
+		Color(ColorSuccess).
 		Build()
 
 	return respondEmbed(s, i, embed)
