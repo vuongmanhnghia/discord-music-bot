@@ -432,6 +432,12 @@ func (s *PlaybackService) SetVolume(guildID string, level int) error {
 	return nil
 }
 
+// JoinChannel connects to a voice channel without starting playback.
+// Uses the same AudioService path as Play() to avoid conflicting voice connections.
+func (s *PlaybackService) JoinChannel(guildID, channelID string) error {
+	return s.audioService.ConnectToChannel(guildID, channelID)
+}
+
 // SetProcessingService updates the processing service reference
 // Used when restarting the processing service (single-server mode)
 func (s *PlaybackService) SetProcessingService(ps *ProcessingService) {

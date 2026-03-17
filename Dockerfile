@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
 
@@ -17,7 +17,12 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o music-bot ./cmd/bot
 
 FROM alpine:latest
 
-# Install runtime deps in one layer
+# Install runtime dependencies
+# - python3 + pip: runtime for yt-dlp
+# - nodejs: required for yt-dlp n-challenge JS solver (--js-runtimes node)
+# - ffmpeg: audio encoding pipeline
+# NOTE: do NOT install apk yt-dlp — it lags behind and its EJS solver is outdated.
+#       We install yt-dlp via pip to always get the latest version.
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
@@ -25,11 +30,14 @@ RUN apk add --no-cache \
     python3 \
     py3-pip \
     nodejs \
-    yt-dlp-ejs \
     make \
     && pip3 install --break-system-packages --no-cache-dir --upgrade yt-dlp \
     && yt-dlp --version \
     && rm -rf /root/.cache /var/cache/apk/*
+
+# PYTHONPATH ensures the pip-installed yt_dlp module is always importable,
+# even in restricted Python environments.
+ENV PYTHONPATH="/usr/lib/python3/dist-packages:/usr/local/lib/python3.12/site-packages"
 
 WORKDIR /app
 

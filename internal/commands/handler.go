@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/bwmarrin/discordgo"
@@ -153,8 +154,23 @@ func (h *Handler) HandleInteraction(s *discordgo.Session, i *discordgo.Interacti
 	}
 
 	if err != nil {
+		// 10062 = "Unknown interaction" - interaction token expired before we could respond.
+		// This happens when the event arrives stale (e.g., startup race). Not a real error.
+		if isUnknownInteraction(err) {
+			h.logger.WithField("command", data.Name).Debug("Interaction expired before response (stale event)")
+			return
+		}
 		h.logger.WithError(err).WithField("command", data.Name).Error("Command handler failed")
 	}
+}
+
+// isUnknownInteraction returns true when Discord returns code 10062 (interaction token expired)
+func isUnknownInteraction(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "10062") || strings.Contains(msg, "Unknown interaction")
 }
 
 // getUserVoiceChannel gets the user's current voice channel

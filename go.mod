@@ -15,6 +15,7 @@ require (
 )
 
 require (
+	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
@@ -28,5 +29,5 @@ require (
 	golang.org/x/text v0.27.0 // indirect
 )
 
-// Use Richy-Z fork with aead_aes256_gcm_rtpsize encryption support (master branch)
-replace github.com/bwmarrin/discordgo => github.com/Richy-Z/discordgo v0.29.1-0.20251123191524-2672c0ec4dca
+// Use yeongaori fork with full DAVE/E2EE protocol support (required since Discord enforced DAVE on 2026-03-02)
+replace github.com/bwmarrin/discordgo => github.com/yeongaori/discordgo-fork v0.0.0-20260316044635-6e7c94f657fb

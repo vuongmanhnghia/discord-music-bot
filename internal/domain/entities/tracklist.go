@@ -38,7 +38,7 @@ func NewTracklist(guildID string) *Tracklist {
 		history:        list.New(),
 		maxHistory:     50,
 		shuffleEnabled: false,
-		repeatMode:     RepeatModeQueue, // Default: auto-repeat queue
+		repeatMode:     RepeatModeNone, // Default: play through once, stop at end
 	}
 }
 
@@ -89,12 +89,8 @@ func (t *Tracklist) NextSong() *Song {
 			t.currentIndex = 0
 			return t.songs[t.currentIndex]
 		}
-		// No more songs
-		if len(t.songs) > 0 {
-			t.currentIndex = len(t.songs) - 1
-		} else {
-			t.currentIndex = 0
-		}
+		// No more songs — keep index past the end so CurrentSong() returns nil
+		// (resetting to len-1 would cause the last song to replay)
 		return nil
 	}
 

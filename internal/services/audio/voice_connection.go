@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -42,7 +43,7 @@ func (v *VoiceConnection) Connect(session *discordgo.Session, channelID string) 
 	defer v.mu.Unlock()
 
 	// Check if already connected
-	if v.vc != nil && v.vc.Ready {
+	if v.vc != nil && v.vc.Status == discordgo.VoiceConnectionStatusReady {
 		if v.channelID == channelID {
 			v.logger.WithField("channel", channelID).Info("Already connected to this channel")
 			return nil
@@ -56,26 +57,13 @@ func (v *VoiceConnection) Connect(session *discordgo.Session, channelID string) 
 
 	v.logger.WithField("channel", channelID).Info("Connecting to voice channel...")
 
-	// Join voice channel (mute=false, deaf=true)
-	vc, err := session.ChannelVoiceJoin(v.guildID, channelID, false, true)
+	// Join voice channel (mute=false, deaf=true); waits until Ready internally (with 10s timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	vc, err := session.ChannelVoiceJoin(ctx, v.guildID, channelID, false, true)
 	if err != nil {
 		v.logger.WithError(err).Error("Failed to join voice channel")
 		return fmt.Errorf("%w: %v", ErrConnectionFailed, err)
-	}
-
-	// Wait for voice connection to be ready with timeout
-	readyTimeout := time.After(10 * time.Second)
-	readyTicker := time.NewTicker(100 * time.Millisecond)
-	defer readyTicker.Stop()
-
-	for !vc.Ready {
-		select {
-		case <-readyTimeout:
-			vc.Disconnect()
-			return fmt.Errorf("%w: connection not ready after 10s", ErrConnectionFailed)
-		case <-readyTicker.C:
-			continue
-		}
 	}
 
 	v.vc = vc
@@ -100,7 +88,7 @@ func (v *VoiceConnection) disconnectLocked() error {
 
 	v.logger.Info("Disconnecting from voice channel...")
 
-	if err := v.vc.Disconnect(); err != nil {
+	if err := v.vc.Disconnect(context.Background()); err != nil {
 		v.logger.WithError(err).Error("Failed to disconnect")
 		return err
 	}
@@ -116,7 +104,7 @@ func (v *VoiceConnection) disconnectLocked() error {
 func (v *VoiceConnection) IsConnected() bool {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	return v.vc != nil && v.vc.Ready
+	return v.vc != nil && v.vc.Status == discordgo.VoiceConnectionStatusReady
 }
 
 // GetChannelID returns the current channel ID

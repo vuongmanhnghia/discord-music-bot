@@ -81,24 +81,16 @@ func (e *AudioEncoder) encodeWithYtDlpPipe(streamURL string, options *EncodeOpti
 	// Start yt-dlp process to download audio to stdout
 	// Added options to bypass YouTube's 403 restrictions
 	ytDlpArgs := []string{
-		// Use explicit format selector for iOS/web client compatibility
-		// iOS client returns m4a formats, this selector handles them properly
-		"-f", "bestaudio[ext=m4a]/bestaudio/best",
+		// Flexible format: takes best audio-only, falls back to best overall
+		"-f", "bestaudio/best",
 		"-o", "-", // Output to stdout
 		"--no-playlist",
 		"--no-check-certificate",
 		"--geo-bypass",
-
-		// User-Agent spoofing to bypass restrictions
-		"--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-
-		// Use iOS client to bypass 403 errors (more reliable than web client)
-		"--extractor-args", "youtube:player_client=ios,web",
-
-		// Additional bypass options
-		"--add-header", "Accept-Language:en-US,en;q=0.9",
-		"--add-header", "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-
+		// Use node as JS runtime and fetch latest challenge solver from GitHub
+		// This solves YouTube's n-function signature challenge to prevent 403 errors
+		"--js-runtimes", "node",
+		"--remote-components", "ejs:github",
 		"--quiet",
 		"--no-warnings",
 		streamURL,

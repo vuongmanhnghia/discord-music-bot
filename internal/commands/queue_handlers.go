@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -115,7 +116,7 @@ func (h *Handler) handleClear(s *discordgo.Session, i *discordgo.InteractionCrea
 	// 6. Leave voice channel to fully disconnect
 	voiceConnections := s.VoiceConnections
 	if vc, exists := voiceConnections[i.GuildID]; exists && vc != nil {
-		if err := vc.Disconnect(); err != nil {
+		if err := vc.Disconnect(context.Background()); err != nil {
 			h.logger.WithError(err).Warn("Failed to disconnect from voice channel")
 		}
 	}

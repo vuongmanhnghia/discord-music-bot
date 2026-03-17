@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -14,9 +15,14 @@ func (h *Handler) handleJoin(s *discordgo.Session, i *discordgo.InteractionCreat
 		return respondError(s, i, "You must be in a voice channel")
 	}
 
-	_, err = s.ChannelVoiceJoin(i.GuildID, channelID, false, true)
-	if err != nil {
-		return respondError(s, i, "Failed to join voice channel: "+err.Error())
+	// Defer before the blocking voice join (can take several seconds) to prevent interaction timeout
+	if err := deferResponse(s, i); err != nil {
+		return err
+	}
+
+	// Use AudioService path so /join and /play share the same voice connection
+	if err = h.playbackService.JoinChannel(i.GuildID, channelID); err != nil {
+		return followUpError(s, i, "Failed to join voice channel: "+err.Error())
 	}
 
 	embed := NewEmbed().
@@ -26,7 +32,7 @@ func (h *Handler) handleJoin(s *discordgo.Session, i *discordgo.InteractionCreat
 		Footer("Use /play to start playing music").
 		Build()
 
-	return respondEmbed(s, i, embed)
+	return followUpEmbed(s, i, embed)
 }
 
 // handleLeave handles the leave command
@@ -47,7 +53,7 @@ func (h *Handler) handleLeave(s *discordgo.Session, i *discordgo.InteractionCrea
 	// Disconnect from voice
 	for _, vs := range s.VoiceConnections {
 		if vs.GuildID == i.GuildID {
-			if err := vs.Disconnect(); err != nil {
+			if err := vs.Disconnect(context.Background()); err != nil {
 				return respondError(s, i, "Failed to disconnect from voice channel")
 			}
 

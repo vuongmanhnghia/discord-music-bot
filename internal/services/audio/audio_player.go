@@ -98,6 +98,8 @@ func (p *AudioPlayer) Play(song *entities.Song, callback PlaybackCallback) error
 
 // playbackLoop handles the actual playback
 func (p *AudioPlayer) playbackLoop(song *entities.Song, sourceURL string) {
+	frameCount := 0 // Declared here so the defer can check it
+
 	defer func() {
 		p.isPlaying.Store(false)
 		p.isPaused.Store(false)
@@ -108,7 +110,13 @@ func (p *AudioPlayer) playbackLoop(song *entities.Song, sourceURL string) {
 		p.mu.Unlock()
 
 		if callback != nil {
-			callback(song, nil)
+			var callbackErr error
+			if frameCount == 0 {
+				// Zero frames sent = encoding failed; treat as error so the song is skipped
+				callbackErr = ErrEncodingFailed
+				p.logger.WithField("song", song.DisplayName()).Error("❌ Encoding produced 0 frames, marking as failed")
+			}
+			callback(song, callbackErr)
 		}
 	}()
 
@@ -154,8 +162,7 @@ func (p *AudioPlayer) playbackLoop(song *entities.Song, sourceURL string) {
 
 	p.logger.Info("📻 Streaming audio to Discord...")
 
-	// Stream audio frames
-	frameCount := 0
+	// Stream audio frames (frameCount declared at top of function for defer access)
 	for {
 		select {
 		case <-p.stopSignal:
